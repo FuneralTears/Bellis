@@ -2,11 +2,28 @@
 export type Money = { amountMinor: number; currency: string };
 export type PaymentOrder = { id: string; bookingIntentId: string; amount: Money; returnUrl: string };
 export type CheckoutSession = { providerOrderId: string; redirectUrl: string };
-export type VerifiedPayment = { providerEventId: string; providerOrderId: string; status: "confirmed" | "failed" | "refunded"; amount: Money };
+export type PaymentStatus = "pending" | "approved" | "rejected" | "refunded" | "cancelled" | "expired";
+export type VerifiedPayment = { providerEventId: string; providerOrderId: string; status: PaymentStatus; amount: Money };
 export interface PaymentProvider {
   readonly id: string;
   createCheckout(order: PaymentOrder): Promise<CheckoutSession>;
   verifyWebhook(rawBody: Uint8Array, headers: Headers): Promise<VerifiedPayment>;
+}
+
+/** Argentina-first adapter boundary. The supplied adapter must verify webhook signatures and query Mercado Pago server-side. */
+export class MercadoPagoArgentinaProvider implements PaymentProvider {
+  readonly id = "mercado_pago_ar";
+  constructor(private readonly adapter: {
+    createCheckout(order: PaymentOrder): Promise<CheckoutSession>;
+    verifyWebhook(rawBody: Uint8Array, headers: Headers): Promise<VerifiedPayment>;
+  }) {}
+  createCheckout(order: PaymentOrder): Promise<CheckoutSession> {
+    if (order.amount.currency !== "ARS") throw new Error("Mercado Pago Argentina requires ARS in the MVP");
+    return this.adapter.createCheckout(order);
+  }
+  verifyWebhook(rawBody: Uint8Array, headers: Headers): Promise<VerifiedPayment> {
+    return this.adapter.verifyWebhook(rawBody, headers);
+  }
 }
 
 /** An external URL alone cannot prove payment. Keep intent pending until a trusted callback or manual server-side verification. */

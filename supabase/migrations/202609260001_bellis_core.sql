@@ -3,16 +3,18 @@ create extension if not exists btree_gist;
 
 create type public.workspace_role as enum ('owner','admin','professional','reception');
 create type public.booking_status as enum ('pending_payment','payment_confirmed','awaiting_schedule','scheduled','completed','cancelled','refunded');
-create type public.payment_status as enum ('pending','confirmed','failed','refunded');
+create type public.payment_status as enum ('pending','approved','rejected','refunded','cancelled','expired');
 create type public.question_kind as enum ('short_text','long_text','single_choice','multi_choice','yes_no','scale','date','number');
 
 create table public.workspaces (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   slug text not null unique,
-  country_code char(2) not null,
-  timezone text not null,
-  currency_code char(3) not null,
+  country_code char(2) not null default 'AR',
+  timezone text not null default 'America/Argentina/Buenos_Aires',
+  currency_code char(3) not null default 'ARS',
+  locale text not null default 'es-AR',
+  payment_provider text not null default 'mercado_pago_ar',
   status text not null default 'trial' check (status in ('trial','active','suspended')),
   plan_code text not null default 'trial',
   trial_ends_at timestamptz not null default (now() + interval '30 days'),
@@ -34,6 +36,12 @@ create table public.professionals (
   biography text,
   photo_path text,
   location_text text,
+  province text,
+  city text,
+  address text,
+  practice_name text,
+  offers_online boolean not null default true,
+  offers_in_person boolean not null default false,
   public_slug text not null,
   active boolean not null default true,
   created_at timestamptz not null default now(),
@@ -46,7 +54,7 @@ create table public.services (
   name text not null,
   description text,
   price_minor integer not null check (price_minor >= 0),
-  currency_code char(3) not null,
+  currency_code char(3) not null default 'ARS',
   duration_minutes integer not null check (duration_minutes between 15 and 480),
   modality text not null check (modality in ('online','in_person','both')),
   min_notice_minutes integer not null default 1440 check (min_notice_minutes >= 0),
@@ -76,9 +84,12 @@ create table public.form_questions (
 create table public.patients (
   id uuid primary key default gen_random_uuid(),
   workspace_id uuid not null references public.workspaces(id) on delete cascade,
-  full_name text not null,
+  first_name text not null,
+  last_name text not null,
   email text not null,
   phone text,
+  dni text,
+  date_of_birth date,
   created_at timestamptz not null default now(),
   deleted_at timestamptz,
   unique (workspace_id,email)
@@ -91,7 +102,7 @@ create table public.booking_intents (
   patient_id uuid not null references public.patients(id),
   status public.booking_status not null default 'pending_payment',
   price_minor integer not null check (price_minor >= 0),
-  currency_code char(3) not null,
+  currency_code char(3) not null default 'ARS',
   duration_minutes integer not null check (duration_minutes > 0),
   expires_at timestamptz not null default (now() + interval '48 hours'),
   created_at timestamptz not null default now()
@@ -112,9 +123,9 @@ create table public.payments (
   provider_order_id text,
   provider_event_id text,
   amount_minor integer not null check (amount_minor >= 0),
-  currency_code char(3) not null,
+  currency_code char(3) not null default 'ARS',
   status public.payment_status not null default 'pending',
-  confirmed_at timestamptz,
+  approved_at timestamptz,
   created_at timestamptz not null default now(),
   unique (provider,provider_order_id),
   unique (provider,provider_event_id)
@@ -239,7 +250,7 @@ begin
   if not found or v_intent.status not in ('payment_confirmed','awaiting_schedule') then
     raise exception 'payment_not_confirmed';
   end if;
-  if not exists(select 1 from public.payments where booking_intent_id=p_intent and status='confirmed' and amount_minor=v_intent.price_minor and currency_code=v_intent.currency_code) then
+  if not exists(select 1 from public.payments where booking_intent_id=p_intent and status='approved' and amount_minor=v_intent.price_minor and currency_code=v_intent.currency_code) then
     raise exception 'payment_not_confirmed';
   end if;
   if p_starts_at < now() or v_intent.expires_at < now() then raise exception 'intent_expired'; end if;
