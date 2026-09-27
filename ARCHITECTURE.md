@@ -1,6 +1,6 @@
 # Bellis: implementation boundary
 
-The deployed experience is a visual, interactive prototype. It uses sample data only. Registration, payments, booking and notifications do **not** write data or perform real transactions.
+The public patient flow, dashboard, booking and payments are interactive demonstrations. Professional registration now uses Supabase Auth, and `/mis-formularios` can save questionnaire configuration after sign-in. Patient answers are still kept only in the browser demonstration; no real payment, appointment or notification is created there.
 
 ## Argentina-first defaults
 
@@ -8,10 +8,10 @@ The MVP market configuration is `country=AR`, `currency=ARS`, `timezone=America/
 
 ## Production path
 
-- Frontend: React/TypeScript UI. Connect a new Supabase project using server-side environment values; do not expose the service role key.
-- Identity: Supabase Auth for professional users. Create workspace and owner membership atomically in a trusted function after signup. Keep `/admin` behind a separate server-side Super Admin allowlist.
-- Storage: the Supabase development project `pinfdbvfzoratsntjgah` in `sa-east-1` now has the five migrations in `supabase/migrations/` applied in order. The questionnaire migration models one active progressive questionnaire per service, four internal sections, ordered questions and intent-bound answers. RLS permits staff reads according to role and denies browser writes to answers; explicit SQL grants also deny anonymous access and direct authenticated writes to answers. No real patient data has been stored. Do not store clinical notes or diagnosis by default.
-- Preconsultation: the current professional builder and patient flow are browser demonstrations. The builder holds changes in memory, and the patient flow holds answers in memory; neither writes to Supabase. A trusted API must validate the current question version and answers, create or locate the patient, create the booking intent, and insert answers in one transaction before initiating payment. A public questionnaire read endpoint should expose only active questions and visible section labels, with rate limits and no patient answers. Preserve historical question wording when forms are edited after responses arrive.
+- Frontend: React/TypeScript UI. The Site has a Supabase URL and publishable key as runtime configuration; no service-role key is in the browser or Site.
+- Identity: Supabase Auth registration creates a workspace, owner membership, professional, service and availability rules atomically from the signup form. The real questionnaire editor requires sign-in. The Auth email redirect URL still needs to be allowlisted in the Supabase Dashboard before relying on email confirmation. Keep `/admin` behind a separate server-side Super Admin allowlist.
+- Storage: the Supabase development project `pinfdbvfzoratsntjgah` in `sa-east-1` has the SQL migrations in `supabase/migrations/` applied in order. The questionnaire model supports one active version per service, four internal sections, ordered questions and intent-bound answers. RLS and explicit SQL grants deny anonymous answer access and direct authenticated answer writes. No real patient data has been stored. Do not store clinical notes or diagnosis by default.
+- Preconsultation: `/demo` remains an in-memory demonstration. `/mis-formularios` saves professional questionnaire versions through an authenticated, transactional RPC. The patient flow still holds answers only in memory. A service-role-only RPC can validate the form linkage, create a patient and pending booking intent, and save answer rows with question/section snapshots in one transaction. It is not exposed to public visitors. A rate-limited public endpoint must call it after consent and request validation. A public questionnaire read endpoint must expose only active questions and visible section labels, with no patient answers.
 - Public patient flow: use a limited Edge Function for public profile/forms, another to create an intent and payment order, a signed webhook to confirm payment, and a short-lived intent-bound token for slot selection. Never trust browser payment state.
 - External payment links create only a pending order. A redirect back from the external checkout is insufficient proof of payment. Enable scheduling only after a trusted provider callback or an authorized verification process.
 - Booking: compute slots in the professional timezone, account for breaks, holidays, notice and buffer, then recheck at commit. The PostgreSQL exclusion constraint enforces the final no-overlap rule. The RPC locks the intent and checks an approved payment.
@@ -20,4 +20,4 @@ The MVP market configuration is `country=AR`, `currency=ARS`, `timezone=America/
 
 ## Gaps before live use
 
-Trusted questionnaire API and Auth integration, Mercado Pago application and webhook secret, email provider, production domain, privacy/terms, and legal review for sensitive health information. The current `/profesional/ana-lopez`, `/demo` and `/admin` routes contain fictitious sample data; they are not connected to real tenants. Do not enter real patient responses in the demonstration.
+Auth email redirect allowlist, trusted public questionnaire endpoints, Mercado Pago application and webhook secret, email provider, production domain, privacy/terms, and legal review for sensitive health information. The current `/profesional/ana-lopez`, `/demo` and `/admin` routes contain fictitious sample data; they are not connected to real tenants. Do not enter real patient responses in the demonstration.
