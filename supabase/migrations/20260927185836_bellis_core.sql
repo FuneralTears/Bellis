@@ -218,6 +218,20 @@ alter table public.appointments enable row level security;
 alter table public.notification_outbox enable row level security;
 alter table public.audit_events enable row level security;
 
+-- Data API defaults vary by project. The later explicit_api_grants migration
+-- removes any broad defaults and retains only these permitted operations.
+grant select on public.workspaces, public.workspace_members, public.professionals,
+  public.services, public.forms, public.form_questions, public.patients,
+  public.booking_intents, public.payments, public.availability_rules,
+  public.availability_blocks, public.appointments to authenticated;
+grant insert, update, delete on public.professionals, public.services, public.forms,
+  public.availability_rules, public.availability_blocks to authenticated;
+grant all on public.workspaces, public.workspace_members, public.professionals,
+  public.services, public.forms, public.form_questions, public.patients,
+  public.booking_intents, public.form_answers, public.payments,
+  public.availability_rules, public.availability_blocks, public.appointments,
+  public.notification_outbox, public.audit_events to service_role;
+
 create policy workspace_read on public.workspaces for select to authenticated using (public.has_workspace_role(id,array['owner','admin','professional','reception']::public.workspace_role[]));
 create policy member_read on public.workspace_members for select to authenticated using (public.has_workspace_role(workspace_id,array['owner','admin']::public.workspace_role[]) or user_id=(select auth.uid()));
 create policy professional_read on public.professionals for select to authenticated using (public.has_workspace_role(workspace_id,array['owner','admin','professional','reception']::public.workspace_role[]));

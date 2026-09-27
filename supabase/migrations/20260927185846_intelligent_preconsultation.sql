@@ -1,4 +1,4 @@
--- Apply after 202609260001_bellis_core.sql in the Bellis Supabase project.
+-- Apply after 20260927185836_bellis_core.sql in the Bellis Supabase project.
 -- This migration is additive; the earlier forms/form_questions/form_answers tables remain untouched.
 create type public.questionnaire_question_type as enum
   ('single_choice','multiple_choice','text','long_text','number','yes_no','scale','date');
@@ -129,6 +129,12 @@ alter table public.questionnaires enable row level security;
 alter table public.questionnaire_sections enable row level security;
 alter table public.questionnaire_questions enable row level security;
 alter table public.questionnaire_answers enable row level security;
+
+grant select, insert, update, delete on public.questionnaires,
+  public.questionnaire_sections, public.questionnaire_questions to authenticated;
+grant select on public.questionnaire_answers to authenticated;
+grant all on public.questionnaires, public.questionnaire_sections,
+  public.questionnaire_questions, public.questionnaire_answers to service_role;
 
 create policy questionnaire_read on public.questionnaires for select to authenticated
   using (public.has_workspace_role(workspace_id,array['owner','admin','professional','reception']::public.workspace_role[]));
