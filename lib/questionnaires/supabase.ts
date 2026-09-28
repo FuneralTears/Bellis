@@ -20,7 +20,7 @@ export async function loadProfessionalForms(client: SupabaseClient, userId: stri
   if (!services.length) throw new Error("Tu espacio todavía no tiene servicios activos.");
   const ids = services.map((service) => service.id);
   const questionnaireResult = await client.from("questionnaires")
-    .select("id,service_id,title").in("service_id", ids).eq("active", true);
+    .select("id,service_id,form_group_id,title").in("service_id", ids).eq("active", true);
   if (questionnaireResult.error) throw questionnaireResult.error;
   const rows = questionnaireResult.data ?? [];
   const formIds = rows.map((row) => row.id);
@@ -49,7 +49,7 @@ export async function loadProfessionalForms(client: SupabaseClient, userId: stri
         options: Array.isArray(item.options) ? item.options as string[] : [],
         required: item.required, order: item.sort_order, active: item.active,
       }));
-    questionnaires[service.id] = { id: row.id, serviceId: service.id, title: row.title,
+    questionnaires[service.id] = { id: row.form_group_id, serviceId: service.id, serviceIds: rows.filter((item) => item.form_group_id === row.form_group_id).map((item) => item.service_id), title: row.title,
       sections: SECTION_KEYS.map((key) => sections.find((section) => section.key === key) ?? { key, label: DEFAULT_SECTION_LABELS[key], order: SECTION_KEYS.indexOf(key) }),
       questions };
   }
@@ -57,10 +57,16 @@ export async function loadProfessionalForms(client: SupabaseClient, userId: stri
 }
 
 export async function saveProfessionalQuestionnaire(client: SupabaseClient, questionnaire: Questionnaire): Promise<void> {
-  const { error } = await client.rpc("save_questionnaire", {
-    p_service: questionnaire.serviceId,
+  const services = [...new Set(questionnaire.serviceIds ?? [questionnaire.serviceId])];
+  if (!services.length) throw new Error("Seleccioná al menos un servicio.");
+  if (!questionnaire.title.trim()) throw new Error("Escribí un nombre para el formulario.");
+  if (questionnaire.sections.some((section) => !section.label.trim())) throw new Error("Todas las secciones necesitan un nombre.");
+  if (!questionnaire.questions.length || !questionnaire.questions.some((question) => question.active)) throw new Error("Agregá al menos una pregunta activa.");
+  const { error } = await client.rpc("save_questionnaire_for_services", {
+    p_group: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(questionnaire.id) ? questionnaire.id : crypto.randomUUID(),
+    p_services: services,
     p_document: {
-      title: questionnaire.title,
+      title: questionnaire.title.trim(),
       sections: questionnaire.sections.map((section) => ({ key: section.key, label: section.label })),
       questions: [...questionnaire.questions].sort((a, b) => a.order - b.order).map((question) => ({
         section: question.section, title: question.title, description: question.description,

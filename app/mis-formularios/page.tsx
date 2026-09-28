@@ -33,6 +33,11 @@ export default function MisFormularios() {
   const save = async (questionnaire: Questionnaire) => {
     const client = await getSupabase();
     await saveProfessionalQuestionnaire(client, questionnaire);
+    const { data, error: authError } = await client.auth.getUser();
+    if (authError || !data.user) throw new Error("Tu sesión venció. Volvé a ingresar.");
+    const refreshed = await loadProfessionalForms(client, data.user.id);
+    setForms(refreshed);
+    return refreshed.questionnaires;
   };
   const signOut = async () => {
     const client = await getSupabase();

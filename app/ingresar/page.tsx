@@ -18,7 +18,7 @@ export default function Ingresar() {
       const client = await getSupabase();
       const result = await client.auth.signInWithPassword({ email: email.trim(), password });
       if (result.error) throw result.error;
-      window.location.assign("/mis-formularios");
+      window.location.assign("/dashboard/questionnaires");
     } catch {
       setError("No pudimos ingresar. Revisá tus datos y la confirmación de tu email.");
       setLoading(false);

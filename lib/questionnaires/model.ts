@@ -24,6 +24,7 @@ export type QuestionnaireQuestion = {
 export type Questionnaire = {
   id: string;
   serviceId: string;
+  serviceIds?: string[];
   title: string;
   sections: QuestionnaireSection[];
   questions: QuestionnaireQuestion[];
@@ -33,10 +34,19 @@ export type QuestionnaireAnswers = Record<string, AnswerValue>;
 
 export const SECTION_KEYS: SectionKey[] = ["situation", "problem", "implication", "need"];
 export const DEFAULT_SECTION_LABELS: Record<SectionKey, string> = {
-  situation: "Para empezar",
-  problem: "Lo que está pasando",
-  implication: "Cómo te afecta",
-  need: "Qué buscás",
+  situation: "Situación",
+  problem: "Problema",
+  implication: "Implicación",
+  need: "Necesidad",
+};
+
+const TEMPLATE_SECTION_LABELS: Record<string, [string, string, string, string]> = {
+  Psicología: ["Situación", "Problema", "Impacto", "Objetivo"],
+  Odontología: ["Motivo", "Síntomas", "Antecedentes", "Objetivo"],
+  Nutrición: ["Objetivo", "Hábitos", "Dificultades", "Resultado esperado"],
+  Kinesiología: ["Motivo", "Dolor/lesión", "Impacto", "Objetivo"],
+  Psicopedagogía: ["Motivo", "Dificultad", "Contexto", "Objetivo"],
+  Otro: ["Situación", "Problema", "Implicación", "Necesidad"],
 };
 
 type StarterPrompt = [SectionKey, string, QuestionType, string[], string?];
@@ -84,11 +94,13 @@ export const STARTER_SPECIALTIES = Object.keys(STARTERS);
 export function starterQuestionnaire(serviceId: string, specialty: string = "Psicología"): Questionnaire {
   const id = `demo-questionnaire-${serviceId}`;
   const prompts = STARTERS[specialty] ?? STARTERS.Otro;
+  const labels = TEMPLATE_SECTION_LABELS[specialty] ?? TEMPLATE_SECTION_LABELS.Otro;
   return {
     id,
     serviceId,
+    serviceIds: [serviceId],
     title: "Preconsulta",
-    sections: SECTION_KEYS.map((key, order) => ({ key, label: DEFAULT_SECTION_LABELS[key], order })),
+    sections: SECTION_KEYS.map((key, order) => ({ key, label: labels[order], order })),
     questions: prompts.map(([section, title, type, options, description], order) => ({
       id: `${id}-question-${order + 1}`,
       questionnaireId: id,
