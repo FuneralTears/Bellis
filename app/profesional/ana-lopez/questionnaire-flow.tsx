@@ -18,9 +18,10 @@ type Props = {
   onPatientChange: (patient: PatientDraft) => void;
   onBack: () => void;
   onComplete: (answers: QuestionnaireAnswers, patient: PatientDraft) => void | Promise<void>;
+  demoNote?: boolean;
 };
 
-export function QuestionnaireFlow({ questionnaire, initialAnswers, initialPatient, onAnswersChange, onPatientChange, onBack, onComplete }: Props) {
+export function QuestionnaireFlow({ questionnaire, initialAnswers, initialPatient, onAnswersChange, onPatientChange, onBack, onComplete, demoNote = true }: Props) {
   const [index, setIndex] = useState(0);
   const [answers, setAnswers] = useState<QuestionnaireAnswers>(() => visibleAnswers(questionnaire, initialAnswers));
   const [patient, setPatient] = useState<PatientDraft>(initialPatient);
@@ -89,7 +90,7 @@ export function QuestionnaireFlow({ questionnaire, initialAnswers, initialPatien
   return <section className="booking-card smart-form" aria-labelledby="smart-form-title">
     <div className="smart-form-top"><span className="profile-label">PRECONSULTA · {index + 1} DE {total}</span><span>{progress}%</span></div>
     <div className="smart-progress" role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={index + 1} aria-label="Progreso de la preconsulta"><span style={{ width: `${progress}%` }} /></div>
-    <p className="smart-demo-note">Vista de demostración · tus respuestas no se guardan.</p>
+    {demoNote && <p className="smart-demo-note">Vista de demostración · tus respuestas no se guardan.</p>}
     <div key={isPatientStep ? "patient" : question.id} className="smart-question">
       <div className="smart-section-label">✦ {sectionLabel?.toUpperCase()}</div>
       <h1 id="smart-form-title">{isPatientStep ? "Tus datos para el turno" : question.title}</h1>
