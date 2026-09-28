@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { DEFAULT_SECTION_LABELS, SECTION_KEYS, starterQuestionnaire, type Questionnaire, type QuestionnaireQuestion, type QuestionnaireSection, type SectionKey } from "./model";
+import { DEFAULT_SECTION_LABELS, SECTION_KEYS, starterQuestionnaire, validateConditions, type QuestionCondition, type Questionnaire, type QuestionnaireQuestion, type QuestionnaireSection, type SectionKey } from "./model";
 
 export type ProfessionalForms = {
   professionalName: string;
@@ -24,12 +24,14 @@ export async function loadProfessionalForms(client: SupabaseClient, userId: stri
   if (questionnaireResult.error) throw questionnaireResult.error;
   const rows = questionnaireResult.data ?? [];
   const formIds = rows.map((row) => row.id);
-  const [sectionsResult, questionsResult] = formIds.length ? await Promise.all([
+  const [sectionsResult, questionsResult, conditionsResult] = formIds.length ? await Promise.all([
     client.from("questionnaire_sections").select("questionnaire_id,section_key,visible_name,sort_order").in("questionnaire_id", formIds).order("sort_order"),
     client.from("questionnaire_questions").select("id,questionnaire_id,section_key,title,description,type,options,required,sort_order,active").in("questionnaire_id", formIds).order("sort_order"),
-  ]) : [{ data: [], error: null }, { data: [], error: null }];
+    client.from("questionnaire_conditions").select("id,questionnaire_id,target_question_id,question_id,operator,value,action").in("questionnaire_id", formIds),
+  ]) : [{ data: [], error: null }, { data: [], error: null }, { data: [], error: null }];
   if (sectionsResult.error) throw sectionsResult.error;
   if (questionsResult.error) throw questionsResult.error;
+  if (conditionsResult.error) throw conditionsResult.error;
 
   const questionnaires: Record<string, Questionnaire> = {};
   for (const service of services) {
@@ -48,6 +50,7 @@ export async function loadProfessionalForms(client: SupabaseClient, userId: stri
         title: item.title, description: item.description ?? "", type: item.type,
         options: Array.isArray(item.options) ? item.options as string[] : [],
         required: item.required, order: item.sort_order, active: item.active,
+        conditions: (conditionsResult.data ?? []).filter((condition) => condition.target_question_id === item.id).map((condition) => ({ id: condition.id, questionId: condition.question_id, operator: condition.operator as QuestionCondition["operator"], value: condition.value as QuestionCondition["value"], action: condition.action as QuestionCondition["action"] })),
       }));
     questionnaires[service.id] = { id: row.form_group_id, serviceId: service.id, serviceIds: rows.filter((item) => item.form_group_id === row.form_group_id).map((item) => item.service_id), title: row.title,
       sections: SECTION_KEYS.map((key) => sections.find((section) => section.key === key) ?? { key, label: DEFAULT_SECTION_LABELS[key], order: SECTION_KEYS.indexOf(key) }),
@@ -62,15 +65,18 @@ export async function saveProfessionalQuestionnaire(client: SupabaseClient, ques
   if (!questionnaire.title.trim()) throw new Error("Escribí un nombre para el formulario.");
   if (questionnaire.sections.some((section) => !section.label.trim())) throw new Error("Todas las secciones necesitan un nombre.");
   if (!questionnaire.questions.length || !questionnaire.questions.some((question) => question.active)) throw new Error("Agregá al menos una pregunta activa.");
+  const conditionError = validateConditions(questionnaire);
+  if (conditionError) throw new Error(conditionError);
   const { error } = await client.rpc("save_questionnaire_for_services", {
     p_group: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(questionnaire.id) ? questionnaire.id : crypto.randomUUID(),
     p_services: services,
     p_document: {
       title: questionnaire.title.trim(),
       sections: questionnaire.sections.map((section) => ({ key: section.key, label: section.label })),
-      questions: [...questionnaire.questions].sort((a, b) => a.order - b.order).map((question) => ({
-        section: question.section, title: question.title, description: question.description,
+      questions: [...questionnaire.questions].sort((a, b) => SECTION_KEYS.indexOf(a.section) - SECTION_KEYS.indexOf(b.section) || a.order - b.order).map((question) => ({
+        client_id: question.id, section: question.section, title: question.title, description: question.description,
         type: question.type, options: question.options, required: question.required, active: question.active,
+        conditions: (question.conditions ?? []).map((condition) => ({ id: condition.id, question_id: condition.questionId, operator: condition.operator, value: condition.value, action: condition.action })),
       })),
     },
   });

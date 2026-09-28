@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { normalizeArgentinePhone } from "@/lib/market";
-import { activeQuestions, hasAnswer, type AnswerValue, type Questionnaire, type QuestionnaireAnswers, type QuestionnaireQuestion } from "@/lib/questionnaires/model";
+import { hasAnswer, visibleAnswers, visibleQuestions, type AnswerValue, type Questionnaire, type QuestionnaireAnswers, type QuestionnaireQuestion } from "@/lib/questionnaires/model";
 
 export type PatientDraft = { firstName: string; lastName: string; email: string; phone: string };
 
@@ -21,12 +21,12 @@ type Props = {
 };
 
 export function QuestionnaireFlow({ questionnaire, initialAnswers, initialPatient, onAnswersChange, onPatientChange, onBack, onComplete }: Props) {
-  const questions = activeQuestions(questionnaire);
   const [index, setIndex] = useState(0);
-  const [answers, setAnswers] = useState<QuestionnaireAnswers>(initialAnswers);
+  const [answers, setAnswers] = useState<QuestionnaireAnswers>(() => visibleAnswers(questionnaire, initialAnswers));
   const [patient, setPatient] = useState<PatientDraft>(initialPatient);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const questions = visibleQuestions(questionnaire, answers);
   const isPatientStep = index === questions.length;
   const question = questions[index];
   const total = questions.length + 1;
@@ -34,7 +34,7 @@ export function QuestionnaireFlow({ questionnaire, initialAnswers, initialPatien
   const sectionLabel = question ? questionnaire.sections.find((section) => section.key === question.section)?.label : "Casi listo";
 
   const setAnswer = (value: AnswerValue) => {
-    const updated = { ...answers, [question.id]: value };
+    const updated = visibleAnswers(questionnaire, { ...answers, [question.id]: value });
     setAnswers(updated);
     onAnswersChange(updated);
     setError("");
@@ -78,7 +78,7 @@ export function QuestionnaireFlow({ questionnaire, initialAnswers, initialPatien
     setLoading(true);
     setError("");
     try {
-      await onComplete(answers, normalized);
+      await onComplete(visibleAnswers(questionnaire, answers), normalized);
     } catch {
       setError("No pudimos avanzar. Tus respuestas siguen acá; intentá nuevamente.");
     } finally {

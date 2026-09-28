@@ -1,9 +1,9 @@
-import { DEFAULT_SECTION_LABELS, SECTION_KEYS, type Questionnaire, type QuestionnaireAnswers } from "@/lib/questionnaires/model";
+import { DEFAULT_SECTION_LABELS, SECTION_KEYS, visibleQuestions, type Questionnaire, type QuestionnaireAnswers } from "@/lib/questionnaires/model";
 import "./preconsultation-summary.css";
 
 export function PreconsultationSummary({ questionnaire, answers }: { questionnaire: Questionnaire; answers: QuestionnaireAnswers }) {
   return <div className="preconsultation-summary"><h4>Preconsulta <span>Respuestas de ejemplo</span></h4>{SECTION_KEYS.map((key) => {
-    const questions = questionnaire.questions.filter((question) => question.active && question.section === key).sort((a, b) => a.order - b.order);
+    const questions = visibleQuestions(questionnaire, answers).filter((question) => question.section === key);
     if (!questions.length) return null;
     const section = questionnaire.sections.find((item) => item.key === key);
     return <section key={key}><h5>{section?.label || DEFAULT_SECTION_LABELS[key]}</h5>{questions.map((question) => {
