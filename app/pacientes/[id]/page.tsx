@@ -6,8 +6,9 @@ import { useParams } from "next/navigation";
 import { ArrowLeft, Check, Mail, MessageCircle, Pencil, Plus, X } from "lucide-react";
 import { getSupabase } from "@/lib/supabase/browser";
 import CrmShell from "../CrmShell";
-import { crmBirthDate, crmDate, crmMoney, errorMessage, fetchPages, loadCrmContext, statusLabels, type CrmContext, type PatientOverview, type PatientStatus } from "../crm";
+import { crmBirthDate, crmDate, crmMoney, errorMessage, fetchPages, loadCrmContext, statusLabels, type CrmContext, type PatientStatus } from "../crm";
 import { buildPatientTimeline, followUpBucket, followUpLabels, priorityLabels, todayInTimezone, type Activity, type Appointment, type FollowUp, type Intent, type Note, type Payment } from "../timeline";
+import { detectOpportunities, type OpportunityOverview } from "../opportunities";
 
 type Answer = { id: string; booking_intent_id: string; questionnaire_id: string; question_title: string; section_label: string; answer: unknown; created_at: string };
 type Professional = { id: string; user_id: string | null; display_name: string };
@@ -24,7 +25,7 @@ export default function PatientDetailPage() {
   const params = useParams();
   const patientId = typeof params.id === "string" ? params.id : "";
   const [context, setContext] = useState<CrmContext | null>(null);
-  const [patient, setPatient] = useState<PatientOverview | null>(null);
+  const [patient, setPatient] = useState<OpportunityOverview | null>(null);
   const [details, setDetails] = useState<Details>(emptyDetails);
   const [userId, setUserId] = useState("");
   const [loading, setLoading] = useState(true);
@@ -48,7 +49,7 @@ export default function PatientDetailPage() {
         if (!/^[0-9a-f-]{36}$/i.test(patientId)) throw new Error("No encontramos ese paciente.");
         const client = await getSupabase();
         const { data: auth } = await client.auth.getUser();
-        const { data: person, error: patientError } = await client.from("patient_crm_overview").select("*")
+        const { data: person, error: patientError } = await client.from("patient_follow_up_opportunities").select("*")
           .eq("id", patientId).eq("workspace_id", nextContext.workspaceId).maybeSingle();
         if (patientError) throw patientError;
         if (!person) throw new Error("No encontramos ese paciente en tu espacio.");
@@ -72,7 +73,7 @@ export default function PatientDetailPage() {
           fetchPages<{ id: string; title: string }>(async (from, to) => await client.from("questionnaires").select("id,title").eq("workspace_id", workspace).range(from, to))
         ]);
         if (!cancelled) {
-          setContext(nextContext); setPatient(person as PatientOverview);
+          setContext(nextContext); setPatient(person as OpportunityOverview);
           setDetails({ appointments, intents, payments, answers, notes, activities, followUps, services, professionals, questionnaires });
           setUserId(auth.user?.id ?? "");
         }
@@ -111,6 +112,7 @@ export default function PatientDetailPage() {
   }) : [], [patient, context, details, serviceById, professionalById]);
   const today = context ? todayInTimezone(context.market.timezone) : "";
   const pendingFollowUps = details.followUps.filter((item) => item.status === "pending");
+  const opportunities = patient ? detectOpportunities(patient) : [];
   const nextFollowUp = pendingFollowUps[0];
   const whatsappDigits = patient?.phone?.replace(/\D/g, "") ?? "";
   const whatsappUrl = whatsappDigits.startsWith("54") && whatsappDigits.length >= 12 && whatsappDigits.length <= 14
@@ -202,6 +204,9 @@ export default function PatientDetailPage() {
           <div><span>Total pagado</span><strong>{crmMoney(patient.approved_total_minor, context.market)}</strong></div>
           <div><span>Seguimiento</span><strong>{nextFollowUp ? `${followUpLabels[followUpBucket(nextFollowUp.due_date, today)]} · ${dateOnly(nextFollowUp.due_date)}` : "Sin seguimiento"}</strong></div>
         </div></section>
+        <section className="demo-panel crm-section crm-opportunities"><div className="crm-section-head"><div><h2>Oportunidades de seguimiento</h2><p className="crm-hint">Se actualizan según turnos, pagos y seguimientos. Revisá cada caso antes de actuar.</p></div></div>
+          {opportunities.length ? <div className="crm-opportunity-list">{opportunities.map((item) => <article className={`crm-opportunity-item crm-opportunity-${item.level}`} key={item.kind}><strong>{item.title}</strong><p>{item.reason}</p>{item.level === "attention" && <button onClick={() => { openFollowUp(); setFollowUpDraft({ ...emptyFollowUp, title: item.title, due_date: today, priority: item.priority <= 1 ? "high" : "medium" }); }}>Crear seguimiento</button>}</article>)}</div> : <p className="live-empty">No detectamos oportunidades de seguimiento en este momento.</p>}
+        </section>
         <div className="crm-detail-grid"><section className="demo-panel"><h2>Información</h2><dl className="crm-info">
           <div><dt>Nombre</dt><dd>{patient.first_name}</dd></div><div><dt>Apellido</dt><dd>{patient.last_name}</dd></div><div><dt>Email</dt><dd>{patient.email}</dd></div><div><dt>Teléfono</dt><dd>{patient.phone || "No informado"}</dd></div><div><dt>Fecha de nacimiento</dt><dd>{crmBirthDate(patient.date_of_birth, context.market)}</dd></div>
         </dl><label className="crm-status-field">Estado<select value={patient.status} disabled={saving} onChange={(event) => void saveStatus(event.target.value as PatientStatus)}>{Object.entries(statusLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>

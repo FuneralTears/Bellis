@@ -48,8 +48,32 @@
 .crm-cell-description { display: block; max-width: 240px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #82988b; margin-top: 4px; }
 .crm-table-actions { margin-top: 0; }
 .crm-table-actions a { color: #3b8665; }
+.crm-opportunity-select { display: inline-grid; gap: 6px; color: #557466; font-size: 12px; font-weight: 700; margin: 12px 0; }
+.crm-opportunity-select select { border: 1px solid #dbe8df; background: #fff; border-radius: 9px; padding: 9px 10px; color: #244334; font: inherit; max-width: 100%; }
+.crm-opportunity-pill { display: inline-block; border-radius: 999px; padding: 5px 9px; background: #eef2f1; color: #647e72; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.crm-opportunity-attention .crm-opportunity-pill, .crm-opportunity-pill.crm-opportunity-attention { background: #fff1db; color: #ac793d; }
+.crm-opportunity-list { display: grid; gap: 10px; margin-top: 14px; }
+.crm-opportunity-item { display: flex; align-items: center; justify-content: space-between; gap: 16px; border: 1px solid #e6eeeb; border-radius: 12px; padding: 14px; }
+.crm-opportunity-item.crm-opportunity-attention { border-color: #fff1db; }
+.crm-opportunity-item strong { display: block; color: #274639; font-size: 14px; margin-top: 5px; }
+.crm-opportunity-item p { color: #557466; font-size: 13px; line-height: 1.5; margin: 5px 0 0; }
+.crm-opportunity-item button, .crm-opportunity-item a, .crm-dashboard-link { border: 0; background: none; color: #3b8665; font: inherit; font-size: 12px; font-weight: 700; white-space: nowrap; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
+.crm-opportunity-panel { margin-bottom: 18px; }
+.crm-dashboard-opportunities { padding: 22px; margin-top: 18px; }
+.crm-dashboard-opportunities .crm-section-head h2 { margin: 0 0 5px; }
+.crm-dashboard-counts { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 10px; margin: 15px 0; }
+.crm-dashboard-counts > div { background: #f4faf5; border-radius: 12px; padding: 13px; }
+.crm-dashboard-counts strong, .crm-dashboard-counts span { display: block; }
+.crm-dashboard-counts strong { color: #274639; font-size: 22px; }
+.crm-dashboard-counts span { color: #557466; font-size: 11px; line-height: 1.4; }
+.crm-dashboard-opportunity-list { display: grid; gap: 7px; }
+.crm-dashboard-opportunity-list a { display: flex; align-items: center; justify-content: space-between; gap: 15px; border-top: 1px solid #e6eeeb; padding: 10px 0; color: #3b8665; }
+.crm-dashboard-opportunity-list b, .crm-dashboard-opportunity-list small { display: block; }
+.crm-dashboard-opportunity-list b { color: #274639; font-size: 13px; }
+.crm-dashboard-opportunity-list small { color: #557466; font-size: 12px; line-height: 1.4; }
 @media (max-width: 900px) {
   .crm-overview .crm-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .crm-dashboard-counts { grid-template-columns: repeat(2,minmax(0,1fr)); }
 }
 @media (max-width: 600px) {
   .crm-overview { padding: 18px; }
@@ -57,4 +81,5 @@
   .crm-follow-up-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .crm-form-grid { grid-template-columns: 1fr; }
   .crm-table-actions { flex-wrap: nowrap; }
+  .crm-opportunity-item { align-items: flex-start; flex-direction: column; }
 }

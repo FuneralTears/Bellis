@@ -7,10 +7,12 @@ import { getSupabase } from "@/lib/supabase/browser";
 import CrmShell from "../pacientes/CrmShell";
 import { errorMessage, fetchPages, loadCrmContext, type CrmContext } from "../pacientes/crm";
 import { followUpBucket, followUpLabels, priorityLabels, todayInTimezone, type FollowUp } from "../pacientes/timeline";
+import { detectOpportunities, hasAttention, opportunityFilters, type OpportunityKind, type OpportunityOverview } from "../pacientes/opportunities";
 
 type PatientName = { id: string; full_name: string };
 type StatusFilter = "pending" | "completed" | "cancelled" | "all";
 type PriorityFilter = "all" | FollowUp["priority"];
+type SignalFilter = OpportunityKind | "all" | "attention";
 const statusLabels = { pending: "Pendiente", completed: "Completado", cancelled: "Cancelado" };
 function dateOnly(value: string): string { const [year, month, day] = value.split("-"); return `${day}/${month}/${year}`; }
 
@@ -18,9 +20,11 @@ export default function FollowUpsPage() {
   const [context, setContext] = useState<CrmContext | null>(null);
   const [followUps, setFollowUps] = useState<FollowUp[]>([]);
   const [patients, setPatients] = useState<PatientName[]>([]);
+  const [opportunities, setOpportunities] = useState<OpportunityOverview[]>([]);
   const [search, setSearch] = useState("");
   const [priority, setPriority] = useState<PriorityFilter>("all");
   const [status, setStatus] = useState<StatusFilter>("pending");
+  const [signalFilter, setSignalFilter] = useState<SignalFilter>("attention");
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -32,14 +36,14 @@ export default function FollowUpsPage() {
       try {
         const nextContext = await loadCrmContext();
         const client = await getSupabase();
-        const [tasks, names] = await Promise.all([
+        const [tasks, overviews] = await Promise.all([
           fetchPages<FollowUp>(async (from, to) => await client.from("patient_follow_ups")
             .select("id,patient_id,professional_id,title,description,due_date,due_time,priority,status,completed_at,cancelled_at,created_by,created_at,updated_at")
             .eq("workspace_id", nextContext.workspaceId).order("due_date").range(from, to)),
-          fetchPages<PatientName>(async (from, to) => await client.from("patient_crm_overview")
-            .select("id,full_name").eq("workspace_id", nextContext.workspaceId).order("id").range(from, to))
+          fetchPages<OpportunityOverview>(async (from, to) => await client.from("patient_follow_up_opportunities")
+            .select("*").eq("workspace_id", nextContext.workspaceId).order("id").range(from, to))
         ]);
-        if (!cancelled) { setContext(nextContext); setFollowUps(tasks); setPatients(names); }
+        if (!cancelled) { setContext(nextContext); setFollowUps(tasks); setPatients(overviews.map(({ id, full_name }) => ({ id, full_name }))); setOpportunities(overviews); }
       } catch (caught) {
         const message = errorMessage(caught);
         if (message === "onboarding_required") window.location.replace("/onboarding");
@@ -68,6 +72,11 @@ export default function FollowUpsPage() {
     return rank[followUpBucket(a.due_date, today)] - rank[followUpBucket(b.due_date, today)]
       || a.due_date.localeCompare(b.due_date) || (a.due_time ?? "").localeCompare(b.due_time ?? "");
   }), [followUps, patientById, search, priority, status, today]);
+  const signalRows = useMemo(() => opportunities.flatMap((patient) => detectOpportunities(patient)
+    .filter((item) => signalFilter === "all" || (signalFilter === "attention" ? item.level === "attention" : item.kind === signalFilter))
+    .map((item) => ({ patient, item }))).filter(({ patient }) => patient.full_name.toLocaleLowerCase("es-AR").includes(search.trim().toLocaleLowerCase("es-AR")))
+    .sort((a, b) => a.item.priority - b.item.priority || a.patient.full_name.localeCompare(b.patient.full_name, "es-AR")), [opportunities, search, signalFilter]);
+  const attentionPatients = opportunities.filter(hasAttention).length;
 
   async function complete(item: FollowUp) {
     if (!context) return;
@@ -91,6 +100,9 @@ export default function FollowUpsPage() {
       <div className="demo-panel"><span>Vencidos</span><strong>{loading ? "—" : counts.overdue}</strong></div>
       <div className="demo-panel"><span>Completados</span><strong>{loading ? "—" : counts.completed}</strong></div>
     </div>
+    <section className="demo-panel crm-list-panel crm-opportunity-panel"><div className="crm-section-head"><div><h2>Oportunidades detectadas</h2><p className="crm-hint">{loading ? "Analizando registros…" : `${attentionPatients} ${attentionPatients === 1 ? "paciente necesita" : "pacientes necesitan"} atención.`} Las señales se actualizan con tus datos.</p></div><label className="crm-opportunity-select">Mostrar <select value={signalFilter} onChange={(event) => setSignalFilter(event.target.value as SignalFilter)}>{opportunityFilters.map((item) => <option key={item.kind} value={item.kind}>{item.label}</option>)}</select></label></div>
+      {loading ? <p className="live-empty" role="status">Buscando oportunidades…</p> : signalRows.length ? <div className="crm-opportunity-list">{signalRows.map(({ patient, item }) => <article className={`crm-opportunity-item crm-opportunity-${item.level}`} key={`${patient.id}:${item.kind}`}><div><span className="crm-opportunity-pill">{item.level === "attention" ? "Atención pendiente" : "Información"}</span><strong>{patient.full_name} · {item.title}</strong><p>{item.reason}</p></div><Link href={`/pacientes/${patient.id}`}>Ver paciente <ArrowRight size={15}/></Link></article>)}</div> : <p className="live-empty">No hay oportunidades con ese filtro.</p>}
+    </section>
     <section className="demo-panel crm-list-panel"><div className="crm-toolbar">
       <label className="crm-search"><Search size={18}/><input aria-label="Buscar paciente" placeholder="Buscar paciente" value={search} onChange={(event) => setSearch(event.target.value)}/></label>
       <label className="crm-sort">Prioridad<select value={priority} onChange={(event) => setPriority(event.target.value as PriorityFilter)}><option value="all">Todas</option>{Object.entries(priorityLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
