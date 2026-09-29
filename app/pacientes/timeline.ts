@@ -1,0 +1,69 @@
+export type Appointment = { id: string; booking_intent_id: string; professional_id: string; starts_at: string; status: string; created_at: string; status_changed_at: string | null };
+export type Intent = { id: string; service_id: string; professional_id: string; created_at: string };
+export type Payment = { id: string; booking_intent_id: string; amount_minor: number; currency_code: string; status: string; created_at: string; approved_at: string | null };
+export type Note = { id: string; author_id: string; content: string; created_at: string; updated_at: string };
+export type Activity = { id: string; professional_id: string; type: "call" | "email" | "whatsapp" | "other"; title: string; description: string; created_by: string; created_at: string };
+export type FollowUp = { id: string; patient_id: string; professional_id: string; title: string; description: string; due_date: string; due_time: string | null; priority: "low" | "medium" | "high"; status: "pending" | "completed" | "cancelled"; completed_at: string | null; cancelled_at: string | null; created_by: string; created_at: string; updated_at: string };
+export type TimelineEvent = { id: string; at: string; kind: "patient" | "appointment" | "payment" | "note" | "activity" | "follow_up"; title: string; description: string; actor?: string; approximate?: boolean };
+
+export function todayInTimezone(timezone: string, now = new Date()): string {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now);
+  const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "00";
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
+export function followUpBucket(dueDate: string | null, today: string): "none" | "overdue" | "today" | "upcoming" {
+  if (!dueDate) return "none";
+  if (dueDate < today) return "overdue";
+  if (dueDate === today) return "today";
+  return "upcoming";
+}
+
+export const followUpLabels = { none: "Sin seguimiento", overdue: "Vencido", today: "Hoy", upcoming: "Próximo" };
+export const priorityLabels = { low: "Baja", medium: "Media", high: "Alta" };
+
+export function buildPatientTimeline(input: {
+  patientCreatedAt: string;
+  appointments: Appointment[];
+  intents: Intent[];
+  payments: Payment[];
+  notes: Note[];
+  activities: Activity[];
+  followUps: FollowUp[];
+  services: Map<string, string>;
+  professionals: Map<string, string>;
+  money: (amountMinor: number, currency: string) => string;
+}): TimelineEvent[] {
+  const events: TimelineEvent[] = [{ id: "patient-created", at: input.patientCreatedAt, kind: "patient", title: "Paciente creado", description: "Ficha creada en Bellis." }];
+  const intents = new Map(input.intents.map((intent) => [intent.id, intent]));
+  for (const appointment of input.appointments) {
+    const intent = intents.get(appointment.booking_intent_id);
+    const service = input.services.get(intent?.service_id ?? "") ?? "Turno";
+    const actor = input.professionals.get(appointment.professional_id);
+    events.push({ id: `appointment-created-${appointment.id}`, at: appointment.created_at, kind: "appointment", title: "Turno reservado", description: service, actor });
+    if (appointment.status === "completed" || appointment.status === "cancelled") {
+      events.push({ id: `appointment-status-${appointment.id}`, at: appointment.status_changed_at ?? appointment.starts_at,
+        kind: "appointment", title: appointment.status === "completed" ? "Turno completado" : "Turno cancelado",
+        description: appointment.status_changed_at ? service : `${service} · hora exacta del cambio no disponible`, actor,
+        approximate: !appointment.status_changed_at });
+    }
+  }
+  for (const payment of input.payments) {
+    const intent = intents.get(payment.booking_intent_id);
+    if (payment.status !== "approved" && payment.status !== "pending") continue;
+    events.push({ id: `payment-${payment.id}`, at: payment.status === "approved" ? payment.approved_at ?? payment.created_at : payment.created_at,
+      kind: "payment", title: payment.status === "approved" ? "Pago recibido" : "Pago pendiente",
+      description: `${input.money(payment.amount_minor, payment.currency_code.trim())} · ${input.services.get(intent?.service_id ?? "") ?? "Servicio"}` });
+  }
+  for (const note of input.notes) events.push({ id: `note-${note.id}`, at: note.created_at, kind: "note", title: "Nota agregada", description: note.content, actor: input.professionals.get(note.author_id) });
+  const activityNames = { call: "Llamada registrada", email: "Email registrado", whatsapp: "WhatsApp registrado", other: "Interacción registrada" };
+  for (const activity of input.activities) events.push({ id: `activity-${activity.id}`, at: activity.created_at, kind: "activity",
+    title: activityNames[activity.type], description: `${activity.title} · ${activity.description}`, actor: input.professionals.get(activity.professional_id) });
+  for (const followUp of input.followUps) {
+    const actor = input.professionals.get(followUp.professional_id);
+    events.push({ id: `follow-up-created-${followUp.id}`, at: followUp.created_at, kind: "follow_up", title: "Seguimiento creado", description: followUp.title, actor });
+    if (followUp.completed_at) events.push({ id: `follow-up-completed-${followUp.id}`, at: followUp.completed_at, kind: "follow_up", title: "Seguimiento completado", description: followUp.title, actor });
+    if (followUp.cancelled_at) events.push({ id: `follow-up-cancelled-${followUp.id}`, at: followUp.cancelled_at, kind: "follow_up", title: "Seguimiento cancelado", description: followUp.title, actor });
+  }
+  return events.sort((a, b) => b.at.localeCompare(a.at) || a.id.localeCompare(b.id));
+}

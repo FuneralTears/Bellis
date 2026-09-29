@@ -4,8 +4,8 @@ import { formatDate, formatDateTime, formatMoney, type MarketConfig } from "@/li
 
 export type PatientStatus = "new" | "active" | "follow_up" | "inactive";
 export const statusLabels: Record<PatientStatus, string> = { new: "Nuevo", active: "Activo", follow_up: "Seguimiento", inactive: "Inactivo" };
-export type CrmContext = { workspaceId: string; professionalName: string; specialty: string; market: MarketConfig };
-export type PatientOverview = { id: string; workspace_id: string; first_name: string; last_name: string; full_name: string; email: string; phone: string | null; date_of_birth: string | null; status: PatientStatus; created_at: string; last_turn: string | null; next_turn: string | null; turn_count: number; approved_total_minor: number; currency_code: string };
+export type CrmContext = { workspaceId: string; professionalId: string; professionalName: string; specialty: string; market: MarketConfig };
+export type PatientOverview = { id: string; workspace_id: string; first_name: string; last_name: string; full_name: string; email: string; phone: string | null; date_of_birth: string | null; status: PatientStatus; created_at: string; last_turn: string | null; next_turn: string | null; turn_count: number; approved_total_minor: number; currency_code: string; follow_up_due_date: string | null };
 
 export async function loadCrmContext(): Promise<CrmContext> {
   const client = await getSupabase();
@@ -13,12 +13,12 @@ export async function loadCrmContext(): Promise<CrmContext> {
   if (authError || !auth.user) throw new Error("Tu sesión venció. Volvé a ingresar.");
   if (await landingRouteForUser(client, auth.user.id) === "/onboarding") throw new Error("onboarding_required");
   const { data: professional, error: profileError } = await client.from("professionals")
-    .select("workspace_id,display_name,specialty").eq("user_id", auth.user.id).limit(1).maybeSingle();
+    .select("id,workspace_id,display_name,specialty").eq("user_id", auth.user.id).limit(1).maybeSingle();
   if (profileError || !professional) throw new Error("No encontramos tu espacio profesional.");
   const { data: workspace, error: workspaceError } = await client.from("workspaces")
     .select("timezone,currency_code,locale,payment_provider").eq("id", professional.workspace_id).single();
   if (workspaceError || !workspace) throw new Error("No pudimos cargar tu espacio.");
-  return { workspaceId: professional.workspace_id, professionalName: professional.display_name, specialty: professional.specialty,
+  return { workspaceId: professional.workspace_id, professionalId: professional.id, professionalName: professional.display_name, specialty: professional.specialty,
     market: { country: "AR", currency: workspace.currency_code.trim(), timezone: workspace.timezone, locale: workspace.locale, paymentProvider: workspace.payment_provider } };
 }
 
