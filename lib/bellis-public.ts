@@ -15,6 +15,7 @@ export type PublicProfile = {
   questionnaires: Record<string, Questionnaire>;
   market: { timezone: string; currency: string; locale: string };
   canCheckout: boolean;
+  paymentFlow: { guidance: string; actionLabel: string; confirmationLabel: string };
 };
 
 export async function publicRequest<T>(action: string, options: { method?: "GET" | "POST"; body?: unknown; token?: string; params?: Record<string, string> } = {}): Promise<T> {

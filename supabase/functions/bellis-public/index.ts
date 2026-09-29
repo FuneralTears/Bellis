@@ -1,4 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2.117.2";
+import { mercadoPagoAccount, mercadoPagoProvider, recordVerifiedPayment } from "../_shared/bellis-payment.ts";
+import { ExternalPaymentLinkProvider } from "../_shared/mercado-pago.ts";
 
 const db = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
@@ -83,12 +85,21 @@ async function profile(request: Request, slug: string) {
         conditions: (conditionResult.data ?? []).filter((rule) => rule.target_question_id === item.id)
           .map((rule) => ({ id: rule.id, questionId: rule.question_id, operator: rule.operator, value: rule.value, action: rule.action })) })),
   }]));
+  const mercadoPagoReady = workspace.payment_provider === "mercado_pago_ar" &&
+    !!Deno.env.get("MERCADO_PAGO_WEBHOOK_SECRET") &&
+    !!await mercadoPagoAccount(db, workspace.id);
+  const externalReady = workspace.payment_provider === "external_link";
   return json(request, {
     professional: { ...professional, workspace_id: undefined, id: undefined },
     services: (services ?? []).map(({ external_payment_url, ...item }) => ({ ...item,
-      can_checkout: workspace.payment_provider === "external_link" && !!(external_payment_url || workspace.external_payment_url) })), questionnaires,
+      can_checkout: mercadoPagoReady || (externalReady && !!(external_payment_url || workspace.external_payment_url)) })), questionnaires,
     market: { timezone: workspace.timezone, currency: workspace.currency_code.trim(), locale: workspace.locale },
-    canCheckout: workspace.payment_provider === "external_link",
+    canCheckout: mercadoPagoReady || externalReady,
+    paymentFlow: mercadoPagoReady
+      ? { guidance: "Pagá con Mercado Pago. Cuando confirme el pago, vas a poder elegir un horario.",
+          actionLabel: "Abrir Mercado Pago", confirmationLabel: "Confirmado por Mercado Pago" }
+      : { guidance: "Pagá en el enlace configurado por el profesional. Después verificará el cobro para habilitar los horarios.",
+          actionLabel: "Abrir enlace de pago", confirmationLabel: "Registrado por el profesional" },
   });
 }
 
@@ -120,12 +131,35 @@ Deno.serve(async (request) => {
         p_token_hash: await sha256(token),
       });
       if (error) return json(request, { error: "No pudimos crear la solicitud. Revisá el formulario y que el cobro esté configurado." }, 400);
-      const { data: intent } = await db.from("booking_intents").select("workspace_id,service_id").eq("id", intentId).single();
-      const [{ data: workspace }, { data: service }] = await Promise.all([
-        db.from("workspaces").select("external_payment_url").eq("id", intent.workspace_id).single(),
-        db.from("services").select("external_payment_url").eq("id", intent.service_id).single(),
+      const { data: intent } = await db.from("booking_intents")
+        .select("id,workspace_id,service_id,professional_id,price_minor,currency_code").eq("id", intentId).single();
+      if (!intent) throw new Error("intent_unavailable");
+      const [{ data: workspace }, { data: service }, { data: professional }] = await Promise.all([
+        db.from("workspaces").select("payment_provider,external_payment_url").eq("id", intent.workspace_id).single(),
+        db.from("services").select("name,external_payment_url").eq("id", intent.service_id).single(),
+        db.from("professionals").select("public_slug").eq("id", intent.professional_id).single(),
       ]);
-      return json(request, { token, checkoutUrl: service?.external_payment_url || workspace?.external_payment_url });
+      if (!workspace || !service || !professional) throw new Error("checkout_unavailable");
+      if (workspace.payment_provider === "external_link") {
+        const checkout = await new ExternalPaymentLinkProvider(service.external_payment_url || workspace.external_payment_url || "")
+          .createCheckout({ intentId: intent.id });
+        return json(request, { token, checkoutUrl: checkout.redirectUrl });
+      }
+      if (workspace.payment_provider !== "mercado_pago_ar" || !Deno.env.get("MERCADO_PAGO_WEBHOOK_SECRET"))
+        throw new Error("checkout_unavailable");
+      const account = await mercadoPagoAccount(db, intent.workspace_id);
+      if (!account) throw new Error("checkout_unavailable");
+      const checkout = await mercadoPagoProvider(account).createCheckout({
+        intentId: intent.id, serviceId: intent.service_id, title: service.name,
+        amountMinor: intent.price_minor, currency: intent.currency_code, environment: account.environment,
+        returnUrl: `${siteOrigin}/p/${professional.public_slug}`,
+        notificationUrl: `${Deno.env.get("SUPABASE_URL")}/functions/v1/bellis-mp-webhook?intent=${intent.id}`,
+      });
+      const { error: preferenceError } = await db.rpc("set_mercado_pago_preference", {
+        p_intent: intent.id, p_preference: checkout.providerOrderId,
+      });
+      if (preferenceError) throw preferenceError;
+      return json(request, { token, checkoutUrl: checkout.redirectUrl });
     }
     if (["status", "slots", "book"].includes(action)) {
       if (!await limit(request, action, action === "book" ? 15 : 120, 10))
@@ -133,8 +167,25 @@ Deno.serve(async (request) => {
       const intent = await getIntent(request);
       if (!intent) return json(request, { error: "La solicitud venció o no existe" }, 404);
       if (action === "status" && request.method === "GET") {
-        const { data: payment } = await db.from("payments").select("status").eq("booking_intent_id", intent.id).maybeSingle();
-        return json(request, { status: intent.status, paymentStatus: payment?.status ?? "pending" });
+        const { data: stored } = await db.from("payments").select("status,provider,provider_order_id")
+          .eq("booking_intent_id", intent.id).maybeSingle();
+        if (stored?.provider === "mercado_pago_ar" && stored.provider_order_id && stored.status !== "approved") {
+          try {
+            const account = await mercadoPagoAccount(db, intent.workspace_id);
+            if (account) {
+              const matches = await mercadoPagoProvider(account).findPayments(intent.id);
+              const selected = matches.filter((item) => item.preferenceId === stored.provider_order_id)
+                .sort((a, b) => Number(b.status === "approved") - Number(a.status === "approved"))[0];
+              if (selected) await recordVerifiedPayment(db, intent, account, selected,
+                `status:${selected.id}:${selected.status}`);
+            }
+          } catch { /* A delayed provider response leaves the order pending. */ }
+        }
+        const [{ data: latestIntent }, { data: payment }] = await Promise.all([
+          db.from("booking_intents").select("status").eq("id", intent.id).single(),
+          db.from("payments").select("status").eq("booking_intent_id", intent.id).maybeSingle(),
+        ]);
+        return json(request, { status: latestIntent?.status ?? intent.status, paymentStatus: payment?.status ?? "pending" });
       }
       if (intent.status !== "awaiting_schedule" && intent.status !== "payment_confirmed" && action !== "book")
         return json(request, { error: "El pago todavía no está confirmado" }, 403);
