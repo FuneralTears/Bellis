@@ -1,6 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2.117.2";
 import { mercadoPagoAccount, mercadoPagoProvider, recordVerifiedPayment } from "../_shared/bellis-payment.ts";
 import { ExternalPaymentLinkProvider } from "../_shared/mercado-pago.ts";
+import { checkoutReturnOrigin, configuredOrigins, isAllowedOrigin } from "../_shared/origin-policy.ts";
 
 const db = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
@@ -8,12 +9,12 @@ const db = createClient(
   { auth: { persistSession: false } },
 );
 const siteOrigin = Deno.env.get("BELLIS_SITE_ORIGIN") ?? "https://bellis-agenda.pint-solutio-0057.chatgpt.site";
+const allowedOrigins = configuredOrigins(siteOrigin, Deno.env.get("BELLIS_ADDITIONAL_ORIGINS") ?? "");
 
 function cors(request: Request) {
   const origin = request.headers.get("origin") ?? "";
-  const allowed = origin === siteOrigin || /^http:\/\/localhost:\d+$/.test(origin);
   return {
-    "Access-Control-Allow-Origin": allowed ? origin : siteOrigin,
+    "Access-Control-Allow-Origin": isAllowedOrigin(origin, allowedOrigins) ? origin : siteOrigin,
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers": "content-type, x-bellis-intent, apikey, authorization",
     "Vary": "Origin",
@@ -106,7 +107,7 @@ async function profile(request: Request, slug: string) {
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors(request) });
   const origin = request.headers.get("origin");
-  if (origin && origin !== siteOrigin && !/^http:\/\/localhost:\d+$/.test(origin))
+  if (origin && !isAllowedOrigin(origin, allowedOrigins))
     return json(request, { error: "Origen no permitido" }, 403);
   const action = new URL(request.url).searchParams.get("action") ?? "";
   try {
@@ -152,7 +153,7 @@ Deno.serve(async (request) => {
       const checkout = await mercadoPagoProvider(account).createCheckout({
         intentId: intent.id, serviceId: intent.service_id, title: service.name,
         amountMinor: intent.price_minor, currency: intent.currency_code, environment: account.environment,
-        returnUrl: `${siteOrigin}/p/${professional.public_slug}`,
+        returnUrl: `${checkoutReturnOrigin(origin, siteOrigin, allowedOrigins)}/p/${professional.public_slug}`,
         notificationUrl: `${Deno.env.get("SUPABASE_URL")}/functions/v1/bellis-mp-webhook?intent=${intent.id}`,
       });
       const { error: preferenceError } = await db.rpc("set_mercado_pago_preference", {

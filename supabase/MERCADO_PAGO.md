@@ -15,6 +15,7 @@ Esta integración cobra **turnos de pacientes a la cuenta del profesional** medi
 | --- | --- | --- | --- | --- |
 | `MERCADO_PAGO_WEBHOOK_SECRET` | Privada, solo servidor | Verificar HMAC de Webhooks; habilitar checkout | `supabase/functions/.env` (ignorado por Git) | Supabase Dashboard → Edge Functions → Secrets |
 | `BELLIS_SITE_ORIGIN` | Configuración de servidor, no secreta | CORS y URL de retorno del checkout | `supabase/functions/.env` | Supabase Dashboard → Edge Functions → Secrets |
+| `BELLIS_ADDITIONAL_ORIGINS` | Configuración de servidor, no secreta | Orígenes HTTPS exactos adicionales de previews autorizados | `supabase/functions/.env` | Supabase Dashboard → Edge Functions → Secrets |
 | `SUPABASE_URL` | Inyectada por Supabase | API y URL del webhook | Supabase local | Inyectada por Supabase |
 | `SUPABASE_SERVICE_ROLE_KEY` | Privada, solo servidor; inyectada por Supabase | Escrituras controladas en Edge Functions | Supabase local | Inyectada por Supabase |
 

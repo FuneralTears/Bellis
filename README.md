@@ -1,5 +1,7 @@
 # Bellis — entorno de desarrollo
 
+Para publicar con Next.js en Vercel y mantener Supabase, ver [DEPLOY_VERCEL.md](DEPLOY_VERCEL.md). Los comandos habituales `dev`, `build` y `start` usan Next.js; el runtime anterior de Sites sigue disponible mediante los comandos con sufijo `:sites`.
+
 ## Requisitos
 
 - Node.js 22 o superior y `npm ci`.
@@ -11,7 +13,7 @@ SUPABASE_URL=https://<proyecto>.supabase.co
 SUPABASE_PUBLISHABLE_KEY=<clave publicable>
 ```
 
-La Edge Function `bellis-public` debe desplegarse con `verify_jwt=false` porque atiende a pacientes sin cuenta. Su código valida la procedencia, limita solicitudes y usa la clave de servicio disponible solo dentro de Supabase Functions. Para otro dominio, establecer `BELLIS_SITE_ORIGIN` como secreto de la función. Nunca colocar una clave de servicio en `.env.local` ni en el navegador.
+La Edge Function `bellis-public` debe desplegarse con `verify_jwt=false` porque atiende a pacientes sin cuenta. Su código valida la procedencia, limita solicitudes y usa la clave de servicio disponible solo dentro de Supabase Functions. Para el dominio de Vercel, establecer `BELLIS_SITE_ORIGIN` con el origen exacto de producción; las previews autorizadas pueden añadirse como orígenes exactos en `BELLIS_ADDITIONAL_ORIGINS`. Nunca colocar una clave de servicio en `.env.local` ni en el navegador.
 
 ## Probar
 
@@ -28,15 +30,7 @@ Para pruebas sin datos personales, ejecutar `supabase/tests/auth_onboarding_smok
 
 ## Supabase Auth: URL Configuration
 
-En **Authentication → URL Configuration** del proyecto Bellis:
-
-- **Site URL:** `https://bellis-agenda.pint-solutio-0057.chatgpt.site`
-- **Redirect URLs del sitio publicado:**
-  - `https://bellis-agenda.pint-solutio-0057.chatgpt.site/ingresar?confirmed=1`
-  - `https://bellis-agenda.pint-solutio-0057.chatgpt.site/recuperar?mode=update`
-- **Redirect URLs de desarrollo local** (cuando se use `npm run dev` en el puerto 5173):
-  - `http://localhost:5173/ingresar?confirmed=1`
-  - `http://localhost:5173/recuperar?mode=update`
+La configuración exacta de producción y previews está en [DEPLOY_VERCEL.md](DEPLOY_VERCEL.md). La **Site URL** debe ser la URL real asignada por Vercel. Los únicos Redirect URLs que el código solicita son `/ingresar?confirmed=1` y `/recuperar?mode=update`, en cada origen autorizado. Conservar también esas dos rutas para `http://localhost:5173`.
 
 En **Authentication → Providers → Email**, mantener habilitado email y contraseña y decidir si se exige confirmación de email. Si está habilitada, la persona debe confirmar antes de entrar al onboarding. En **Authentication → Emails → SMTP Settings**, configurar un proveedor SMTP y dominio verificado para entrega confiable a profesionales reales; el envío predeterminado de Supabase puede tener restricciones. Los enlaces de confirmación y recuperación usan los Redirect URLs anteriores. No incluir tokens ni contraseñas en estas URL configuradas.
 
@@ -55,6 +49,6 @@ En **Authentication → Providers → Email**, mantener habilitado email y contr
 - Contratar y verificar un proveedor/dominio de email; conectar el despachador de `notification_outbox`.
 - Publicar política de privacidad, términos, retención y proceso de eliminación/exportación de datos de pacientes.
 - Configurar redirecciones de Supabase Auth y revisar protección de contraseñas filtradas.
-- Cambiar la audiencia del Site privado cuando se haya completado la preparación para pacientes externos.
+- Completar la URL de producción de Vercel en Supabase Auth y el origen permitido de `bellis-public` antes de abrir reservas a pacientes externos.
 
 Consultar [ARCHITECTURE.md](ARCHITECTURE.md) para el estado técnico.

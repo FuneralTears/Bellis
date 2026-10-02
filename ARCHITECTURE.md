@@ -1,6 +1,6 @@
 # Bellis MVP — estado técnico
 
-Bellis usa React/TypeScript sobre vinext (Vite/Next) y Supabase Auth + PostgreSQL. El mercado inicial es Argentina (`AR`, `ARS`, `es-AR`, `America/Argentina/Buenos_Aires`). El dashboard real está en `/dashboard`; el constructor versionado de preconsultas sigue en `/dashboard/questionnaires`; la página pública de cada profesional está en `/p/[slug]`. `/demo`, `/profesional/ana-lopez` y `/admin` siguen siendo ejemplos visuales.
+Bellis usa React/TypeScript con Next.js App Router y Supabase Auth + PostgreSQL. La compilación de Vercel usa Next.js; vinext (Vite) queda disponible para el runtime anterior de Sites. El mercado inicial es Argentina (`AR`, `ARS`, `es-AR`, `America/Argentina/Buenos_Aires`). El dashboard real está en `/dashboard`; el constructor versionado de preconsultas sigue en `/dashboard/questionnaires`; la página pública de cada profesional está en `/p/[slug]`. `/demo`, `/profesional/ana-lopez` y `/admin` siguen siendo ejemplos visuales.
 
 ## Flujo implementado
 
@@ -15,7 +15,7 @@ Bellis usa React/TypeScript sobre vinext (Vite/Next) y Supabase Auth + PostgreSQ
 
 RLS delimita lectura y escritura por workspace y rol. Las claves de servicio solo viven en Edge Functions; el navegador recibe la clave publicable. FKs compuestas impiden enlazar entidades de distintos workspaces. El endpoint público limita solicitudes y no recibe datos privados en URLs. Los datos sintéticos de las pruebas HTTP se eliminaron.
 
-El cobro por link externo exige verificación manual del profesional y **no equivale a integración automática con el proveedor**. Mercado Pago por cuenta profesional requiere OAuth/webhooks y aún no está conectado. Sin proveedor de email configurado, los jobs quedan en cola y no se envían. El sitio desplegado sigue privado, de modo que los pacientes externos aún no pueden abrir el link público. La lista de redirecciones de Supabase Auth necesita incluir la URL de Bellis. Falta política de privacidad, retención y eliminación operativa antes de usar datos clínicos reales.
+El cobro por link externo exige verificación manual del profesional y **no equivale a integración automática con el proveedor**. Mercado Pago por cuenta profesional requiere OAuth y aún no está conectado. Sin proveedor de email configurado, los jobs quedan en cola y no se envían. Antes de usar Vercel con pacientes externos, la lista de redirecciones de Supabase Auth y el origen admitido por `bellis-public` deben incluir su URL real. Falta política de privacidad, retención y eliminación operativa antes de usar datos clínicos reales.
 
 ## Pruebas
 
