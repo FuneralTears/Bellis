@@ -10,7 +10,7 @@ import { priorityLabels } from "../pacientes/timeline";
 import "./automations.css";
 
 type Rule = { id: string; workspace_id: string; rule_key: "first_consultation" | "inactive_patient" | "pending_payment"; name: string; description: string; trigger_type: string; condition_type: string; action_title: string; action_priority: "low" | "medium" | "high"; delay_minutes: number; enabled: boolean; enabled_at: string | null; updated_at: string };
-type Run = { id: string; automation_rule_id: string; patient_id: string; triggered_at: string; scheduled_for: string; executed_at: string | null; status: "scheduled" | "processing" | "completed" | "failed" | "cancelled" | "skipped"; result: { reason?: string; follow_up_id?: string }; error_message: string | null; attempt_count: number; follow_up_id: string | null };
+type Run = { id: string; automation_rule_id: string; patient_id: string; triggered_at: string; scheduled_for: string; executed_at: string | null; status: "scheduled" | "processing" | "completed" | "failed" | "cancelled" | "skipped"; result: { reason?: string; follow_up_id?: string }; attempt_count: number; follow_up_id: string | null };
 type Patient = { id: string; first_name: string; last_name: string };
 const descriptions: Record<Rule["rule_key"], { trigger: string; condition: string; unit: "días" | "horas"; factor: number }> = {
   first_consultation: { trigger: "Se completa la primera consulta", condition: "No hay próximo turno y sigue siendo la única consulta completada", unit: "días", factor: 1440 },
@@ -31,6 +31,7 @@ export default function AutomationsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [failedCount, setFailedCount] = useState(0);
 
   useEffect(() => { let cancelled = false;
     async function load() {
@@ -38,12 +39,14 @@ export default function AutomationsPage() {
         const nextContext = await loadCrmContext();
         const client = await getSupabase();
         const { data: auth } = await client.auth.getUser();
-        const [ruleRows, membership] = await Promise.all([
+        const [ruleRows, membership, failures] = await Promise.all([
           client.from("automation_rules").select("*").eq("workspace_id", nextContext.workspaceId).order("created_at"),
-          client.from("workspace_members").select("role").eq("workspace_id", nextContext.workspaceId).eq("user_id", auth.user?.id ?? "").maybeSingle()
+          client.from("workspace_members").select("role").eq("workspace_id", nextContext.workspaceId).eq("user_id", auth.user?.id ?? "").maybeSingle(),
+          client.from("automation_runs").select("id", { count: "exact", head: true }).eq("workspace_id", nextContext.workspaceId).eq("status", "failed")
         ]);
         if (ruleRows.error) throw ruleRows.error;
-        if (!cancelled) { setContext(nextContext); setRules(ruleRows.data as Rule[] ?? []); setCanEdit(["owner", "admin"].includes(membership.data?.role ?? "")); }
+        if (failures.error) throw failures.error;
+        if (!cancelled) { setContext(nextContext); setRules(ruleRows.data as Rule[] ?? []); setCanEdit(["owner", "admin"].includes(membership.data?.role ?? "")); setFailedCount(failures.count ?? 0); }
       } catch (caught) {
         const message = errorMessage(caught);
         if (message === "onboarding_required") window.location.replace("/onboarding");
@@ -58,7 +61,7 @@ export default function AutomationsPage() {
     async function loadHistory() { try {
       const client = await getSupabase();
       const { data, error: historyError } = await client.from("automation_runs")
-        .select("id,automation_rule_id,patient_id,triggered_at,scheduled_for,executed_at,status,result,error_message,attempt_count,follow_up_id")
+        .select("id,automation_rule_id,patient_id,triggered_at,scheduled_for,executed_at,status,result,attempt_count,follow_up_id")
         .eq("workspace_id", context!.workspaceId).eq("automation_rule_id", selectedId).order("created_at", { ascending: false }).limit(50);
       if (historyError) throw historyError;
       const rows = (data ?? []) as Run[];
@@ -91,6 +94,8 @@ export default function AutomationsPage() {
     <div className="demo-title-row"><div><p className="demo-date">SEGUIMIENTO INTERNO</p><h1>Automatizaciones</h1><p>Bellis crea tareas de seguimiento cuando se cumplen tus reglas.</p></div></div>
     <p className="crm-hint">Las reglas empiezan desactivadas. No envían mensajes ni toman decisiones clínicas. Al activarlas, se consideran los eventos nuevos desde ese momento.</p>
     {error && <p className="live-error" role="alert">{error}</p>}{notice && <p className="live-success" role="status">{notice}</p>}
+    {failedCount > 0 && <div className="demo-panel automation-alert"><strong>⚠ Hay {failedCount} {failedCount === 1 ? "ejecución que requiere" : "ejecuciones que requieren"} revisión.</strong><Link href="/automatizaciones/ejecuciones?status=failed">Ver ejecuciones <ArrowRight size={15}/></Link></div>}
+    <Link className="crm-dashboard-link" href="/automatizaciones/ejecuciones">Ver todas las ejecuciones <ArrowRight size={15}/></Link>
     {loading ? <p className="live-empty" role="status">Cargando automatizaciones…</p> : <>
       <div className="automation-cards">{rules.map((rule) => { const info = descriptions[rule.rule_key]; return <article className="demo-panel automation-card" key={rule.id}>
         <div className="automation-card-heading"><div><h2>{rule.name}</h2><p>{rule.description}</p></div><span className={rule.enabled ? "automation-state enabled" : "automation-state"}>{rule.enabled ? "Activa" : "Desactivada"}</span></div>
@@ -109,7 +114,7 @@ export default function AutomationsPage() {
           <div className="automation-actions"><button className="demo-primary" disabled={saving}>Guardar cambios</button><button type="button" className="live-secondary" onClick={() => setDraft(null)}>Cancelar</button></div>
           <p className="crm-hint">El nuevo plazo se aplicará a los eventos futuros. Las tareas ya programadas conservan su fecha.</p>
         </form>}
-        <h3>Historial de ejecuciones</h3>{history.length ? <div className="automation-history">{history.map((run) => <div key={run.id}><span>{context ? crmDate(run.executed_at ?? run.scheduled_for, context.market) : "—"}</span><div><strong>{nameById.get(run.patient_id) ?? "Paciente no disponible"}</strong><small>{runLabels[run.status]}{run.result?.reason ? ` · ${run.result.reason}` : ""}{run.error_message ? ` · ${run.error_message}` : ""}</small></div>{run.follow_up_id && <Link href={`/pacientes/${run.patient_id}#seguimiento-${run.follow_up_id}`}>Ver seguimiento <ArrowRight size={14}/></Link>}</div>)}</div> : <p className="live-empty">Todavía no hay ejecuciones para esta regla.</p>}
+        <h3>Historial de ejecuciones</h3>{history.length ? <div className="automation-history">{history.map((run) => <div key={run.id}><span>{context ? crmDate(run.executed_at ?? run.scheduled_for, context.market) : "—"}</span><div><strong>{nameById.get(run.patient_id) ?? "Paciente no disponible"}</strong><small>{runLabels[run.status]}{run.result?.reason ? ` · ${run.result.reason}` : ""}</small></div><Link href={`/automatizaciones/ejecuciones?run=${run.id}`}>Ver detalle <ArrowRight size={14}/></Link></div>)}</div> : <p className="live-empty">Todavía no hay ejecuciones para esta regla.</p>}
       </section>}
     </>}
   </CrmShell>;

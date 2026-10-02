@@ -2,9 +2,9 @@ export type Appointment = { id: string; booking_intent_id: string; professional_
 export type Intent = { id: string; service_id: string; professional_id: string; created_at: string };
 export type Payment = { id: string; booking_intent_id: string; amount_minor: number; currency_code: string; status: string; created_at: string; approved_at: string | null };
 export type Note = { id: string; author_id: string; content: string; created_at: string; updated_at: string };
-export type Activity = { id: string; professional_id: string; type: "call" | "email" | "whatsapp" | "other" | "automation_created_follow_up"; title: string; description: string; metadata?: { follow_up_id?: string }; created_by: string; created_at: string };
+export type Activity = { id: string; professional_id: string; type: "call" | "email" | "whatsapp" | "other" | "automation_created_follow_up"; title: string; description: string; metadata?: { follow_up_id?: string; automation_run_id?: string }; created_by: string; created_at: string };
 export type FollowUp = { id: string; patient_id: string; professional_id: string; title: string; description: string; due_date: string; due_time: string | null; priority: "low" | "medium" | "high"; status: "pending" | "completed" | "cancelled"; source: "manual" | "automation"; automation_run_id: string | null; completed_at: string | null; cancelled_at: string | null; created_by: string; created_at: string; updated_at: string };
-export type TimelineEvent = { id: string; at: string; kind: "patient" | "appointment" | "payment" | "note" | "activity" | "follow_up"; title: string; description: string; actor?: string; approximate?: boolean; followUpId?: string };
+export type TimelineEvent = { id: string; at: string; kind: "patient" | "appointment" | "payment" | "note" | "activity" | "follow_up"; title: string; description: string; actor?: string; approximate?: boolean; followUpId?: string; automationRunId?: string };
 
 export function todayInTimezone(timezone: string, now = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-US", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now);
@@ -59,10 +59,10 @@ export function buildPatientTimeline(input: {
   const activityNames = { call: "Llamada registrada", email: "Email registrado", whatsapp: "WhatsApp registrado", other: "Interacción registrada", automation_created_follow_up: "⚙ Seguimiento automático creado" };
   for (const activity of input.activities) events.push({ id: `activity-${activity.id}`, at: activity.created_at, kind: "activity",
     title: activityNames[activity.type], description: activity.type === "automation_created_follow_up" ? activity.description : `${activity.title} · ${activity.description}`,
-    actor: activity.type === "automation_created_follow_up" ? undefined : input.professionals.get(activity.professional_id), followUpId: activity.metadata?.follow_up_id });
+    actor: activity.type === "automation_created_follow_up" ? undefined : input.professionals.get(activity.professional_id), followUpId: activity.metadata?.follow_up_id, automationRunId: activity.metadata?.automation_run_id });
   for (const followUp of input.followUps) {
     const actor = input.professionals.get(followUp.professional_id);
-    events.push({ id: `follow-up-created-${followUp.id}`, at: followUp.created_at, kind: "follow_up", title: followUp.source === "automation" ? "Seguimiento generado por Bellis" : "Seguimiento creado", description: followUp.title, actor: followUp.source === "automation" ? undefined : actor, followUpId: followUp.id });
+    events.push({ id: `follow-up-created-${followUp.id}`, at: followUp.created_at, kind: "follow_up", title: followUp.source === "automation" ? "Seguimiento generado por Bellis" : "Seguimiento creado", description: followUp.title, actor: followUp.source === "automation" ? undefined : actor, followUpId: followUp.id, automationRunId: followUp.automation_run_id ?? undefined });
     if (followUp.completed_at) events.push({ id: `follow-up-completed-${followUp.id}`, at: followUp.completed_at, kind: "follow_up", title: "Seguimiento completado", description: followUp.title, actor });
     if (followUp.cancelled_at) events.push({ id: `follow-up-cancelled-${followUp.id}`, at: followUp.cancelled_at, kind: "follow_up", title: "Seguimiento cancelado", description: followUp.title, actor });
   }

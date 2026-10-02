@@ -118,7 +118,7 @@ export default function FollowUpsPage() {
         <td>{dateOnly(item.due_date)}{item.due_time ? ` · ${item.due_time.slice(0, 5)}` : ""}</td>
         <td><span className={`crm-badge crm-priority-${item.priority}`}>{priorityLabels[item.priority]}</span></td>
         <td><span className={`crm-follow-up-state crm-${followUpBucket(item.due_date, today)}`}>{item.status === "pending" ? followUpLabels[followUpBucket(item.due_date, today)] : statusLabels[item.status]}</span></td>
-        <td><div className="crm-table-actions">{item.status === "pending" && <button disabled={savingId === item.id} onClick={() => void complete(item)}><Check size={14}/> Completar</button>}<Link href={`/pacientes/${item.patient_id}`} aria-label={`Ver paciente ${patientById.get(item.patient_id)}`}><ArrowRight size={16}/></Link></div></td>
+        <td><div className="crm-table-actions">{item.status === "pending" && <button disabled={savingId === item.id} onClick={() => void complete(item)}><Check size={14}/> Completar</button>}{item.automation_run_id && <Link href={`/automatizaciones/ejecuciones?run=${item.automation_run_id}`}>Ver automatización</Link>}<Link href={`/pacientes/${item.patient_id}`} aria-label={`Ver paciente ${patientById.get(item.patient_id)}`}><ArrowRight size={16}/></Link></div></td>
       </tr>)}</tbody></table></div> : <p className="live-empty">No hay seguimientos con esos filtros.</p>}
     </section>
   </CrmShell>;
