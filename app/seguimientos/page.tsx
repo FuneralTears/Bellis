@@ -12,6 +12,7 @@ import { detectOpportunities, hasAttention, opportunityFilters, type Opportunity
 type PatientName = { id: string; full_name: string };
 type StatusFilter = "pending" | "completed" | "cancelled" | "all";
 type PriorityFilter = "all" | FollowUp["priority"];
+type SourceFilter = "all" | FollowUp["source"];
 type SignalFilter = OpportunityKind | "all" | "attention";
 const statusLabels = { pending: "Pendiente", completed: "Completado", cancelled: "Cancelado" };
 function dateOnly(value: string): string { const [year, month, day] = value.split("-"); return `${day}/${month}/${year}`; }
@@ -23,6 +24,7 @@ export default function FollowUpsPage() {
   const [opportunities, setOpportunities] = useState<OpportunityOverview[]>([]);
   const [search, setSearch] = useState("");
   const [priority, setPriority] = useState<PriorityFilter>("all");
+  const [source, setSource] = useState<SourceFilter>("all");
   const [status, setStatus] = useState<StatusFilter>("pending");
   const [signalFilter, setSignalFilter] = useState<SignalFilter>("attention");
   const [loading, setLoading] = useState(true);
@@ -38,7 +40,7 @@ export default function FollowUpsPage() {
         const client = await getSupabase();
         const [tasks, overviews] = await Promise.all([
           fetchPages<FollowUp>(async (from, to) => await client.from("patient_follow_ups")
-            .select("id,patient_id,professional_id,title,description,due_date,due_time,priority,status,completed_at,cancelled_at,created_by,created_at,updated_at")
+            .select("id,patient_id,professional_id,title,description,due_date,due_time,priority,status,source,automation_run_id,completed_at,cancelled_at,created_by,created_at,updated_at")
             .eq("workspace_id", nextContext.workspaceId).order("due_date").range(from, to)),
           fetchPages<OpportunityOverview>(async (from, to) => await client.from("patient_follow_up_opportunities")
             .select("*").eq("workspace_id", nextContext.workspaceId).order("id").range(from, to))
@@ -66,12 +68,13 @@ export default function FollowUpsPage() {
   const visible = useMemo(() => followUps.filter((item) => {
     if (status !== "all" && item.status !== status) return false;
     if (priority !== "all" && item.priority !== priority) return false;
+    if (source !== "all" && item.source !== source) return false;
     return patientById.get(item.patient_id)?.toLocaleLowerCase("es-AR").includes(search.trim().toLocaleLowerCase("es-AR")) ?? false;
   }).sort((a, b) => {
     const rank = { overdue: 0, today: 1, upcoming: 2, none: 3 };
     return rank[followUpBucket(a.due_date, today)] - rank[followUpBucket(b.due_date, today)]
       || a.due_date.localeCompare(b.due_date) || (a.due_time ?? "").localeCompare(b.due_time ?? "");
-  }), [followUps, patientById, search, priority, status, today]);
+  }), [followUps, patientById, search, priority, source, status, today]);
   const signalRows = useMemo(() => opportunities.flatMap((patient) => detectOpportunities(patient)
     .filter((item) => signalFilter === "all" || (signalFilter === "attention" ? item.level === "attention" : item.kind === signalFilter))
     .map((item) => ({ patient, item }))).filter(({ patient }) => patient.full_name.toLocaleLowerCase("es-AR").includes(search.trim().toLocaleLowerCase("es-AR")))
@@ -107,10 +110,11 @@ export default function FollowUpsPage() {
       <label className="crm-search"><Search size={18}/><input aria-label="Buscar paciente" placeholder="Buscar paciente" value={search} onChange={(event) => setSearch(event.target.value)}/></label>
       <label className="crm-sort">Prioridad<select value={priority} onChange={(event) => setPriority(event.target.value as PriorityFilter)}><option value="all">Todas</option>{Object.entries(priorityLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
       <label className="crm-sort">Estado<select value={status} onChange={(event) => setStatus(event.target.value as StatusFilter)}><option value="pending">Pendientes</option><option value="completed">Completados</option><option value="cancelled">Cancelados</option><option value="all">Todos</option></select></label>
+      <label className="crm-sort">Origen<select value={source} onChange={(event) => setSource(event.target.value as SourceFilter)}><option value="all">Todos</option><option value="manual">Manuales</option><option value="automation">Automáticos</option></select></label>
     </div>
       {loading ? <p className="live-empty" role="status">Cargando seguimientos…</p> : visible.length ? <div className="crm-table-wrap"><table className="crm-table"><thead><tr><th>Paciente</th><th>Seguimiento</th><th>Fecha</th><th>Prioridad</th><th>Estado</th><th><span className="sr-only">Acciones</span></th></tr></thead><tbody>{visible.map((item) => <tr key={item.id}>
         <td><Link className="crm-person" href={`/pacientes/${item.patient_id}`}><b>{patientById.get(item.patient_id)}</b></Link></td>
-        <td><b>{item.title}</b>{item.description && <small className="crm-cell-description">{item.description}</small>}</td>
+        <td><b>{item.title}</b><small className="crm-cell-description">{item.source === "automation" ? "⚙ Automático" : "Manual"}</small>{item.description && <small className="crm-cell-description">{item.description}</small>}</td>
         <td>{dateOnly(item.due_date)}{item.due_time ? ` · ${item.due_time.slice(0, 5)}` : ""}</td>
         <td><span className={`crm-badge crm-priority-${item.priority}`}>{priorityLabels[item.priority]}</span></td>
         <td><span className={`crm-follow-up-state crm-${followUpBucket(item.due_date, today)}`}>{item.status === "pending" ? followUpLabels[followUpBucket(item.due_date, today)] : statusLabels[item.status]}</span></td>
