@@ -1,5 +1,6 @@
 "use client";
 
+import BellisLogo from "@/components/brand/BellisLogo";
 import { useEffect, useState } from "react";
 import { ArrowRight } from "lucide-react";
 import { QuestionnaireBuilder } from "../demo/questionnaire-builder";
@@ -51,5 +52,5 @@ export default function MisFormularios() {
     setForms(null);
     window.location.replace("/ingresar");
   };
-  return <main className="live-form-shell"><header className="live-form-header"><a className="brand" href="/"><span className="brand-mark">b.</span> bellis</a><div><span>{forms?.professionalName ?? "Mi espacio"}</span>{forms && <button onClick={signOut}>Cerrar sesión</button>}</div></header><div className="live-form-main"><div className="live-form-intro"><span>ESPACIO PROFESIONAL</span><a href="/dashboard">Volver al panel <ArrowRight size={15}/></a></div>{error ? <div className="live-form-message" role="alert"><h1>No pudimos abrir tus formularios</h1><p>{error}</p><a href="/ingresar">Volver a ingresar</a></div> : !forms ? <div className="live-form-message" role="status">Cargando tus servicios y formularios…</div> : <QuestionnaireBuilder serviceOptions={forms.services} initialQuestionnaires={forms.questionnaires} onSave={save} />}</div></main>;
+  return <main className="live-form-shell"><header className="live-form-header"><a className="brand" href="/"><BellisLogo /></a><div><span>{forms?.professionalName ?? "Mi espacio"}</span>{forms && <button onClick={signOut}>Cerrar sesión</button>}</div></header><div className="live-form-main"><div className="live-form-intro"><span>ESPACIO PROFESIONAL</span><a href="/dashboard">Volver al panel <ArrowRight size={15}/></a></div>{error ? <div className="live-form-message" role="alert"><h1>No pudimos abrir tus formularios</h1><p>{error}</p><a href="/ingresar">Volver a ingresar</a></div> : !forms ? <div className="live-form-message" role="status">Cargando tus servicios y formularios…</div> : <QuestionnaireBuilder serviceOptions={forms.services} initialQuestionnaires={forms.questionnaires} onSave={save} />}</div></main>;
 }

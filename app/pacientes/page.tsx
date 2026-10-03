@@ -71,14 +71,17 @@ export default function PatientsPage() {
 
   const today = context ? todayInTimezone(context.market.timezone) : "";
   return <CrmShell context={context}>
-    <div className="demo-title-row"><div><p className="demo-date">ESPACIO PROFESIONAL · ARGENTINA</p><h1>Pacientes</h1><p>Información, turnos y seguimiento en un solo lugar.</p></div><Link className="demo-primary" href="/seguimientos">Ver seguimientos <ArrowRight size={16}/></Link></div>
+    <div className="demo-title-row crm-patients-heading"><div><p className="demo-date">ESPACIO PROFESIONAL · ARGENTINA</p><h1>Pacientes</h1><p>Información, turnos y seguimiento en un solo lugar.</p></div><Link className="demo-primary" href="/seguimientos">Ver seguimientos <ArrowRight size={16}/></Link></div>
     <section className="demo-panel crm-list-panel">
       <div className="crm-toolbar">
         <label className="crm-search"><Search size={18}/><input aria-label="Buscar pacientes" placeholder="Buscar por nombre, email o teléfono" value={query} onChange={(event) => setQuery(event.target.value)}/></label>
         <label className="crm-sort">Ordenar por <select value={sort} onChange={(event) => { setSort(event.target.value as Sort); setPage(0); }}><option value="last_turn">Último turno</option><option value="next_turn">Próximo turno</option><option value="full_name">Nombre</option></select></label>
       </div>
+      <div className="crm-filter-group">
       <div className="crm-filters" aria-label="Filtrar pacientes por estado">{([ ["all","Todos"], ["new","Nuevos"], ["active","Activos"], ["follow_up","Seguimiento"], ["inactive","Inactivos"] ] as const).map(([value,label]) => <button key={value} className={status === value ? "on" : ""} onClick={() => { setStatus(value); setPage(0); }}>{label}</button>)}</div>
       <div className="crm-filters crm-follow-up-filters" aria-label="Filtrar pacientes por seguimiento">{([ ["all","Todos"], ["with","Con seguimiento"], ["without","Sin seguimiento"], ["overdue","Vencidos"], ["today","Hoy"] ] as const).map(([value,label]) => <button key={value} className={followUpFilter === value ? "on" : ""} onClick={() => { setFollowUpFilter(value); setPage(0); }}>{label}</button>)}</div>
+      <p className="crm-filter-scroll-hint">Deslizá los filtros para ver más <ArrowRight size={14} aria-hidden="true" /></p>
+      </div>
       <label className="crm-opportunity-select">Oportunidad de seguimiento <select value={opportunityFilter} onChange={(event) => { setOpportunityFilter(event.target.value as OpportunityFilter); setPage(0); }}>{opportunityFilters.map((item) => <option key={item.kind} value={item.kind}>{item.label}</option>)}</select></label>
       {error && <p className="live-error" role="alert">{error} <button onClick={() => setReload((value) => value + 1)} aria-label="Reintentar">Reintentá la búsqueda</button></p>}
       {loading ? <p className="live-empty" role="status">Cargando pacientes…</p> : error ? null : patients.length === 0 ? <p className="live-empty">{search || status !== "all" || followUpFilter !== "all" || opportunityFilter !== "all" ? "No encontramos pacientes con esos filtros." : "Todavía no tenés pacientes."}</p> : <>
