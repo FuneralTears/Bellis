@@ -6,6 +6,7 @@ import {
   Bell,
   CalendarDays,
   Check,
+  CircleAlert,
   Clock3,
   CreditCard,
   FileText,
@@ -22,6 +23,18 @@ import {
 } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { followUpBucket, priorityLabels } from "../pacientes/timeline";
+import {
+  detectOpportunities,
+  hasAttention,
+  opportunityFilters,
+} from "../pacientes/opportunities";
+import {
+  FollowUpsTable,
+  KpiStrip,
+  OpportunityRow,
+  PageHeader,
+} from "@/components/crm/CrmUi";
+import { demoFollowUp, demoPatients } from "./crm-data";
 import {
   demoNotifications,
   demoRules,
@@ -393,44 +406,56 @@ export function DemoFollowUps({
   automation: () => void;
 }) {
   const [search, setSearch] = useState("");
-  const [status, setStatus] = useState("all");
+  const [status, setStatus] = useState("pending");
   const [priority, setPriority] = useState("all");
   const [source, setSource] = useState("all");
-  const [signal, setSignal] = useState("all");
+  const [signal, setSignal] = useState("attention");
   const [notice, setNotice] = useState("");
-  const visible = state.tasks.filter(
-    (task) =>
-      task.patient
-        .toLocaleLowerCase("es-AR")
-        .includes(search.trim().toLocaleLowerCase("es-AR")) &&
-      (status === "all" || task.status === status) &&
-      (priority === "all" || task.priority === priority) &&
-      (source === "all" || task.source === source),
-  );
-  const opportunities = [
-    {
-      patient: "Lucía Pérez",
-      title: "Pago pendiente",
-      reason: "Un pago necesita verificación.",
-      kind: "payment",
-    },
-    {
-      patient: "Carlos Ruiz",
-      title: "Primera consulta sin próximo turno",
-      reason:
-        "La primera consulta terminó y todavía no hay otro turno reservado.",
-      kind: "next",
-    },
-  ].filter(
-    (item) =>
-      (signal === "all" || item.kind === signal) &&
-      item.patient
-        .toLocaleLowerCase("es-AR")
-        .includes(search.trim().toLocaleLowerCase("es-AR")),
-  );
+  const text = search.trim().toLocaleLowerCase("es-AR");
+  const rank = { overdue: 0, today: 1, upcoming: 2, none: 3 };
+  const visible = state.tasks
+    .filter(
+      (task) =>
+        task.patient.toLocaleLowerCase("es-AR").includes(text) &&
+        (status === "all" || task.status === status) &&
+        (priority === "all" || task.priority === priority) &&
+        (source === "all" || task.source === source),
+    )
+    .map(demoFollowUp)
+    .sort(
+      (a, b) =>
+        rank[followUpBucket(a.due_date, demoToday)] -
+          rank[followUpBucket(b.due_date, demoToday)] ||
+        a.due_date.localeCompare(b.due_date),
+    );
+  const patients = demoPatients(state.tasks);
+  const names = new Map(patients.map((item) => [item.id, item.full_name]));
+  const attention = patients.filter(hasAttention).length;
+  const signals = patients
+    .flatMap((item) =>
+      detectOpportunities(item)
+        .filter(
+          (found) =>
+            signal === "all" ||
+            (signal === "attention"
+              ? found.level === "attention"
+              : found.kind === signal),
+        )
+        .map((found) => ({ patient: item, item: found })),
+    )
+    .filter((row) =>
+      row.patient.full_name.toLocaleLowerCase("es-AR").includes(text),
+    )
+    .sort(
+      (a, b) =>
+        a.item.priority - b.item.priority ||
+        a.patient.full_name.localeCompare(b.patient.full_name, "es-AR"),
+    );
+  const count = (test: (task: DemoTask) => boolean) =>
+    state.tasks.filter(test).length;
   return (
     <>
-      <DemoTitle
+      <PageHeader
         title="Seguimientos"
         description="Lo que necesita atención en tu espacio profesional."
       />
@@ -439,83 +464,87 @@ export function DemoFollowUps({
           {notice}
         </p>
       )}
-      <div className="crm-follow-up-metrics">
-        {[
-          [
-            "Pendientes",
-            state.tasks.filter((task) => task.status === "pending").length,
-          ],
-          [
-            "Hoy",
-            state.tasks.filter(
+      <KpiStrip
+        items={[
+          {
+            label: "Pendientes",
+            value: count((task) => task.status === "pending"),
+            icon: ListChecks,
+            tone: "petrol",
+          },
+          {
+            label: "Hoy",
+            value: count(
               (task) => task.status === "pending" && task.date === demoToday,
-            ).length,
-          ],
-          [
-            "Vencidos",
-            state.tasks.filter(
+            ),
+            icon: Clock3,
+            tone: "orange",
+          },
+          {
+            label: "Vencidos",
+            value: count(
               (task) => task.status === "pending" && task.date < demoToday,
-            ).length,
-          ],
-          [
-            "Completados",
-            state.tasks.filter((task) => task.status === "completed").length,
-          ],
-        ].map(([label, value]) => (
-          <div key={label} className="demo-panel">
-            <span>{label}</span>
-            <strong>{value}</strong>
-          </div>
-        ))}
-      </div>
-      <section className="demo-panel crm-opportunity-panel">
-        <div className="crm-section-head">
+            ),
+            icon: CircleAlert,
+            tone: "coral",
+          },
+          {
+            label: "Completados",
+            value: count((task) => task.status === "completed"),
+            icon: Check,
+            tone: "sage",
+          },
+        ]}
+      />
+      <section className="crm-card">
+        <div className="crm-card-head">
           <div>
             <h2>Oportunidades detectadas</h2>
-            <p className="crm-hint">
-              Señales de ejemplo para revisar la continuidad de atención.
+            <p>
+              {attention}{" "}
+              {attention === 1 ? "paciente necesita" : "pacientes necesitan"}{" "}
+              atención. Las señales se actualizan con tus datos.
             </p>
           </div>
-          <label className="crm-opportunity-select">
+          <label className="crm-select">
             Mostrar
             <select value={signal} onChange={(e) => setSignal(e.target.value)}>
-              <option value="all">Requieren atención</option>
-              <option value="payment">Pagos pendientes</option>
-              <option value="next">Sin próximo turno</option>
+              {opportunityFilters.map((item) => (
+                <option key={item.kind} value={item.kind}>
+                  {item.label}
+                </option>
+              ))}
             </select>
           </label>
         </div>
-        {opportunities.length ? (
-          <div className="crm-opportunity-list">
-            {opportunities.map((item) => (
-              <article
-                key={item.patient}
-                className="crm-opportunity-item crm-opportunity-attention"
+        {signals.length ? (
+          <div className="crm-signals">
+            {signals.map((row) => (
+              <OpportunityRow
+                key={`${row.patient.id}:${row.item.kind}`}
+                item={row.item}
+                patientName={row.patient.full_name}
               >
-                <div>
-                  <span className="crm-opportunity-pill">
-                    Atención pendiente
-                  </span>
-                  <strong>
-                    {item.patient} · {item.title}
-                  </strong>
-                  <p>{item.reason}</p>
-                </div>
                 <button
-                  className="showroom-text-button"
-                  onClick={() => patient(item.patient)}
+                  className="crm-link"
+                  onClick={() => patient(row.patient.full_name)}
                 >
                   Ver paciente <ArrowRight size={15} />
                 </button>
-              </article>
+              </OpportunityRow>
             ))}
           </div>
         ) : (
           <p className="live-empty">No hay oportunidades con ese filtro.</p>
         )}
       </section>
-      <section className="demo-panel">
-        <div className="crm-toolbar">
+      <section className="crm-card">
+        <div className="crm-card-head">
+          <div>
+            <h2>Tareas de seguimiento</h2>
+          </div>
+        </div>
+        <div className="crm-filterbar">
           <label className="crm-search">
             <Search size={16} />
             <input
@@ -525,7 +554,7 @@ export function DemoFollowUps({
               onChange={(e) => setSearch(e.target.value)}
             />
           </label>
-          <label className="crm-sort">
+          <label className="crm-select">
             Prioridad
             <select
               value={priority}
@@ -539,16 +568,16 @@ export function DemoFollowUps({
               ))}
             </select>
           </label>
-          <label className="crm-sort">
+          <label className="crm-select">
             Estado
             <select value={status} onChange={(e) => setStatus(e.target.value)}>
-              <option value="all">Todos</option>
               <option value="pending">Pendientes</option>
               <option value="completed">Completados</option>
               <option value="cancelled">Cancelados</option>
+              <option value="all">Todos</option>
             </select>
           </label>
-          <label className="crm-sort">
+          <label className="crm-select">
             Origen
             <select value={source} onChange={(e) => setSource(e.target.value)}>
               <option value="all">Todos</option>
@@ -558,78 +587,44 @@ export function DemoFollowUps({
           </label>
         </div>
         {visible.length ? (
-          <div className="crm-table-wrap showroom-task-table">
-            <table className="crm-table">
-              <thead>
-                <tr>
-                  <th>Paciente</th>
-                  <th>Seguimiento</th>
-                  <th>Fecha</th>
-                  <th>Prioridad</th>
-                  <th>Estado</th>
-                  <th>Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visible.map((task) => (
-                  <tr key={task.id}>
-                    <td>
-                      <button
-                        className="showroom-text-button crm-person"
-                        onClick={() => patient(task.patient)}
-                      >
-                        <b>{task.patient}</b>
-                      </button>
-                    </td>
-                    <td>
-                      <b>{task.title}</b>
-                      <small className="crm-cell-description">
-                        {task.source === "automation" ? "Automático" : "Manual"}{" "}
-                        · {task.description}
-                      </small>
-                    </td>
-                    <td>
-                      {task.date.split("-").reverse().join("/")} · {task.time}
-                    </td>
-                    <td>
-                      <span
-                        className={`crm-badge crm-priority-${task.priority}`}
-                      >
-                        {priorityLabels[task.priority]}
-                      </span>
-                    </td>
-                    <td>
-                      <span
-                        className={`crm-follow-up-state ${task.status === "pending" ? `crm-${followUpBucket(task.date, demoToday)}` : ""}`}
-                      >
-                        {taskStatus(task)}
-                      </span>
-                    </td>
-                    <td>
-                      <div className="crm-table-actions">
-                        {task.status === "pending" && (
-                          <button
-                            onClick={() => {
-                              state.complete(task.id);
-                              setNotice("Seguimiento completado en la demo.");
-                            }}
-                          >
-                            <Check size={14} />
-                            Completar
-                          </button>
-                        )}
-                        {task.source === "automation" && (
-                          <button onClick={automation}>
-                            Ver automatización
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <FollowUpsTable
+            items={visible}
+            today={demoToday}
+            patientName={(item) => names.get(item.patient_id)}
+            renderPatient={(item, content, { className }) => (
+              <button
+                type="button"
+                className={className}
+                onClick={() => patient(names.get(item.patient_id) ?? "")}
+              >
+                {content}
+              </button>
+            )}
+            renderActions={(item) => (
+              <>
+                {item.status === "pending" && (
+                  <button
+                    onClick={() => {
+                      state.complete(item.id);
+                      setNotice("Seguimiento completado en la demo.");
+                    }}
+                  >
+                    <Check size={14} />
+                    Completar
+                  </button>
+                )}
+                {item.source === "automation" && (
+                  <button onClick={automation}>Ver automatización</button>
+                )}
+                <button
+                  aria-label={`Ver paciente ${names.get(item.patient_id)}`}
+                  onClick={() => patient(names.get(item.patient_id) ?? "")}
+                >
+                  <ArrowRight size={16} />
+                </button>
+              </>
+            )}
+          />
         ) : (
           <p className="live-empty">No hay seguimientos con esos filtros.</p>
         )}

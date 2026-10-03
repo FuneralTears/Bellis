@@ -6,8 +6,9 @@ import { ArrowRight, Search } from "lucide-react";
 import { getSupabase } from "@/lib/supabase/browser";
 import CrmShell from "./CrmShell";
 import { crmDate, errorMessage, loadCrmContext, statusLabels, type CrmContext, type PatientStatus } from "./crm";
-import { followUpBucket, followUpLabels, todayInTimezone } from "./timeline";
-import { detectOpportunities, opportunityFilters, type OpportunityKind, type OpportunityOverview } from "./opportunities";
+import { todayInTimezone } from "./timeline";
+import { opportunityFilters, type OpportunityKind, type OpportunityOverview } from "./opportunities";
+import { PageHeader, PatientsTable } from "@/components/crm/CrmUi";
 
 const PAGE_SIZE = 25;
 type Sort = "last_turn" | "next_turn" | "full_name";
@@ -70,27 +71,25 @@ export default function PatientsPage() {
   }, [context, search, status, followUpFilter, opportunityFilter, sort, page, reload]);
 
   const today = context ? todayInTimezone(context.market.timezone) : "";
+  const filtered = Boolean(search) || status !== "all" || followUpFilter !== "all" || opportunityFilter !== "all";
   return <CrmShell context={context}>
-    <div className="demo-title-row crm-patients-heading"><div><p className="demo-date">ESPACIO PROFESIONAL · ARGENTINA</p><h1>Pacientes</h1><p>Información, turnos y seguimiento en un solo lugar.</p></div><Link className="demo-primary" href="/seguimientos">Ver seguimientos <ArrowRight size={16}/></Link></div>
-    <section className="demo-panel crm-list-panel">
-      <div className="crm-toolbar">
-        <label className="crm-search"><Search size={18}/><input aria-label="Buscar pacientes" placeholder="Buscar por nombre, email o teléfono" value={query} onChange={(event) => setQuery(event.target.value)}/></label>
-        <label className="crm-sort">Ordenar por <select value={sort} onChange={(event) => { setSort(event.target.value as Sort); setPage(0); }}><option value="last_turn">Último turno</option><option value="next_turn">Próximo turno</option><option value="full_name">Nombre</option></select></label>
+    <PageHeader title="Pacientes" description="Información, turnos y seguimiento en un solo lugar."><Link className="demo-primary" href="/seguimientos">Ver seguimientos <ArrowRight size={16}/></Link></PageHeader>
+    <section className="crm-card">
+      <div className="crm-filterbar">
+        <label className="crm-search"><Search size={16}/><input aria-label="Buscar pacientes" placeholder="Buscar por nombre, email o teléfono" value={query} onChange={(event) => setQuery(event.target.value)}/></label>
+        <label className="crm-select">Oportunidad <select aria-label="Oportunidad de seguimiento" value={opportunityFilter} onChange={(event) => { setOpportunityFilter(event.target.value as OpportunityFilter); setPage(0); }}>{opportunityFilters.map((item) => <option key={item.kind} value={item.kind}>{item.label}</option>)}</select></label>
+        <label className="crm-select">Ordenar por <select value={sort} onChange={(event) => { setSort(event.target.value as Sort); setPage(0); }}><option value="last_turn">Último turno</option><option value="next_turn">Próximo turno</option><option value="full_name">Nombre</option></select></label>
       </div>
-      <div className="crm-filter-group">
-      <div className="crm-filters" aria-label="Filtrar pacientes por estado">{([ ["all","Todos"], ["new","Nuevos"], ["active","Activos"], ["follow_up","Seguimiento"], ["inactive","Inactivos"] ] as const).map(([value,label]) => <button key={value} className={status === value ? "on" : ""} onClick={() => { setStatus(value); setPage(0); }}>{label}</button>)}</div>
-      <div className="crm-filters crm-follow-up-filters" aria-label="Filtrar pacientes por seguimiento">{([ ["all","Todos"], ["with","Con seguimiento"], ["without","Sin seguimiento"], ["overdue","Vencidos"], ["today","Hoy"] ] as const).map(([value,label]) => <button key={value} className={followUpFilter === value ? "on" : ""} onClick={() => { setFollowUpFilter(value); setPage(0); }}>{label}</button>)}</div>
-      <p className="crm-filter-scroll-hint">Deslizá los filtros para ver más <ArrowRight size={14} aria-hidden="true" /></p>
+      <div className="crm-chip-rows">
+        <div className="crm-chip-row"><span id="crm-filter-status">Estado</span><div className="crm-chips" role="group" aria-labelledby="crm-filter-status">{([ ["all","Todos"], ["new","Nuevos"], ["active","Activos"], ["follow_up","Seguimiento"], ["inactive","Inactivos"] ] as const).map(([value,label]) => <button key={value} aria-pressed={status === value} className={status === value ? "on" : ""} onClick={() => { setStatus(value); setPage(0); }}>{label}</button>)}</div></div>
+        <div className="crm-chip-row"><span id="crm-filter-follow-up">Seguimiento</span><div className="crm-chips" role="group" aria-labelledby="crm-filter-follow-up">{([ ["all","Todos"], ["with","Con seguimiento"], ["without","Sin seguimiento"], ["overdue","Vencidos"], ["today","Hoy"] ] as const).map(([value,label]) => <button key={value} aria-pressed={followUpFilter === value} className={followUpFilter === value ? "on" : ""} onClick={() => { setFollowUpFilter(value); setPage(0); }}>{label}</button>)}</div></div>
       </div>
-      <label className="crm-opportunity-select">Oportunidad de seguimiento <select value={opportunityFilter} onChange={(event) => { setOpportunityFilter(event.target.value as OpportunityFilter); setPage(0); }}>{opportunityFilters.map((item) => <option key={item.kind} value={item.kind}>{item.label}</option>)}</select></label>
       {error && <p className="live-error" role="alert">{error} <button onClick={() => setReload((value) => value + 1)} aria-label="Reintentar">Reintentá la búsqueda</button></p>}
-      {loading ? <p className="live-empty" role="status">Cargando pacientes…</p> : error ? null : patients.length === 0 ? <p className="live-empty">{search || status !== "all" || followUpFilter !== "all" || opportunityFilter !== "all" ? "No encontramos pacientes con esos filtros." : "Todavía no tenés pacientes."}</p> : <>
-        <div className="crm-table-wrap"><table className="crm-table"><thead><tr><th>Paciente</th><th>Teléfono</th><th>Último turno</th><th>Próximo turno</th><th>Turnos</th><th>Estado</th><th>Oportunidades</th><th>Seguimiento</th><th><span className="sr-only">Abrir</span></th></tr></thead><tbody>{patients.map((patient) => {
-          const signals = detectOpportunities(patient);
-          const primary = signals.find((signal) => signal.level === "attention") ?? signals[0];
-          return <tr key={patient.id}><td><Link className="crm-person" href={`/pacientes/${patient.id}`}><b>{patient.full_name}</b><small>{patient.email}</small></Link></td><td>{patient.phone || "—"}</td><td>{crmDate(patient.last_turn, context!.market)}</td><td>{crmDate(patient.next_turn, context!.market)}</td><td>{patient.turn_count}</td><td><span className={`crm-badge crm-${patient.status}`}>{statusLabels[patient.status]}</span></td><td>{primary ? <span className={`crm-opportunity-pill crm-opportunity-${primary.level}`}>{primary.title}{signals.length > 1 ? ` +${signals.length - 1}` : ""}</span> : "—"}</td><td><span className={`crm-follow-up-state crm-${followUpBucket(patient.follow_up_due_date,today)}`}>{followUpLabels[followUpBucket(patient.follow_up_due_date,today)]}</span>{automaticPatients.has(patient.id) && <small className="crm-cell-description">⚙ Seguimiento automático</small>}</td><td><Link className="crm-open" href={`/pacientes/${patient.id}`} aria-label={`Ver ficha de ${patient.full_name}`}><ArrowRight size={17}/></Link></td></tr>;
-        })}</tbody></table></div>
-        <div className="crm-pagination"><span>{total} {total === 1 ? "paciente" : "pacientes"} · Página {page + 1} de {Math.max(1, Math.ceil(total / PAGE_SIZE))}</span><div><button disabled={page === 0} onClick={() => setPage(page - 1)}>Anterior</button><button disabled={(page + 1) * PAGE_SIZE >= total} onClick={() => setPage(page + 1)}>Siguiente</button></div></div>
+      {loading ? <p className="live-empty" role="status">Cargando pacientes…</p> : error ? null : patients.length === 0 ? <p className="live-empty">{filtered ? "No encontramos pacientes con esos filtros." : "Todavía no tenés pacientes."}</p> : <>
+        <p className="crm-result-count">{total} {total === 1 ? "paciente" : "pacientes"}{filtered ? " con estos filtros" : ""}</p>
+        <PatientsTable patients={patients} today={today} automaticIds={automaticPatients} formatDate={(value) => crmDate(value, context!.market)} statusLabel={(value) => statusLabels[value]}
+          renderOpen={(patient, content, { className, label }) => <Link className={className} href={`/pacientes/${patient.id}`} aria-label={label}>{content}</Link>}/>
+        <div className="crm-pagination"><span>Página {page + 1} de {Math.max(1, Math.ceil(total / PAGE_SIZE))}</span><div><button disabled={page === 0} onClick={() => setPage(page - 1)}>Anterior</button><button disabled={(page + 1) * PAGE_SIZE >= total} onClick={() => setPage(page + 1)}>Siguiente</button></div></div>
       </>}
     </section>
   </CrmShell>;

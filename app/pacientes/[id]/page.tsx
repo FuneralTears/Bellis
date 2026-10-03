@@ -3,12 +3,13 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ArrowLeft, Check, Mail, MessageCircle, Pencil, Plus, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Cake, CalendarDays, Check, Mail, MessageCircle, Pencil, Phone, Plus, X } from "lucide-react";
 import { getSupabase } from "@/lib/supabase/browser";
 import CrmShell from "../CrmShell";
 import { crmBirthDate, crmDate, crmMoney, errorMessage, fetchPages, loadCrmContext, statusLabels, type CrmContext, type PatientStatus } from "../crm";
 import { buildPatientTimeline, followUpBucket, followUpLabels, priorityLabels, todayInTimezone, type Activity, type Appointment, type FollowUp, type Intent, type Note, type Payment } from "../timeline";
 import { detectOpportunities, type OpportunityOverview } from "../opportunities";
+import { FollowUpCard, OpportunityRow, ProfileHeader, StatusTag, Tabs, Tag, Timeline, dateOnly, type Tone } from "@/components/crm/CrmUi";
 
 type Answer = { id: string; booking_intent_id: string; questionnaire_id: string; question_title: string; section_label: string; answer: unknown; created_at: string };
 type Professional = { id: string; user_id: string | null; display_name: string };
@@ -19,7 +20,9 @@ const paymentLabels: Record<string, string> = { pending: "Pendiente", approved: 
 const emptyFollowUp = { title: "", description: "", due_date: "", due_time: "", priority: "medium" as FollowUp["priority"] };
 type ActivityType = "note" | "call" | "email" | "whatsapp" | "other";
 function answerText(value: unknown): string { if (Array.isArray(value)) return value.map(answerText).join(", "); if (value === null || value === undefined) return "—"; if (typeof value === "object") return JSON.stringify(value); if (typeof value === "boolean") return value ? "Sí" : "No"; return String(value); }
-function dateOnly(value: string): string { const [year, month, day] = value.split("-"); return `${day}/${month}/${year}`; }
+const appointmentTones: Record<string, Tone> = { scheduled: "blue", completed: "sage", cancelled: "neutral", refunded: "neutral", awaiting_schedule: "orange" };
+const paymentTones: Record<string, Tone> = { pending: "orange", approved: "sage", rejected: "coral", refunded: "neutral", cancelled: "neutral", expired: "coral" };
+type ProfileTab = "resumen" | "seguimientos" | "turnos" | "cuestionarios";
 
 export default function PatientDetailPage() {
   const params = useParams();
@@ -40,6 +43,7 @@ export default function PatientDetailPage() {
   const [followUpOpen, setFollowUpOpen] = useState(false);
   const [editingFollowUp, setEditingFollowUp] = useState<string | null>(null);
   const [followUpDraft, setFollowUpDraft] = useState(emptyFollowUp);
+  const [tab, setTab] = useState<ProfileTab>("resumen");
 
   useEffect(() => {
     let cancelled = false;
@@ -88,6 +92,7 @@ export default function PatientDetailPage() {
     return () => { cancelled = true; };
   }, [patientId]);
 
+  useEffect(() => { if (followUpOpen) document.getElementById("crm-follow-up-form")?.scrollIntoView({ behavior: "smooth", block: "center" }); }, [followUpOpen, editingFollowUp]);
   const intentById = useMemo(() => new Map(details.intents.map((item) => [item.id, item])), [details.intents]);
   const serviceById = useMemo(() => new Map(details.services.map((item) => [item.id, item.name])), [details.services]);
   const professionalById = useMemo(() => {
@@ -190,55 +195,87 @@ export default function PatientDetailPage() {
     } catch (caught) { setError(errorMessage(caught)); } finally { setSaving(false); }
   }
 
+  const openActivity = () => { setTab("resumen"); setActivityOpen(true); setEditingNote(null); setActivityType("note"); setActivityTitle(""); setActivityDescription(""); };
+  const showFollowUp = (id: string) => (event: { preventDefault: () => void }) => {
+    if (document.getElementById(`seguimiento-${id}`)) return;
+    event.preventDefault(); setTab("seguimientos");
+    setTimeout(() => document.getElementById(`seguimiento-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 0);
+  };
+  const followUpActions = (item: FollowUp) => <><button disabled={saving} onClick={() => void changeFollowUpStatus(item, "completed")}><Check size={14}/> Completar</button><button disabled={saving} onClick={() => openFollowUp(item)}><Pencil size={14}/> Editar</button><button disabled={saving} onClick={() => void changeFollowUpStatus(item, "cancelled")}><X size={14}/> Cancelar</button>{item.automation_run_id && <Link href={`/automatizaciones/ejecuciones?run=${item.automation_run_id}`}>Ver automatización</Link>}</>;
+  const pendingList = pendingFollowUps.length ? <div className="crm-tasks">{pendingFollowUps.map((item) => <FollowUpCard key={item.id} item={item} today={today}>{followUpActions(item)}</FollowUpCard>)}</div> : <p className="live-empty">No hay seguimientos pendientes.</p>;
+  const closedFollowUps = details.followUps.filter((item) => item.status !== "pending");
+  const nextAppointment = patient?.next_turn ? details.appointments.find((item) => item.starts_at === patient.next_turn) : undefined;
+  const lastAnswers = answerGroups[0];
+
   return <CrmShell context={context} breadcrumb="Pacientes / Ficha">
-    <Link className="crm-back" href="/pacientes"><ArrowLeft size={16}/> Volver a pacientes</Link>
+    <Link className="crm-back" href="/pacientes"><ArrowLeft size={15}/> Volver a pacientes</Link>
     {loading ? <div className="demo-panel live-state" role="status">Cargando ficha del paciente…</div>
       : error && !patient ? <div className="demo-panel live-state" role="alert">{error}</div>
       : patient && context && <>
-        <div className="demo-title-row"><div><p className="demo-date">FICHA DEL PACIENTE</p><h1>{patient.full_name}</h1><p>Historial de atención y seguimiento.</p></div><span className={`crm-badge crm-${patient.status}`}>{statusLabels[patient.status]}</span></div>
+        <ProfileHeader name={patient.full_name} status={<StatusTag status={patient.status}>{statusLabels[patient.status]}</StatusTag>}
+          contact={<><span><Mail size={14}/> {patient.email}</span>{patient.phone && <span><Phone size={14}/> {patient.phone}</span>}{patient.date_of_birth && <span><Cake size={14}/> {crmBirthDate(patient.date_of_birth, context.market)}</span>}</>}
+          actions={<><button className="crm-btn" onClick={openActivity}><Plus size={15}/> Registrar actividad</button><button className="demo-primary" onClick={() => openFollowUp()}><Plus size={15}/> Nuevo seguimiento</button></>}
+          stats={[
+            { label: "Último turno", value: crmDate(patient.last_turn, context.market) },
+            { label: "Próximo turno", value: crmDate(patient.next_turn, context.market) },
+            { label: "Turnos", value: patient.turn_count },
+            { label: "Total pagado", value: crmMoney(patient.approved_total_minor, context.market) },
+            { label: "Seguimiento", value: nextFollowUp ? `${followUpLabels[followUpBucket(nextFollowUp.due_date, today)]} · ${dateOnly(nextFollowUp.due_date)}` : "Sin seguimiento" },
+          ]}/>
+        <Tabs label="Secciones de la ficha" active={tab} onChange={setTab} tabs={[
+          { id: "resumen", label: "Resumen" },
+          { id: "seguimientos", label: "Seguimientos", count: pendingFollowUps.length },
+          { id: "turnos", label: "Turnos", count: details.appointments.length },
+          { id: "cuestionarios", label: "Cuestionarios", count: answerGroups.length },
+        ]}/>
         {error && <p className="live-error" role="alert">{error}</p>}{notice && <p className="live-success" role="status">{notice}</p>}
-        <section className="demo-panel crm-overview"><div className="crm-summary">
-          <div><span>Último turno</span><strong>{crmDate(patient.last_turn, context.market)}</strong></div>
-          <div><span>Próximo turno</span><strong>{crmDate(patient.next_turn, context.market)}</strong></div>
-          <div><span>Turnos</span><strong>{patient.turn_count}</strong></div>
-          <div><span>Total pagado</span><strong>{crmMoney(patient.approved_total_minor, context.market)}</strong></div>
-          <div><span>Seguimiento</span><strong>{nextFollowUp ? `${followUpLabels[followUpBucket(nextFollowUp.due_date, today)]} · ${dateOnly(nextFollowUp.due_date)}` : "Sin seguimiento"}</strong></div>
-        </div></section>
-        <section className="demo-panel crm-section crm-opportunities"><div className="crm-section-head"><div><h2>Oportunidades de seguimiento</h2><p className="crm-hint">Se actualizan según turnos, pagos y seguimientos. Revisá cada caso antes de actuar.</p></div></div>
-          {opportunities.length ? <div className="crm-opportunity-list">{opportunities.map((item) => <article className={`crm-opportunity-item crm-opportunity-${item.level}`} key={item.kind}><strong>{item.title}</strong><p>{item.reason}</p>{item.level === "attention" && <button onClick={() => { openFollowUp(); setFollowUpDraft({ ...emptyFollowUp, title: item.title, due_date: today, priority: item.priority <= 1 ? "high" : "medium" }); }}>Crear seguimiento</button>}</article>)}</div> : <p className="live-empty">No detectamos oportunidades de seguimiento en este momento.</p>}
-        </section>
-        <div className="crm-detail-grid"><section className="demo-panel"><h2>Información</h2><dl className="crm-info">
-          <div><dt>Nombre</dt><dd>{patient.first_name}</dd></div><div><dt>Apellido</dt><dd>{patient.last_name}</dd></div><div><dt>Email</dt><dd>{patient.email}</dd></div><div><dt>Teléfono</dt><dd>{patient.phone || "No informado"}</dd></div><div><dt>Fecha de nacimiento</dt><dd>{crmBirthDate(patient.date_of_birth, context.market)}</dd></div>
-        </dl><label className="crm-status-field">Estado<select value={patient.status} disabled={saving} onChange={(event) => void saveStatus(event.target.value as PatientStatus)}>{Object.entries(statusLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
-          <div className="crm-contact"><a href={`mailto:${patient.email}`}><Mail size={16}/> Enviar email</a>{whatsappUrl && <a href={whatsappUrl} target="_blank" rel="noreferrer"><MessageCircle size={16}/> WhatsApp</a>}</div>
-          <p className="crm-hint">Abrir un enlace no registra un envío. Podés anotarlo como actividad después.</p>
-        </section><section className="demo-panel"><div className="crm-section-head"><h2>Próximos seguimientos</h2><button className="demo-primary" onClick={() => openFollowUp()}><Plus size={16}/> Nuevo</button></div>
-          {pendingFollowUps.length ? <div className="crm-follow-up-list">{pendingFollowUps.map((item) => <article id={`seguimiento-${item.id}`} key={item.id} className="crm-follow-up">
-            <div><span className={`crm-badge crm-priority-${item.priority}`}>{priorityLabels[item.priority]}</span><span className={`crm-follow-up-state crm-${followUpBucket(item.due_date, today)}`}>{followUpLabels[followUpBucket(item.due_date, today)]}</span><span className="crm-follow-up-state">{item.source === "automation" ? "⚙ Automático" : "Manual"}</span></div>
-            <strong>{item.title}</strong><p>{item.description}</p><small>{dateOnly(item.due_date)}{item.due_time ? ` · ${item.due_time.slice(0, 5)}` : ""}</small>
-            <div className="crm-follow-up-actions"><button disabled={saving} onClick={() => void changeFollowUpStatus(item, "completed")}><Check size={14}/> Completar</button><button disabled={saving} onClick={() => openFollowUp(item)}><Pencil size={14}/> Editar</button><button disabled={saving} onClick={() => void changeFollowUpStatus(item, "cancelled")}><X size={14}/> Cancelar</button>{item.automation_run_id && <Link href={`/automatizaciones/ejecuciones?run=${item.automation_run_id}`}>Ver automatización</Link>}</div>
-          </article>)}</div> : <p className="live-empty">No hay seguimientos pendientes.</p>}
-        </section></div>
-        {details.followUps.some((item) => item.status !== "pending") && <section className="demo-panel crm-section"><h2>Seguimientos anteriores</h2><div className="crm-follow-up-list">{details.followUps.filter((item) => item.status !== "pending").map((item) => <article id={`seguimiento-${item.id}`} key={item.id} className="crm-follow-up"><div><span className="crm-follow-up-state">{item.status === "completed" ? "Completado" : "Cancelado"}</span><span className="crm-follow-up-state">{item.source === "automation" ? "⚙ Automático" : "Manual"}</span></div><strong>{item.title}</strong><p>{item.description}</p><small>{dateOnly(item.due_date)}</small></article>)}</div></section>}
-        {followUpOpen && <section className="demo-panel crm-section"><h2>{editingFollowUp ? "Editar seguimiento" : "Nuevo seguimiento"}</h2><div className="crm-form-grid">
+        {followUpOpen && <section id="crm-follow-up-form" className="crm-card crm-form-card"><div className="crm-card-head"><h2>{editingFollowUp ? "Editar seguimiento" : "Nuevo seguimiento"}</h2></div><div className="crm-form-grid">
           <label>Título<input maxLength={160} value={followUpDraft.title} onChange={(e) => setFollowUpDraft({ ...followUpDraft, title: e.target.value })}/></label>
           <label>Fecha<input type="date" value={followUpDraft.due_date} onChange={(e) => setFollowUpDraft({ ...followUpDraft, due_date: e.target.value })}/></label>
           <label>Hora opcional<input type="time" value={followUpDraft.due_time} onChange={(e) => setFollowUpDraft({ ...followUpDraft, due_time: e.target.value })}/></label>
           <label>Prioridad<select value={followUpDraft.priority} onChange={(e) => setFollowUpDraft({ ...followUpDraft, priority: e.target.value as FollowUp["priority"] })}>{Object.entries(priorityLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
           <label className="crm-wide">Descripción opcional<textarea maxLength={3000} value={followUpDraft.description} onChange={(e) => setFollowUpDraft({ ...followUpDraft, description: e.target.value })}/></label>
         </div><div className="crm-note-actions"><button className="demo-primary" disabled={saving || !followUpDraft.title.trim() || !followUpDraft.due_date} onClick={() => void saveFollowUp()}>Guardar seguimiento</button><button className="live-secondary" onClick={() => setFollowUpOpen(false)}>Cerrar</button></div></section>}
-        <section className="demo-panel crm-section"><div className="crm-section-head"><div><h2>Historial</h2><p className="crm-hint">Turnos, pagos, notas, actividades y seguimientos en orden cronológico.</p></div><button className="demo-primary" onClick={() => { setActivityOpen(true); setEditingNote(null); setActivityType("note"); setActivityTitle(""); setActivityDescription(""); }}><Plus size={16}/> Registrar actividad</button></div>
-          {activityOpen && <div id="crm-activity-form" className="crm-activity-form"><div className="crm-form-grid">
-            <label>Tipo<select value={activityType} onChange={(e) => setActivityType(e.target.value as ActivityType)}><option value="note">Nota</option><option value="call">Llamada</option><option value="whatsapp">WhatsApp</option><option value="email">Email</option><option value="other">Otro</option></select></label>
-            <label>Título<input maxLength={120} value={activityTitle} onChange={(e) => setActivityTitle(e.target.value)}/></label>
-            <label className="crm-wide">Descripción<textarea maxLength={activityType === "note" ? 4800 : 3000} value={activityDescription} onChange={(e) => setActivityDescription(e.target.value)}/></label>
-          </div><div className="crm-note-actions"><button className="demo-primary" disabled={saving || !activityDescription.trim() || (activityType === "note" && !activityTitle.trim())} onClick={() => void saveActivity()}>{editingNote ? "Guardar nota" : "Guardar actividad"}</button><button className="live-secondary" onClick={() => { setActivityOpen(false); setEditingNote(null); }}>Cerrar</button></div><p className="crm-hint">Registrá solo contactos realizados. Evitá datos sensibles innecesarios.</p></div>}
-          <div className="crm-timeline">{timeline.map((event) => <article className="crm-timeline-item" key={event.id}><div className={`crm-timeline-dot crm-event-${event.kind}`}/><div><time>{crmDate(event.at, context.market)}{event.approximate ? " · fecha aproximada" : ""}</time><strong>{event.title}</strong><p>{event.description}</p>{event.actor && <small>{event.actor}</small>}{event.followUpId && <Link href={`#seguimiento-${event.followUpId}`}>Ver seguimiento</Link>}{event.automationRunId && <Link href={`/automatizaciones/ejecuciones?run=${event.automationRunId}`}>Ver automatización</Link>}</div></article>)}</div>
-        </section>
-        <section className="demo-panel crm-section"><h2>Historial de turnos</h2>{details.appointments.length ? <div className="crm-records">{details.appointments.map((item) => { const intent = intentById.get(item.booking_intent_id); const payment = details.payments.find((p) => p.booking_intent_id === item.booking_intent_id && p.status === "approved"); return <div className="crm-record" key={item.id}><strong>{crmDate(item.starts_at, context.market)}</strong><div><b>{serviceById.get(intent?.service_id ?? "") ?? "Servicio no disponible"}</b><small>{professionalById.get(item.professional_id) ?? "Profesional no disponible"}</small></div><span>{appointmentLabels[item.status] ?? item.status}</span><span>Pago: {payment ? paymentLabels[payment.status] : "Sin registro"}</span></div>; })}</div> : <p className="live-empty">Todavía no hay turnos para este paciente.</p>}</section>
-        <section className="demo-panel crm-section"><h2>Pagos</h2>{details.payments.length ? <div className="crm-records">{[...details.payments].sort((a, b) => b.created_at.localeCompare(a.created_at)).map((item) => <div className="crm-record" key={item.id}><strong>{crmDate(item.approved_at ?? item.created_at, context.market)}</strong><div><b>{serviceById.get(intentById.get(item.booking_intent_id)?.service_id ?? "") ?? "Servicio no disponible"}</b></div><span>{crmMoney(item.amount_minor, { ...context.market, currency: item.currency_code.trim() })}</span><span>{paymentLabels[item.status] ?? item.status}</span></div>)}</div> : <p className="live-empty">Todavía no hay pagos registrados.</p>}</section>
-        <section className="demo-panel crm-section"><h2>Preconsultas</h2>{answerGroups.length ? answerGroups.map((answers) => { const first = answers[0]; const intent = intentById.get(first.booking_intent_id); return <div className="crm-preconsult" key={`${first.booking_intent_id}:${first.questionnaire_id}`}><div className="crm-preconsult-head"><div><b>{questionnaireById.get(first.questionnaire_id) ?? "Preconsulta"}</b><small>{serviceById.get(intent?.service_id ?? "") ?? "Servicio no disponible"}</small></div><span>{crmDate(intent?.created_at ?? first.created_at, context.market)}</span></div>{answers.map((answer) => <div className="live-answer" key={answer.id}><small>{answer.section_label}</small><b>{answer.question_title}</b><p>{answerText(answer.answer)}</p></div>)}</div>; }) : <p className="live-empty">Todavía no hay respuestas de preconsulta.</p>}</section>
-        <section className="demo-panel crm-section"><h2>Notas</h2><p className="crm-hint">Solo el equipo autorizado puede verlas.</p>{details.notes.length ? <div className="crm-notes">{details.notes.map((note) => <article className="crm-note" key={note.id}><div><b>{professionalById.get(note.author_id) ?? "Nota del equipo"}</b><small>{crmDate(note.created_at, context.market)}{note.updated_at !== note.created_at ? " · Editada" : ""}</small></div><p>{note.content}</p>{note.author_id === userId && <button onClick={() => { const [title, ...body] = note.content.split("\n\n"); setActivityTitle(body.length ? title : "Nota"); setActivityDescription(body.join("\n\n") || note.content); setActivityType("note"); setEditingNote(note.id); setActivityOpen(true); setTimeout(() => document.getElementById("crm-activity-form")?.scrollIntoView({ behavior: "smooth", block: "center" }), 0); }}><Pencil size={14}/> Editar</button>}</article>)}</div> : <p className="live-empty">Todavía no hay notas.</p>}</section>
+
+        {tab === "resumen" && <div className="crm-two-col crm-stack" role="tabpanel" aria-labelledby="crm-tab-resumen">
+          <div>
+            <section className="crm-card"><div className="crm-card-head"><div><h2>Historial</h2><p>Turnos, pagos, notas, actividades y seguimientos en orden cronológico.</p></div></div>
+              {activityOpen && <div id="crm-activity-form" className="crm-activity-form"><div className="crm-form-grid">
+                <label>Tipo<select value={activityType} onChange={(e) => setActivityType(e.target.value as ActivityType)}><option value="note">Nota</option><option value="call">Llamada</option><option value="whatsapp">WhatsApp</option><option value="email">Email</option><option value="other">Otro</option></select></label>
+                <label>Título<input maxLength={120} value={activityTitle} onChange={(e) => setActivityTitle(e.target.value)}/></label>
+                <label className="crm-wide">Descripción<textarea maxLength={activityType === "note" ? 4800 : 3000} value={activityDescription} onChange={(e) => setActivityDescription(e.target.value)}/></label>
+              </div><div className="crm-note-actions"><button className="demo-primary" disabled={saving || !activityDescription.trim() || (activityType === "note" && !activityTitle.trim())} onClick={() => void saveActivity()}>{editingNote ? "Guardar nota" : "Guardar actividad"}</button><button className="live-secondary" onClick={() => { setActivityOpen(false); setEditingNote(null); }}>Cerrar</button></div><p className="crm-hint">Registrá solo contactos realizados. Evitá datos sensibles innecesarios.</p></div>}
+              <Timeline events={timeline} formatAt={(event) => `${crmDate(event.at, context.market)}${event.approximate ? " · fecha aproximada" : ""}`}
+                renderLinks={(event) => <>{event.followUpId && <Link href={`#seguimiento-${event.followUpId}`} onClick={showFollowUp(event.followUpId)}>Ver seguimiento</Link>}{event.automationRunId && <Link href={`/automatizaciones/ejecuciones?run=${event.automationRunId}`}>Ver automatización</Link>}</>}/>
+            </section>
+            <section className="crm-card"><div className="crm-card-head"><div><h2>Notas</h2><p>Solo el equipo autorizado puede verlas.</p></div></div>{details.notes.length ? <div className="crm-notes">{details.notes.map((note) => <article className="crm-note" key={note.id}><div><b>{professionalById.get(note.author_id) ?? "Nota del equipo"}</b><small>{crmDate(note.created_at, context.market)}{note.updated_at !== note.created_at ? " · Editada" : ""}</small></div><p>{note.content}</p>{note.author_id === userId && <button onClick={() => { const [title, ...body] = note.content.split("\n\n"); setActivityTitle(body.length ? title : "Nota"); setActivityDescription(body.join("\n\n") || note.content); setActivityType("note"); setEditingNote(note.id); setActivityOpen(true); setTimeout(() => document.getElementById("crm-activity-form")?.scrollIntoView({ behavior: "smooth", block: "center" }), 0); }}><Pencil size={14}/> Editar</button>}</article>)}</div> : <p className="live-empty">Todavía no hay notas.</p>}</section>
+            <section className="crm-card"><div className="crm-card-head"><h2>Próximos seguimientos</h2><button className="crm-link" onClick={() => setTab("seguimientos")}>Ver todos <ArrowRight size={14}/></button></div>{pendingList}</section>
+          </div>
+          <div>
+            <section className="crm-card"><div className="crm-card-head"><h2>Próximo turno</h2></div>{patient.next_turn ? <div className="crm-next-turn"><span className="crm-signal-icon crm-tone-sage"><CalendarDays size={16}/></span><div><strong>{crmDate(patient.next_turn, context.market)}</strong>{nextAppointment && <small>{serviceById.get(intentById.get(nextAppointment.booking_intent_id)?.service_id ?? "") ?? "Servicio no disponible"}</small>}</div></div> : <p className="live-empty">Sin próximo turno reservado.</p>}</section>
+            <section className="crm-card"><div className="crm-card-head"><h2>Datos del paciente</h2></div><dl className="crm-info">
+              <div><dt>Nombre</dt><dd>{patient.first_name}</dd></div><div><dt>Apellido</dt><dd>{patient.last_name}</dd></div><div><dt>Email</dt><dd>{patient.email}</dd></div><div><dt>Teléfono</dt><dd>{patient.phone || "No informado"}</dd></div><div><dt>Nacimiento</dt><dd>{crmBirthDate(patient.date_of_birth, context.market)}</dd></div>
+            </dl><label className="crm-status-field">Estado<select value={patient.status} disabled={saving} onChange={(event) => void saveStatus(event.target.value as PatientStatus)}>{Object.entries(statusLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label></section>
+            <section className="crm-card"><div className="crm-card-head"><h2>Preconsulta</h2></div>{lastAnswers ? <div className="crm-mini"><b>{questionnaireById.get(lastAnswers[0].questionnaire_id) ?? "Preconsulta"}</b><small>{crmDate(intentById.get(lastAnswers[0].booking_intent_id)?.created_at ?? lastAnswers[0].created_at, context.market)} · {lastAnswers.length} {lastAnswers.length === 1 ? "respuesta" : "respuestas"}</small><button className="crm-link" onClick={() => setTab("cuestionarios")}>Ver respuestas <ArrowRight size={14}/></button></div> : <p className="live-empty">Todavía no hay respuestas de preconsulta.</p>}</section>
+            <section className="crm-card"><div className="crm-card-head"><h2>Acciones rápidas</h2></div><div className="crm-quick-actions"><a className="crm-btn" href={`mailto:${patient.email}`}><Mail size={15}/> Enviar email</a>{whatsappUrl && <a className="crm-btn" href={whatsappUrl} target="_blank" rel="noreferrer"><MessageCircle size={15}/> WhatsApp</a>}</div>
+              <p className="crm-hint">Abrir un enlace no registra un envío. Podés anotarlo como actividad después.</p></section>
+          </div>
+        </div>}
+
+        {tab === "seguimientos" && <div className="crm-stack" role="tabpanel" aria-labelledby="crm-tab-seguimientos">
+          <section className="crm-card"><div className="crm-card-head"><div><h2>Oportunidades de seguimiento</h2><p>Se actualizan según turnos, pagos y seguimientos. Revisá cada caso antes de actuar.</p></div></div>
+            {opportunities.length ? <div className="crm-signals">{opportunities.map((item) => <OpportunityRow key={item.kind} item={item}>{item.level === "attention" && <button className="crm-link" onClick={() => { openFollowUp(); setFollowUpDraft({ ...emptyFollowUp, title: item.title, due_date: today, priority: item.priority <= 1 ? "high" : "medium" }); }}>Crear seguimiento</button>}</OpportunityRow>)}</div> : <p className="live-empty">No detectamos oportunidades de seguimiento en este momento.</p>}
+          </section>
+          <section className="crm-card"><div className="crm-card-head"><h2>Próximos seguimientos</h2><button className="crm-btn" onClick={() => openFollowUp()}><Plus size={15}/> Nuevo</button></div>{pendingList}</section>
+          {closedFollowUps.length > 0 && <section className="crm-card"><div className="crm-card-head"><h2>Seguimientos anteriores</h2></div><div className="crm-tasks">{closedFollowUps.map((item) => <FollowUpCard key={item.id} item={item} today={today}/>)}</div></section>}
+        </div>}
+
+        {tab === "turnos" && <div className="crm-stack" role="tabpanel" aria-labelledby="crm-tab-turnos">
+          <section className="crm-card"><div className="crm-card-head"><h2>Historial de turnos</h2></div>{details.appointments.length ? <div className="crm-records">{details.appointments.map((item) => { const intent = intentById.get(item.booking_intent_id); const payment = details.payments.find((p) => p.booking_intent_id === item.booking_intent_id && p.status === "approved"); return <div className="crm-record" key={item.id}><strong>{crmDate(item.starts_at, context.market)}</strong><div><b>{serviceById.get(intent?.service_id ?? "") ?? "Servicio no disponible"}</b><small>{professionalById.get(item.professional_id) ?? "Profesional no disponible"}</small></div><Tag tone={appointmentTones[item.status] ?? "neutral"}>{appointmentLabels[item.status] ?? item.status}</Tag><span>Pago: {payment ? paymentLabels[payment.status] : "Sin registro"}</span></div>; })}</div> : <p className="live-empty">Todavía no hay turnos para este paciente.</p>}</section>
+          <section className="crm-card"><div className="crm-card-head"><h2>Pagos</h2></div>{details.payments.length ? <div className="crm-records">{[...details.payments].sort((a, b) => b.created_at.localeCompare(a.created_at)).map((item) => <div className="crm-record" key={item.id}><strong>{crmDate(item.approved_at ?? item.created_at, context.market)}</strong><div><b>{serviceById.get(intentById.get(item.booking_intent_id)?.service_id ?? "") ?? "Servicio no disponible"}</b></div><span>{crmMoney(item.amount_minor, { ...context.market, currency: item.currency_code.trim() })}</span><Tag tone={paymentTones[item.status] ?? "neutral"}>{paymentLabels[item.status] ?? item.status}</Tag></div>)}</div> : <p className="live-empty">Todavía no hay pagos registrados.</p>}</section>
+        </div>}
+
+        {tab === "cuestionarios" && <section className="crm-card" role="tabpanel" aria-labelledby="crm-tab-cuestionarios"><div className="crm-card-head"><h2>Preconsultas</h2></div>{answerGroups.length ? answerGroups.map((answers) => { const first = answers[0]; const intent = intentById.get(first.booking_intent_id); return <div className="crm-preconsult" key={`${first.booking_intent_id}:${first.questionnaire_id}`}><div className="crm-preconsult-head"><div><b>{questionnaireById.get(first.questionnaire_id) ?? "Preconsulta"}</b><small>{serviceById.get(intent?.service_id ?? "") ?? "Servicio no disponible"}</small></div><span>{crmDate(intent?.created_at ?? first.created_at, context.market)}</span></div>{answers.map((answer) => <div className="live-answer" key={answer.id}><small>{answer.section_label}</small><b>{answer.question_title}</b><p>{answerText(answer.answer)}</p></div>)}</div>; }) : <p className="live-empty">Todavía no hay respuestas de preconsulta.</p>}</section>}
       </>}
   </CrmShell>;
 }

@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, Check, Search } from "lucide-react";
+import { ArrowRight, Check, CircleAlert, Clock3, ListChecks, Search } from "lucide-react";
 import { getSupabase } from "@/lib/supabase/browser";
 import CrmShell from "../pacientes/CrmShell";
 import { errorMessage, fetchPages, loadCrmContext, type CrmContext } from "../pacientes/crm";
-import { followUpBucket, followUpLabels, priorityLabels, todayInTimezone, type FollowUp } from "../pacientes/timeline";
+import { followUpBucket, priorityLabels, todayInTimezone, type FollowUp } from "../pacientes/timeline";
+import { FollowUpsTable, KpiStrip, OpportunityRow, PageHeader } from "@/components/crm/CrmUi";
 import { detectOpportunities, hasAttention, opportunityFilters, type OpportunityKind, type OpportunityOverview } from "../pacientes/opportunities";
 
 type PatientName = { id: string; full_name: string };
@@ -14,8 +15,6 @@ type StatusFilter = "pending" | "completed" | "cancelled" | "all";
 type PriorityFilter = "all" | FollowUp["priority"];
 type SourceFilter = "all" | FollowUp["source"];
 type SignalFilter = OpportunityKind | "all" | "attention";
-const statusLabels = { pending: "Pendiente", completed: "Completado", cancelled: "Cancelado" };
-function dateOnly(value: string): string { const [year, month, day] = value.split("-"); return `${day}/${month}/${year}`; }
 
 export default function FollowUpsPage() {
   const [context, setContext] = useState<CrmContext | null>(null);
@@ -95,31 +94,26 @@ export default function FollowUpsPage() {
   }
 
   return <CrmShell context={context} breadcrumb="Seguimientos">
-    <div className="demo-title-row"><div><p className="demo-date">PRÓXIMAS ACCIONES</p><h1>Seguimientos</h1><p>Lo que necesita atención en tu espacio profesional.</p></div></div>
+    <PageHeader title="Seguimientos" description="Lo que necesita atención en tu espacio profesional."/>
     {error && <p className="live-error" role="alert">{error}</p>}{notice && <p className="live-success" role="status">{notice}</p>}
-    <div className="crm-follow-up-metrics">
-      <div className="demo-panel"><span>Pendientes</span><strong>{loading ? "—" : counts.pending}</strong></div>
-      <div className="demo-panel"><span>Hoy</span><strong>{loading ? "—" : counts.today}</strong></div>
-      <div className="demo-panel"><span>Vencidos</span><strong>{loading ? "—" : counts.overdue}</strong></div>
-      <div className="demo-panel"><span>Completados</span><strong>{loading ? "—" : counts.completed}</strong></div>
-    </div>
-    <section className="demo-panel crm-list-panel crm-opportunity-panel"><div className="crm-section-head"><div><h2>Oportunidades detectadas</h2><p className="crm-hint">{loading ? "Analizando registros…" : `${attentionPatients} ${attentionPatients === 1 ? "paciente necesita" : "pacientes necesitan"} atención.`} Las señales se actualizan con tus datos.</p></div><label className="crm-opportunity-select">Mostrar <select value={signalFilter} onChange={(event) => setSignalFilter(event.target.value as SignalFilter)}>{opportunityFilters.map((item) => <option key={item.kind} value={item.kind}>{item.label}</option>)}</select></label></div>
-      {loading ? <p className="live-empty" role="status">Buscando oportunidades…</p> : signalRows.length ? <div className="crm-opportunity-list">{signalRows.map(({ patient, item }) => <article className={`crm-opportunity-item crm-opportunity-${item.level}`} key={`${patient.id}:${item.kind}`}><div><span className="crm-opportunity-pill">{item.level === "attention" ? "Atención pendiente" : "Información"}</span><strong>{patient.full_name} · {item.title}</strong><p>{item.reason}</p></div><Link href={`/pacientes/${patient.id}`}>Ver paciente <ArrowRight size={15}/></Link></article>)}</div> : <p className="live-empty">No hay oportunidades con ese filtro.</p>}
+    <KpiStrip items={[
+      { label: "Pendientes", value: loading ? "—" : counts.pending, icon: ListChecks, tone: "petrol" },
+      { label: "Hoy", value: loading ? "—" : counts.today, icon: Clock3, tone: "orange" },
+      { label: "Vencidos", value: loading ? "—" : counts.overdue, icon: CircleAlert, tone: "coral" },
+      { label: "Completados", value: loading ? "—" : counts.completed, icon: Check, tone: "sage" },
+    ]}/>
+    <section className="crm-card"><div className="crm-card-head"><div><h2>Oportunidades detectadas</h2><p>{loading ? "Analizando registros…" : `${attentionPatients} ${attentionPatients === 1 ? "paciente necesita" : "pacientes necesitan"} atención.`} Las señales se actualizan con tus datos.</p></div><label className="crm-select">Mostrar <select value={signalFilter} onChange={(event) => setSignalFilter(event.target.value as SignalFilter)}>{opportunityFilters.map((item) => <option key={item.kind} value={item.kind}>{item.label}</option>)}</select></label></div>
+      {loading ? <p className="live-empty" role="status">Buscando oportunidades…</p> : signalRows.length ? <div className="crm-signals">{signalRows.map(({ patient, item }) => <OpportunityRow key={`${patient.id}:${item.kind}`} item={item} patientName={patient.full_name}><Link className="crm-link" href={`/pacientes/${patient.id}`}>Ver paciente <ArrowRight size={15}/></Link></OpportunityRow>)}</div> : <p className="live-empty">No hay oportunidades con ese filtro.</p>}
     </section>
-    <section className="demo-panel crm-list-panel"><div className="crm-toolbar">
-      <label className="crm-search"><Search size={18}/><input aria-label="Buscar paciente" placeholder="Buscar paciente" value={search} onChange={(event) => setSearch(event.target.value)}/></label>
-      <label className="crm-sort">Prioridad<select value={priority} onChange={(event) => setPriority(event.target.value as PriorityFilter)}><option value="all">Todas</option>{Object.entries(priorityLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-      <label className="crm-sort">Estado<select value={status} onChange={(event) => setStatus(event.target.value as StatusFilter)}><option value="pending">Pendientes</option><option value="completed">Completados</option><option value="cancelled">Cancelados</option><option value="all">Todos</option></select></label>
-      <label className="crm-sort">Origen<select value={source} onChange={(event) => setSource(event.target.value as SourceFilter)}><option value="all">Todos</option><option value="manual">Manuales</option><option value="automation">Automáticos</option></select></label>
+    <section className="crm-card"><div className="crm-card-head"><div><h2>Tareas de seguimiento</h2></div></div><div className="crm-filterbar">
+      <label className="crm-search"><Search size={16}/><input aria-label="Buscar paciente" placeholder="Buscar paciente" value={search} onChange={(event) => setSearch(event.target.value)}/></label>
+      <label className="crm-select">Prioridad<select value={priority} onChange={(event) => setPriority(event.target.value as PriorityFilter)}><option value="all">Todas</option>{Object.entries(priorityLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+      <label className="crm-select">Estado<select value={status} onChange={(event) => setStatus(event.target.value as StatusFilter)}><option value="pending">Pendientes</option><option value="completed">Completados</option><option value="cancelled">Cancelados</option><option value="all">Todos</option></select></label>
+      <label className="crm-select">Origen<select value={source} onChange={(event) => setSource(event.target.value as SourceFilter)}><option value="all">Todos</option><option value="manual">Manuales</option><option value="automation">Automáticos</option></select></label>
     </div>
-      {loading ? <p className="live-empty" role="status">Cargando seguimientos…</p> : visible.length ? <div className="crm-table-wrap"><table className="crm-table"><thead><tr><th>Paciente</th><th>Seguimiento</th><th>Fecha</th><th>Prioridad</th><th>Estado</th><th><span className="sr-only">Acciones</span></th></tr></thead><tbody>{visible.map((item) => <tr key={item.id}>
-        <td><Link className="crm-person" href={`/pacientes/${item.patient_id}`}><b>{patientById.get(item.patient_id)}</b></Link></td>
-        <td><b>{item.title}</b><small className="crm-cell-description">{item.source === "automation" ? "⚙ Automático" : "Manual"}</small>{item.description && <small className="crm-cell-description">{item.description}</small>}</td>
-        <td>{dateOnly(item.due_date)}{item.due_time ? ` · ${item.due_time.slice(0, 5)}` : ""}</td>
-        <td><span className={`crm-badge crm-priority-${item.priority}`}>{priorityLabels[item.priority]}</span></td>
-        <td><span className={`crm-follow-up-state crm-${followUpBucket(item.due_date, today)}`}>{item.status === "pending" ? followUpLabels[followUpBucket(item.due_date, today)] : statusLabels[item.status]}</span></td>
-        <td><div className="crm-table-actions">{item.status === "pending" && <button disabled={savingId === item.id} onClick={() => void complete(item)}><Check size={14}/> Completar</button>}{item.automation_run_id && <Link href={`/automatizaciones/ejecuciones?run=${item.automation_run_id}`}>Ver automatización</Link>}<Link href={`/pacientes/${item.patient_id}`} aria-label={`Ver paciente ${patientById.get(item.patient_id)}`}><ArrowRight size={16}/></Link></div></td>
-      </tr>)}</tbody></table></div> : <p className="live-empty">No hay seguimientos con esos filtros.</p>}
+      {loading ? <p className="live-empty" role="status">Cargando seguimientos…</p> : visible.length ? <FollowUpsTable items={visible} today={today} patientName={(item) => patientById.get(item.patient_id)}
+        renderPatient={(item, content, { className }) => <Link className={className} href={`/pacientes/${item.patient_id}`}>{content}</Link>}
+        renderActions={(item) => <>{item.status === "pending" && <button disabled={savingId === item.id} onClick={() => void complete(item)}><Check size={14}/> Completar</button>}{item.automation_run_id && <Link href={`/automatizaciones/ejecuciones?run=${item.automation_run_id}`}>Ver automatización</Link>}<Link href={`/pacientes/${item.patient_id}`} aria-label={`Ver paciente ${patientById.get(item.patient_id)}`}><ArrowRight size={16}/></Link></>}/> : <p className="live-empty">No hay seguimientos con esos filtros.</p>}
     </section>
   </CrmShell>;
 }
