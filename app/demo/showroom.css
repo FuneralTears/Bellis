@@ -1,0 +1,223 @@
+/* Demo-only adaptations; product tokens, shell, dashboard and CRM styles are shared. */
+.bellis-showroom .demo-main {
+  max-width: 1320px;
+  padding-top: 12px;
+}
+.bellis-showroom .demo-notice {
+  padding: 9px 12px;
+  margin-bottom: 18px;
+  font-size: 11px;
+}
+.bellis-showroom .demo-title-row {
+  margin-bottom: 20px;
+}
+.bellis-showroom .demo-title-row h1 {
+  font-size: 28px;
+  font-weight: 700;
+}
+.bellis-showroom .demo-title-row p {
+  font-size: 13px;
+}
+.bellis-showroom .crm-main .demo-panel {
+  padding: 18px;
+}
+.bellis-showroom .crm-main h2 {
+  font-size: 16px;
+  margin-bottom: 6px;
+}
+.showroom-text-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  background: transparent;
+  padding: 4px 0;
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+}
+.showroom-pending-list {
+  display: grid;
+  gap: 3px;
+}
+.showroom-pending-list > button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 12px 0;
+}
+.showroom-pending-list > button > span:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+.showroom-pending-list b,
+.showroom-pending-list small {
+  display: block;
+}
+.showroom-pending-list b {
+  font-size: 13px;
+  font-weight: 600;
+}
+.showroom-pending-list small {
+  font-size: 11px;
+  margin-top: 4px;
+  color: var(--muted-foreground);
+}
+.showroom-pending-list svg {
+  flex: none;
+}
+.showroom-notification-summary {
+  margin-top: 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  width: 100%;
+  font-size: 11px;
+}
+.showroom-rules {
+  grid-template-columns: minmax(0, 1fr);
+}
+.showroom-rule-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.showroom-rule-heading > div {
+  flex: 1;
+  min-width: 0;
+}
+.showroom-rule-heading .metric-icon {
+  flex: none;
+  width: 34px;
+  height: 34px;
+}
+.bellis-showroom .showroom-rule-heading h2 {
+  font-size: 15px;
+  margin: 0 0 5px;
+}
+.bellis-showroom .showroom-rule-heading p {
+  font-size: 12px;
+}
+.bellis-showroom .automation-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 12px;
+  margin: 12px 0;
+}
+.bellis-showroom .automation-actions .live-secondary {
+  margin-left: 0;
+  padding: 7px 10px;
+  font-size: 12px;
+}
+.bellis-showroom .automation-history small {
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  line-height: 1.5;
+  margin-top: 4px;
+}
+.bellis-showroom .automation-history > div > span:last-of-type {
+  min-width: 0;
+}
+.bellis-showroom .showroom-task-table {
+  margin-top: 14px;
+}
+.bellis-showroom .crm-table td {
+  padding: 12px 10px;
+}
+.bellis-showroom .crm-table-actions button {
+  min-height: 28px;
+}
+.bellis-showroom .notification-body {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.bellis-showroom .bell-item-icon {
+  background: var(--sage-subtle);
+}
+.bellis-showroom .demo-main :is(input, select) {
+  max-width: 100%;
+}
+@media (max-width: 1100px) {
+  .bellis-showroom .crm-follow-up-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .bellis-showroom .panel-head {
+    flex-wrap: wrap;
+  }
+}
+@media (max-width: 720px) {
+  .bellis-showroom .demo-top-link {
+    display: none;
+  }
+  .bellis-showroom .demo-main {
+    padding-inline: 14px;
+  }
+  .bellis-showroom .demo-title-row h1 {
+    font-size: 26px;
+  }
+  .bellis-showroom .demo-notice span {
+    display: block;
+    margin-bottom: 2px;
+  }
+  .bellis-showroom .calendar-toolbar {
+    flex-wrap: wrap;
+  }
+  .bellis-showroom .calendar-toolbar strong {
+    min-width: 0;
+    max-width: calc(100% - 90px);
+    font-size: 13px;
+  }
+  .bellis-showroom .calendar-item {
+    grid-template-columns: 44px minmax(0, 1fr);
+    padding: 12px 0;
+  }
+  .bellis-showroom .calendar-item > span:last-child {
+    grid-column: 2;
+    justify-self: start;
+  }
+  .bellis-showroom .demo-title-row {
+    flex-wrap: wrap;
+  }
+  .bellis-showroom .panel-head .search-box {
+    width: 100%;
+  }
+  .bellis-showroom .search-box input {
+    width: 100%;
+    min-width: 0;
+  }
+  .bellis-showroom .showroom-rule-heading {
+    flex-wrap: wrap;
+    align-items: start;
+    gap: 9px;
+  }
+  .showroom-rule-heading > div {
+    flex-basis: calc(100% - 48px);
+  }
+  .showroom-rule-heading .automation-state {
+    margin-left: 43px;
+  }
+  .bellis-showroom .crm-toolbar .crm-search {
+    min-width: 0;
+    width: 100%;
+  }
+  .bellis-showroom .automation-history > div > div {
+    flex-basis: 100%;
+    min-width: 0;
+  }
+  .bellis-showroom .notification-actions > .live-secondary {
+    margin-left: 0;
+    font-size: 12px;
+    padding: 8px 10px;
+  }
+  .bellis-showroom .notification-filters {
+    gap: 5px;
+  }
+  .bellis-showroom .notification-filters button {
+    padding: 8px 10px;
+  }
+}
