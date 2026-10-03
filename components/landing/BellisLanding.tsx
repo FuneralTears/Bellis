@@ -10,7 +10,6 @@ import {
   Clock3,
   CreditCard,
   FileText,
-  ImageIcon,
   ListChecks,
   Menu,
   Settings2,
@@ -19,13 +18,6 @@ import {
 } from "lucide-react";
 import BellisLogo from "@/components/brand/BellisLogo";
 import "./landing.css";
-
-/**
- * Final hero photo (warm consulting room, desk, laptop showing Bellis, plant,
- * natural light). Set to its public path once the asset exists, for example
- * "/landing/consultorio.jpg". While null, a neutral placeholder is shown.
- */
-const HERO_PHOTO: string | null = null;
 
 const heroBenefits = [
   [CalendarCheck, "Turnos online"],
@@ -113,24 +105,14 @@ const features = [
 function LandingVisual() {
   return (
     <figure className="landing-visual">
-      {HERO_PHOTO ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          className="landing-photo"
-          src={HERO_PHOTO}
-          alt="Consultorio cálido con escritorio, planta y una laptop mostrando Bellis"
-        />
-      ) : (
-        <div
-          className="landing-photo-placeholder"
-          role="img"
-          aria-label="Espacio reservado para la foto final de un consultorio cálido, con escritorio, laptop con Bellis, planta y luz natural"
-        >
-          <ImageIcon size={34} strokeWidth={1.2} aria-hidden="true" />
-          <span>Un espacio para atender mejor.</span>
-          <small>Imagen de consultorio · próximamente</small>
-        </div>
-      )}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        className="landing-photo"
+        src="/landing/bienestar.webp"
+        width={1173}
+        height={1341}
+        alt="Ilustración de una persona estirándose junto a una planta y un banquito de madera"
+      />
       <div
         className="landing-product-sample"
         aria-label="Vista de ejemplo de Bellis"
