@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { ArrowLeft, ArrowRight, Cake, CalendarDays, Check, Mail, MessageCircle, Pencil, Phone, Plus, X } from "lucide-react";
 import { getSupabase } from "@/lib/supabase/browser";
 import CrmShell from "../CrmShell";
@@ -10,6 +10,7 @@ import { crmBirthDate, crmDate, crmMoney, errorMessage, fetchPages, loadCrmConte
 import { buildPatientTimeline, followUpBucket, followUpLabels, priorityLabels, todayInTimezone, type Activity, type Appointment, type FollowUp, type Intent, type Note, type Payment } from "../timeline";
 import { detectOpportunities, type OpportunityOverview } from "../opportunities";
 import { FollowUpCard, OpportunityRow, ProfileHeader, StatusTag, Tabs, Tag, Timeline, dateOnly, type Tone } from "@/components/crm/CrmUi";
+import { useProfileTab } from "@/components/crm/useProfileTab";
 
 type Answer = { id: string; booking_intent_id: string; questionnaire_id: string; question_title: string; section_label: string; answer: unknown; created_at: string };
 type Professional = { id: string; user_id: string | null; display_name: string };
@@ -22,7 +23,6 @@ type ActivityType = "note" | "call" | "email" | "whatsapp" | "other";
 function answerText(value: unknown): string { if (Array.isArray(value)) return value.map(answerText).join(", "); if (value === null || value === undefined) return "—"; if (typeof value === "object") return JSON.stringify(value); if (typeof value === "boolean") return value ? "Sí" : "No"; return String(value); }
 const appointmentTones: Record<string, Tone> = { scheduled: "blue", completed: "sage", cancelled: "neutral", refunded: "neutral", awaiting_schedule: "orange" };
 const paymentTones: Record<string, Tone> = { pending: "orange", approved: "sage", rejected: "coral", refunded: "neutral", cancelled: "neutral", expired: "coral" };
-type ProfileTab = "resumen" | "seguimientos" | "turnos" | "cuestionarios";
 
 export default function PatientDetailPage() {
   const params = useParams();
@@ -43,7 +43,10 @@ export default function PatientDetailPage() {
   const [followUpOpen, setFollowUpOpen] = useState(false);
   const [editingFollowUp, setEditingFollowUp] = useState<string | null>(null);
   const [followUpDraft, setFollowUpDraft] = useState(emptyFollowUp);
-  const [tab, setTab] = useState<ProfileTab>("resumen");
+  // Tab and focused follow-up live in the URL, so Back and reloads keep the reader's place.
+  const { tab, setTab, showFollowUp: revealFollowUp, rememberFollowUp, focusFollowUp } = useProfileTab(!loading && !!patient);
+  // Opened from Seguimientos: "Volver" goes back there instead of the patient list.
+  const fromFollowUps = useSearchParams().get("from") === "seguimientos";
 
   useEffect(() => {
     let cancelled = false;
@@ -179,7 +182,7 @@ export default function PatientDetailPage() {
       if (result.error || !result.data) throw result.error ?? new Error("No pudimos guardar el seguimiento.");
       const saved = result.data as FollowUp;
       setDetails((value) => ({ ...value, followUps: (editingFollowUp ? value.followUps.map((item) => item.id === saved.id ? saved : item) : [...value.followUps, saved]).sort((a, b) => a.due_date.localeCompare(b.due_date)) }));
-      setFollowUpOpen(false); setEditingFollowUp(null); setNotice("Seguimiento guardado.");
+      setFollowUpOpen(false); if (editingFollowUp) focusFollowUp(editingFollowUp); setEditingFollowUp(null); setNotice("Seguimiento guardado.");
     } catch (caught) { setError(errorMessage(caught)); } finally { setSaving(false); }
   }
 
@@ -196,19 +199,16 @@ export default function PatientDetailPage() {
   }
 
   const openActivity = () => { setTab("resumen"); setActivityOpen(true); setEditingNote(null); setActivityType("note"); setActivityTitle(""); setActivityDescription(""); };
-  const showFollowUp = (id: string) => (event: { preventDefault: () => void }) => {
-    if (document.getElementById(`seguimiento-${id}`)) return;
-    event.preventDefault(); setTab("seguimientos");
-    setTimeout(() => document.getElementById(`seguimiento-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 0);
-  };
-  const followUpActions = (item: FollowUp) => <><button disabled={saving} onClick={() => void changeFollowUpStatus(item, "completed")}><Check size={14}/> Completar</button><button disabled={saving} onClick={() => openFollowUp(item)}><Pencil size={14}/> Editar</button><button disabled={saving} onClick={() => void changeFollowUpStatus(item, "cancelled")}><X size={14}/> Cancelar</button>{item.automation_run_id && <Link href={`/automatizaciones/ejecuciones?run=${item.automation_run_id}`}>Ver automatización</Link>}</>;
+  const showFollowUp = (id: string) => (event: { preventDefault: () => void }) => { event.preventDefault(); revealFollowUp(id); };
+  const closeFollowUp = () => { setFollowUpOpen(false); if (editingFollowUp) focusFollowUp(editingFollowUp); };
+  const followUpActions = (item: FollowUp) => <><button disabled={saving} onClick={() => void changeFollowUpStatus(item, "completed")}><Check size={14}/> Completar</button><button disabled={saving} onClick={() => openFollowUp(item)}><Pencil size={14}/> Editar</button><button disabled={saving} onClick={() => void changeFollowUpStatus(item, "cancelled")}><X size={14}/> Cancelar</button>{item.automation_run_id && <Link href={`/automatizaciones/ejecuciones?run=${item.automation_run_id}`} onClick={() => rememberFollowUp(item.id)}>Ver automatización</Link>}</>;
   const pendingList = pendingFollowUps.length ? <div className="crm-tasks">{pendingFollowUps.map((item) => <FollowUpCard key={item.id} item={item} today={today}>{followUpActions(item)}</FollowUpCard>)}</div> : <p className="live-empty">No hay seguimientos pendientes.</p>;
   const closedFollowUps = details.followUps.filter((item) => item.status !== "pending");
   const nextAppointment = patient?.next_turn ? details.appointments.find((item) => item.starts_at === patient.next_turn) : undefined;
   const lastAnswers = answerGroups[0];
 
   return <CrmShell context={context} breadcrumb="Pacientes / Ficha">
-    <Link className="crm-back" href="/pacientes"><ArrowLeft size={15}/> Volver a pacientes</Link>
+    {fromFollowUps ? <Link className="crm-back" href="/seguimientos"><ArrowLeft size={15}/> Volver a seguimientos</Link> : <Link className="crm-back" href="/pacientes"><ArrowLeft size={15}/> Volver a pacientes</Link>}
     {loading ? <div className="demo-panel live-state" role="status">Cargando ficha del paciente…</div>
       : error && !patient ? <div className="demo-panel live-state" role="alert">{error}</div>
       : patient && context && <>
@@ -235,7 +235,7 @@ export default function PatientDetailPage() {
           <label>Hora opcional<input type="time" value={followUpDraft.due_time} onChange={(e) => setFollowUpDraft({ ...followUpDraft, due_time: e.target.value })}/></label>
           <label>Prioridad<select value={followUpDraft.priority} onChange={(e) => setFollowUpDraft({ ...followUpDraft, priority: e.target.value as FollowUp["priority"] })}>{Object.entries(priorityLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
           <label className="crm-wide">Descripción opcional<textarea maxLength={3000} value={followUpDraft.description} onChange={(e) => setFollowUpDraft({ ...followUpDraft, description: e.target.value })}/></label>
-        </div><div className="crm-note-actions"><button className="demo-primary" disabled={saving || !followUpDraft.title.trim() || !followUpDraft.due_date} onClick={() => void saveFollowUp()}>Guardar seguimiento</button><button className="live-secondary" onClick={() => setFollowUpOpen(false)}>Cerrar</button></div></section>}
+        </div><div className="crm-note-actions"><button className="demo-primary" disabled={saving || !followUpDraft.title.trim() || !followUpDraft.due_date} onClick={() => void saveFollowUp()}>Guardar seguimiento</button><button className="live-secondary" onClick={closeFollowUp}>Cerrar</button></div></section>}
 
         {tab === "resumen" && <div className="crm-two-col crm-stack" role="tabpanel" aria-labelledby="crm-tab-resumen">
           <div>
@@ -246,7 +246,7 @@ export default function PatientDetailPage() {
                 <label className="crm-wide">Descripción<textarea maxLength={activityType === "note" ? 4800 : 3000} value={activityDescription} onChange={(e) => setActivityDescription(e.target.value)}/></label>
               </div><div className="crm-note-actions"><button className="demo-primary" disabled={saving || !activityDescription.trim() || (activityType === "note" && !activityTitle.trim())} onClick={() => void saveActivity()}>{editingNote ? "Guardar nota" : "Guardar actividad"}</button><button className="live-secondary" onClick={() => { setActivityOpen(false); setEditingNote(null); }}>Cerrar</button></div><p className="crm-hint">Registrá solo contactos realizados. Evitá datos sensibles innecesarios.</p></div>}
               <Timeline events={timeline} formatAt={(event) => `${crmDate(event.at, context.market)}${event.approximate ? " · fecha aproximada" : ""}`}
-                renderLinks={(event) => <>{event.followUpId && <Link href={`#seguimiento-${event.followUpId}`} onClick={showFollowUp(event.followUpId)}>Ver seguimiento</Link>}{event.automationRunId && <Link href={`/automatizaciones/ejecuciones?run=${event.automationRunId}`}>Ver automatización</Link>}</>}/>
+                renderLinks={(event) => <>{event.followUpId && <Link href={`?tab=seguimientos#seguimiento-${event.followUpId}`} onClick={showFollowUp(event.followUpId)}>Ver seguimiento</Link>}{event.automationRunId && <Link href={`/automatizaciones/ejecuciones?run=${event.automationRunId}`}>Ver automatización</Link>}</>}/>
             </section>
             <section className="crm-card"><div className="crm-card-head"><div><h2>Notas</h2><p>Solo el equipo autorizado puede verlas.</p></div></div>{details.notes.length ? <div className="crm-notes">{details.notes.map((note) => <article className="crm-note" key={note.id}><div><b>{professionalById.get(note.author_id) ?? "Nota del equipo"}</b><small>{crmDate(note.created_at, context.market)}{note.updated_at !== note.created_at ? " · Editada" : ""}</small></div><p>{note.content}</p>{note.author_id === userId && <button onClick={() => { const [title, ...body] = note.content.split("\n\n"); setActivityTitle(body.length ? title : "Nota"); setActivityDescription(body.join("\n\n") || note.content); setActivityType("note"); setEditingNote(note.id); setActivityOpen(true); setTimeout(() => document.getElementById("crm-activity-form")?.scrollIntoView({ behavior: "smooth", block: "center" }), 0); }}><Pencil size={14}/> Editar</button>}</article>)}</div> : <p className="live-empty">Todavía no hay notas.</p>}</section>
             <section className="crm-card"><div className="crm-card-head"><h2>Próximos seguimientos</h2><button className="crm-link" onClick={() => setTab("seguimientos")}>Ver todos <ArrowRight size={14}/></button></div>{pendingList}</section>

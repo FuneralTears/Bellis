@@ -70,6 +70,7 @@ export const demoTasks: DemoTask[] = [
 ];
 export type DemoRule = {
   id: string;
+  kind: "first_consultation" | "inactive_patient" | "pending_payment";
   name: string;
   description: string;
   trigger: string;
@@ -83,6 +84,7 @@ export type DemoRule = {
 export const demoRules: DemoRule[] = [
   {
     id: "demo-rule-1",
+    kind: "first_consultation",
     name: "Primera consulta sin próximo turno",
     description:
       "Crea una tarea para revisar la continuidad después de la primera consulta.",
@@ -96,6 +98,7 @@ export const demoRules: DemoRule[] = [
   },
   {
     id: "demo-rule-2",
+    kind: "inactive_patient",
     name: "Paciente inactivo",
     description:
       "Crea un seguimiento cuando no hay consultas recientes ni un turno próximo.",
@@ -109,6 +112,7 @@ export const demoRules: DemoRule[] = [
   },
   {
     id: "demo-rule-3",
+    kind: "pending_payment",
     name: "Pago pendiente",
     description:
       "Crea una tarea para verificar un pago que continúa pendiente.",
@@ -121,30 +125,115 @@ export const demoRules: DemoRule[] = [
     enabled: true,
   },
 ];
-export const demoRuns = [
+export type DemoRun = {
+  id: string;
+  ruleId: string;
+  patient: string;
+  status: "scheduled" | "processing" | "completed" | "failed" | "skipped" | "cancelled";
+  created: string;
+  scheduled: string;
+  executed: string;
+  attempts: number;
+  result: string;
+  detail: string;
+};
+export const demoRuns: DemoRun[] = [
+  {
+    id: "demo-run-7",
+    ruleId: "demo-rule-1",
+    patient: "Mariana López",
+    status: "processing",
+    created: "30/09/2026, 12:00",
+    scheduled: "03/10/2026, 12:00",
+    executed: "—",
+    attempts: 1,
+    result: "—",
+    detail: "Pendiente de ejecución.",
+  },
+  {
+    id: "demo-run-6",
+    ruleId: "demo-rule-3",
+    patient: "Lucía Pérez",
+    status: "scheduled",
+    created: "03/10/2026, 09:05",
+    scheduled: "04/10/2026, 09:05",
+    executed: "—",
+    attempts: 0,
+    result: "—",
+    detail: "Pendiente de ejecución.",
+  },
   {
     id: "demo-run-2",
     ruleId: "demo-rule-1",
     patient: "Carlos Ruiz",
-    date: "3 oct · 08:10",
     status: "failed",
-    detail: "No se pudo crear el seguimiento. Ejecución de ejemplo con error.",
+    created: "30/09/2026, 11:30",
+    scheduled: "03/10/2026, 08:10",
+    executed: "03/10/2026, 08:10",
+    attempts: 3,
+    result: "Requiere revisión",
+    detail:
+      "No se pudo crear el seguimiento. La ejecución quedó registrada para revisión.",
   },
   {
     id: "demo-run-3",
     ruleId: "demo-rule-2",
     patient: "Tomás Méndez",
-    date: "2 oct · 17:30",
     status: "skipped",
-    detail: "Omitida: el paciente ya tiene un próximo turno.",
+    created: "03/08/2026, 17:30",
+    scheduled: "02/10/2026, 17:30",
+    executed: "02/10/2026, 17:30",
+    attempts: 1,
+    result: "El paciente ya tiene un próximo turno",
+    detail: "El paciente ya tiene un próximo turno.",
   },
   {
     id: "demo-run-1",
     ruleId: "demo-rule-3",
     patient: "Lucía Pérez",
-    date: "2 oct · 08:15",
     status: "completed",
-    detail: "Seguimiento creado: verificar pago pendiente.",
+    created: "01/10/2026, 08:15",
+    scheduled: "02/10/2026, 08:15",
+    executed: "02/10/2026, 08:15",
+    attempts: 1,
+    result: "Seguimiento creado",
+    detail: "Seguimiento creado correctamente.",
+  },
+  {
+    id: "demo-run-4",
+    ruleId: "demo-rule-1",
+    patient: "Valentina Ríos",
+    status: "completed",
+    created: "26/09/2026, 10:00",
+    scheduled: "29/09/2026, 10:00",
+    executed: "29/09/2026, 10:00",
+    attempts: 1,
+    result: "Seguimiento creado",
+    detail: "Seguimiento creado correctamente.",
+  },
+  {
+    id: "demo-run-5",
+    ruleId: "demo-rule-2",
+    patient: "Jorge Castro",
+    status: "skipped",
+    created: "14/07/2026, 17:00",
+    scheduled: "12/09/2026, 17:00",
+    executed: "12/09/2026, 17:00",
+    attempts: 1,
+    result: "La regla estaba desactivada",
+    detail: "La regla estaba desactivada al momento de ejecutar.",
+  },
+  {
+    id: "demo-run-8",
+    ruleId: "demo-rule-3",
+    patient: "Jorge Castro",
+    status: "cancelled",
+    created: "08/09/2026, 09:40",
+    scheduled: "09/09/2026, 09:40",
+    executed: "—",
+    attempts: 0,
+    result: "—",
+    detail: "Pendiente de ejecución.",
   },
 ];
 export type DemoNotification = {
@@ -153,39 +242,63 @@ export type DemoNotification = {
   message: string;
   time: string;
   read: boolean;
-  target: "Seguimientos" | "Automatizaciones";
-  failed: boolean;
+  kind: "created" | "failed" | "skipped" | "completed";
+  /** Like production: run notifications open that run; follow-up ones open the task list. */
+  runId?: string;
 };
 export const demoNotifications: DemoNotification[] = [
-  {
-    id: "demo-notification-1",
-    title: "Seguimiento creado",
-    message: "Lucía Pérez · Verificar pago pendiente.",
-    time: "2 oct, 08:15",
-    read: false,
-    target: "Seguimientos",
-    failed: false,
-  },
   {
     id: "demo-notification-2",
     title: "Una automatización requiere revisión",
     message: "Primera consulta sin próximo turno · Carlos Ruiz.",
-    time: "3 oct, 08:10",
+    time: "hoy, 08:10",
     read: false,
-    target: "Automatizaciones",
-    failed: true,
+    kind: "failed",
+    runId: "demo-run-2",
+  },
+  {
+    id: "demo-notification-1",
+    title: "Seguimiento creado",
+    message: "Lucía Pérez · Verificar pago pendiente.",
+    time: "ayer, 08:15",
+    read: false,
+    kind: "created",
   },
   {
     id: "demo-notification-3",
     title: "Seguimiento creado",
     message: "Mariana López · Revisar evolución.",
-    time: "2 oct, 16:00",
+    time: "ayer, 16:00",
     read: true,
-    target: "Seguimientos",
-    failed: false,
+    kind: "created",
+  },
+  {
+    id: "demo-notification-5",
+    title: "Automatización omitida",
+    message: "Paciente inactivo · Tomás Méndez.",
+    time: "ayer, 17:30",
+    read: true,
+    kind: "skipped",
+    runId: "demo-run-3",
+  },
+  {
+    id: "demo-notification-6",
+    title: "Automatización completada",
+    message: "Primera consulta sin próximo turno · Valentina Ríos.",
+    time: "hace 4 días",
+    read: true,
+    kind: "completed",
+    runId: "demo-run-4",
+  },
+  {
+    id: "demo-notification-4",
+    title: "Seguimiento creado",
+    message: "Valentina Ríos · Coordinar próxima consulta.",
+    time: "hace 4 días",
+    read: true,
+    kind: "created",
   },
 ];
-
 export type DemoService = {
   name: string;
   price: number;

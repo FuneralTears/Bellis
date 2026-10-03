@@ -1,19 +1,21 @@
 /* Phase C: Pacientes, ficha and Seguimientos. Shared by the product and /demo. */
-.crm-main {
+:is(.crm-main, .bell-wrap) {
   --petrol-subtle: #e6eef0;
   --blue-ink: #2a4fa8;
   --coral-ink: #a8402f;
   --lilac-ink: #5b4a94;
 }
-.crm-main .crm-tone-sage { background: var(--sage-subtle); color: var(--success); }
-.crm-main .crm-tone-blue { background: var(--blue-subtle); color: var(--blue-ink); }
-.crm-main .crm-tone-orange { background: var(--warning-subtle); color: var(--warning); }
-.crm-main .crm-tone-coral { background: var(--coral-subtle); color: var(--coral-ink); }
-.crm-main .crm-tone-neutral { background: var(--surface-muted); color: var(--muted-foreground); }
-.crm-main .crm-tone-petrol { background: var(--petrol-subtle); color: var(--primary); }
-.crm-main .crm-tone-lilac { background: var(--lilac-subtle); color: var(--lilac-ink); }
+:is(.crm-main, .bell-wrap) .crm-tone-sage { background: var(--sage-subtle); color: var(--success); }
+:is(.crm-main, .bell-wrap) .crm-tone-blue { background: var(--blue-subtle); color: var(--blue-ink); }
+:is(.crm-main, .bell-wrap) .crm-tone-orange { background: var(--warning-subtle); color: var(--warning); }
+:is(.crm-main, .bell-wrap) .crm-tone-coral { background: var(--coral-subtle); color: var(--coral-ink); }
+:is(.crm-main, .bell-wrap) .crm-tone-neutral { background: var(--surface-muted); color: var(--muted-foreground); }
+:is(.crm-main, .bell-wrap) .crm-tone-petrol { background: var(--petrol-subtle); color: var(--primary); }
+:is(.crm-main, .bell-wrap) .crm-tone-lilac { background: var(--lilac-subtle); color: var(--lilac-ink); }
 
-/* Lets wide tables scroll inside their card instead of stretching the page. */
+/* Lets wide tables scroll inside their card instead of stretching the page.
+   The wrap is positioned so visually hidden labels inside the table stay clipped with it. */
+.crm-table-wrap { position: relative; }
 .demo-shell > .demo-content { min-width: 0; }
 
 /* Page header */
@@ -45,6 +47,7 @@
 
 /* KPIs */
 .crm-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
+.crm-kpis-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .crm-kpi { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 14px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); }
 .crm-kpi-icon { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: var(--radius-sm); }
 .crm-kpi div > span { display: block; font-size: 12px; color: var(--muted-foreground); }
@@ -196,6 +199,7 @@
 }
 @media (max-width: 900px) {
   .crm-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .crm-kpis-5 > :last-child { grid-column: 1 / -1; }
   .crm-profile-top { flex-wrap: wrap; }
   .crm-profile-actions { width: 100%; justify-content: flex-start; }
   .crm-main .crm-profile-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -233,8 +237,10 @@
   .crm-kpi { padding: 12px; gap: 10px; }
   .crm-kpi strong { font-size: 20px; }
   .crm-main .crm-filterbar .crm-search { flex-basis: 100%; height: 40px; }
-  .crm-select { flex: 1 1 140px; height: 40px; }
-  .crm-select select { flex: 1; }
+  /* A filter never gets narrower than its label plus a readable control: it wraps to the next row instead. */
+  .crm-select { flex: 1 1 140px; min-width: min-content; max-width: 100%; height: 40px; }
+  /* width: 0 keeps the longest option from setting the minimum; the control grows from 96px instead. */
+  .crm-select select { flex: 1; width: 0; min-width: 96px; }
   .crm-chip-row { flex-direction: column; gap: 6px; }
   .crm-chip-row > span { width: auto; padding-top: 0; }
   .crm-chips button { min-height: 34px; }

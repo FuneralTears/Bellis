@@ -565,8 +565,17 @@
     font-weight: 600;
   }
   .landing-hero {
-    padding-block: 36px;
-    gap: 30px;
+    padding-block: 12px 36px;
+    gap: 20px;
+  }
+  /* Phones lead with the visual; the markup (and desktop) keep copy first. Capped so the headline stays on the first screen. */
+  .landing-hero > .landing-visual {
+    order: -1;
+    max-width: 272px;
+  }
+  /* Phones show only the illustration, so the headline starts on the first screen. */
+  .landing-hero > .landing-visual .landing-product-sample {
+    display: none;
   }
   .landing-hero h1 {
     font-size: clamp(36px, 10.6vw, 50px);

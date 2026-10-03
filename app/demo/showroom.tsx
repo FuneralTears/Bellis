@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import {
   ArrowRight,
   Bell,
@@ -12,16 +12,8 @@ import {
   FileText,
   ListChecks,
   Search,
-  Settings2,
   Users,
 } from "lucide-react";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Switch } from "@/components/ui/switch";
 import { followUpBucket, priorityLabels } from "../pacientes/timeline";
 import {
   detectOpportunities,
@@ -42,6 +34,7 @@ import {
   demoTasks,
   demoToday,
   type DemoRule,
+  type DemoRun,
   type DemoTask,
 } from "./showroom-data";
 
@@ -69,17 +62,31 @@ export function useShowroom() {
         !id || item.id === id ? { ...item, read: true } : item,
       ),
     );
-  return { tasks, rules, notifications, complete, toggle, configure, read };
+  // Which Automatizaciones screen is open, so the shell breadcrumb and notifications can follow it.
+  const [automation, setAutomation] = useState<{
+    view: "rules" | "runs";
+    runId: string | null;
+  }>({ view: "rules", runId: null });
+  // Shared so the dashboard summary and Ejecuciones always count the same runs.
+  const [runs, setRuns] = useState(demoRuns);
+  return {
+    tasks,
+    rules,
+    notifications,
+    automation,
+    runs,
+    setRuns,
+    complete,
+    toggle,
+    configure,
+    read,
+    setAutomation,
+  };
 }
 type State = ReturnType<typeof useShowroom>;
 type Navigate = (
   section: "Seguimientos" | "Automatizaciones" | "Notificaciones",
 ) => void;
-const runLabels = {
-  completed: "Seguimiento creado",
-  failed: "Error",
-  skipped: "Omitida",
-};
 const taskStatus = (task: DemoTask) =>
   task.status === "completed"
     ? "Completado"
@@ -90,103 +97,6 @@ const taskStatus = (task: DemoTask) =>
         : task.date === demoToday
           ? "Hoy"
           : "Próximo";
-
-export function DemoBell({
-  state,
-  navigate,
-}: {
-  state: State;
-  navigate: Navigate;
-}) {
-  const [open, setOpen] = useState(false);
-  const wrap = useRef<HTMLDivElement>(null);
-  const trigger = useRef<HTMLButtonElement>(null);
-  const count = state.notifications.filter((item) => !item.read).length;
-  useEffect(() => {
-    if (!open) return;
-    const click = (event: PointerEvent) => {
-      if (!wrap.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const key = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setOpen(false);
-        trigger.current?.focus();
-      }
-    };
-    document.addEventListener("pointerdown", click);
-    document.addEventListener("keydown", key);
-    return () => {
-      document.removeEventListener("pointerdown", click);
-      document.removeEventListener("keydown", key);
-    };
-  }, [open]);
-  return (
-    <div className="bell-wrap" ref={wrap}>
-      <button
-        ref={trigger}
-        type="button"
-        className="bell-button"
-        aria-label={`Notificaciones: ${count} sin leer`}
-        aria-expanded={open}
-        aria-controls="demo-notifications-dropdown"
-        onClick={() => setOpen(!open)}
-      >
-        <Bell size={18} />
-        {count > 0 && <span className="bell-count">{count}</span>}
-      </button>
-      {open && (
-        <section
-          id="demo-notifications-dropdown"
-          className="bell-dropdown"
-          aria-label="Notificaciones de la demo"
-        >
-          <div className="bell-dropdown-head">
-            <strong>Notificaciones</strong>
-            <button
-              className="showroom-text-button"
-              onClick={() => {
-                setOpen(false);
-                navigate("Notificaciones");
-              }}
-            >
-              Ver todas
-            </button>
-          </div>
-          {state.notifications.length ? (
-            <div className="bell-list">
-              {state.notifications.map((item) => (
-                <button
-                  key={item.id}
-                  className={`bell-item ${item.read ? "" : "unread"}`}
-                  onClick={() => {
-                    state.read(item.id);
-                    setOpen(false);
-                    navigate(item.target);
-                  }}
-                >
-                  <span className="bell-item-icon">
-                    {item.failed ? (
-                      <Settings2 size={16} />
-                    ) : (
-                      <ListChecks size={16} />
-                    )}
-                  </span>
-                  <span>
-                    <strong>{item.title}</strong>
-                    <small>{item.message}</small>
-                    <time>{item.time}</time>
-                  </span>
-                </button>
-              ))}
-            </div>
-          ) : (
-            <p className="bell-empty">Todavía no hay notificaciones.</p>
-          )}
-        </section>
-      )}
-    </div>
-  );
-}
 
 export function DemoDashboard({
   state,
@@ -210,6 +120,8 @@ export function DemoDashboard({
   const pending = state.tasks.filter(
     (task) => task.status === "pending" && task.date <= demoToday,
   );
+  const runCount = (...statuses: DemoRun["status"][]) =>
+    state.runs.filter((run) => statuses.includes(run.status)).length;
   return (
     <>
       <div className="demo-title-row">
@@ -365,16 +277,20 @@ export function DemoDashboard({
               <span>Reglas activas</span>
             </div>
             <div>
-              <strong>3</strong>
+              <strong>{state.runs.length}</strong>
               <span>Ejecuciones de ejemplo</span>
             </div>
             <div>
-              <strong>1</strong>
-              <span>Seguimiento creado</span>
+              <strong>{runCount("completed")}</strong>
+              <span>Completadas</span>
             </div>
             <div>
-              <strong>1</strong>
-              <span>Ejecución con error</span>
+              <strong>{runCount("failed")}</strong>
+              <span>Fallidas</span>
+            </div>
+            <div>
+              <strong>{runCount("scheduled", "processing")}</strong>
+              <span>Pendientes</span>
             </div>
           </div>
         </section>
@@ -630,321 +546,5 @@ export function DemoFollowUps({
         )}
       </section>
     </>
-  );
-}
-
-export function DemoAutomations({
-  state,
-  patient,
-}: {
-  state: State;
-  patient: (name: string) => void;
-}) {
-  const [selected, setSelected] = useState<DemoRule | null>(null);
-  const [notice, setNotice] = useState("");
-  const [runFilter, setRunFilter] = useState("all");
-  return (
-    <>
-      <DemoTitle
-        title="Automatizaciones"
-        description="Reglas que crean tareas de seguimiento en tu consultorio."
-      />
-      <p className="crm-hint automation-intro">
-        Acciones internas de ejemplo. Los cambios de esta demo duran durante la
-        visita.
-      </p>
-      {notice && (
-        <p className="live-success" role="status">
-          {notice}
-        </p>
-      )}
-      <div className="automation-cards showroom-rules">
-        {state.rules.map((rule, index) => {
-          const Icon = [ListChecks, Clock3, CreditCard][index];
-          return (
-            <article key={rule.id} className="demo-panel automation-card">
-              <div className="showroom-rule-heading">
-                <span
-                  className={`metric-icon ${index === 2 ? "coral" : "sage"}`}
-                >
-                  <Icon size={18} />
-                </span>
-                <div>
-                  <h2>{rule.name}</h2>
-                  <p>{rule.description}</p>
-                </div>
-                <span
-                  className={`automation-state ${rule.enabled ? "enabled" : ""}`}
-                >
-                  {rule.enabled ? "Activa" : "Inactiva"}
-                </span>
-                <Switch
-                  checked={rule.enabled}
-                  aria-label={`Activar ${rule.name}`}
-                  onCheckedChange={(enabled) => state.toggle(rule.id, enabled)}
-                />
-              </div>
-              <div className="automation-steps">
-                <span>
-                  <Clock3 size={16} />
-                  Esperar {rule.delay} {rule.unit}
-                </span>
-                <span>
-                  <Settings2 size={16} />
-                  {rule.action} · {priorityLabels[rule.priority]}
-                </span>
-              </div>
-              <div className="automation-actions">
-                <button
-                  className="live-secondary"
-                  onClick={() => setSelected({ ...rule })}
-                >
-                  Configurar
-                </button>
-              </div>
-            </article>
-          );
-        })}
-      </div>
-      <section className="demo-panel">
-        <div className="crm-section-head">
-          <div>
-            <h2>Ejecuciones recientes</h2>
-            <p className="crm-hint">
-              Historial de ejemplo; no se ejecutan reglas reales.
-            </p>
-          </div>
-          <label className="crm-opportunity-select">
-            Estado de ejecución
-            <select
-              value={runFilter}
-              onChange={(e) => setRunFilter(e.target.value)}
-            >
-              <option value="all">Todos</option>
-              {Object.entries(runLabels).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        <div className="automation-history">
-          {demoRuns
-            .filter((run) => runFilter === "all" || run.status === runFilter)
-            .map((run) => (
-              <div key={run.id}>
-                <span>{run.date}</span>
-                <div>
-                  <strong>
-                    {state.rules.find((rule) => rule.id === run.ruleId)?.name}
-                  </strong>
-                  <small>
-                    {run.patient} · {run.detail}
-                  </small>
-                </div>
-                <span
-                  className={`status ${run.status === "failed" ? "pending" : run.status === "completed" ? "paid" : "muted"}`}
-                >
-                  {runLabels[run.status as keyof typeof runLabels]}
-                </span>
-                <button
-                  className="showroom-text-button"
-                  onClick={() => patient(run.patient)}
-                >
-                  Ver paciente <ArrowRight size={15} />
-                </button>
-              </div>
-            ))}
-        </div>
-      </section>
-      <Dialog
-        open={!!selected}
-        onOpenChange={(open) => {
-          if (!open) setSelected(null);
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Configurar regla de ejemplo</DialogTitle>
-          </DialogHeader>
-          {selected && (
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                state.configure(selected);
-                setSelected(null);
-                setNotice("Configuración actualizada en la demo.");
-              }}
-            >
-              <div className="automation-definition">
-                <div>
-                  <small>SE ACTIVA CUANDO</small>
-                  <strong>{selected.trigger}</strong>
-                </div>
-                <div>
-                  <small>CONDICIÓN</small>
-                  <strong>{selected.condition}</strong>
-                </div>
-              </div>
-              <div className="automation-form">
-                <label>
-                  Nombre
-                  <input
-                    required
-                    value={selected.name}
-                    onChange={(e) =>
-                      setSelected({ ...selected, name: e.target.value })
-                    }
-                  />
-                </label>
-                <label>
-                  Espera ({selected.unit})
-                  <input
-                    type="number"
-                    required
-                    min="1"
-                    max="365"
-                    value={selected.delay}
-                    onChange={(e) =>
-                      setSelected({
-                        ...selected,
-                        delay: Number(e.target.value),
-                      })
-                    }
-                  />
-                </label>
-                <label>
-                  Acción
-                  <input
-                    required
-                    value={selected.action}
-                    onChange={(e) =>
-                      setSelected({ ...selected, action: e.target.value })
-                    }
-                  />
-                </label>
-                <label>
-                  Prioridad
-                  <select
-                    value={selected.priority}
-                    onChange={(e) =>
-                      setSelected({
-                        ...selected,
-                        priority: e.target.value as DemoRule["priority"],
-                      })
-                    }
-                  >
-                    {Object.entries(priorityLabels).map(([value, label]) => (
-                      <option key={value} value={value}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              <button type="submit" className="demo-primary">
-                Guardar en la demo
-              </button>
-            </form>
-          )}
-        </DialogContent>
-      </Dialog>
-    </>
-  );
-}
-
-export function DemoNotifications({
-  state,
-  navigate,
-}: {
-  state: State;
-  navigate: Navigate;
-}) {
-  const [filter, setFilter] = useState("all");
-  const count = state.notifications.filter((item) => !item.read).length;
-  const visible = state.notifications.filter(
-    (item) => filter === "all" || (filter === "read" ? item.read : !item.read),
-  );
-  return (
-    <>
-      <DemoTitle
-        title="Notificaciones"
-        description="Acciones de seguimiento registradas para vos."
-      />
-      <div className="notification-actions">
-        <div
-          className="notification-filters"
-          role="group"
-          aria-label="Filtrar notificaciones"
-        >
-          {[
-            ["all", "Todas"],
-            ["unread", `No leídas (${count})`],
-            ["read", "Leídas"],
-          ].map(([value, label]) => (
-            <button
-              key={value}
-              className={filter === value ? "active" : ""}
-              aria-pressed={filter === value}
-              onClick={() => setFilter(value)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        <button
-          className="live-secondary"
-          disabled={!count}
-          onClick={() => state.read()}
-        >
-          Marcar todas como leídas
-        </button>
-      </div>
-      {visible.length ? (
-        <div className="notifications-list">
-          {visible.map((item) => (
-            <button
-              key={item.id}
-              className={`notification-card ${item.read ? "" : "unread"}`}
-              onClick={() => {
-                state.read(item.id);
-                navigate(item.target);
-              }}
-            >
-              <span className="notification-dot" />
-              <span className="notification-body">
-                <strong>{item.title}</strong>
-                <span>{item.message}</span>
-                <small>
-                  {item.time} · {item.read ? "Leída" : "No leída"}
-                </small>
-              </span>
-              <ArrowRight size={17} />
-            </button>
-          ))}
-        </div>
-      ) : (
-        <p className="live-empty" role="status">
-          No hay notificaciones con este filtro.
-        </p>
-      )}
-    </>
-  );
-}
-function DemoTitle({
-  title,
-  description,
-}: {
-  title: string;
-  description: string;
-}) {
-  return (
-    <div className="demo-title-row">
-      <div>
-        <h1>{title}</h1>
-        <p>{description}</p>
-      </div>
-    </div>
   );
 }

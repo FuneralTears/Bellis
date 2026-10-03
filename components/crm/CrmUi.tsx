@@ -130,14 +130,22 @@ export function PageHeader({ title, description, children }: { title: string; de
 }
 
 export function KpiStrip({ items }: { items: { label: string; value: ReactNode; icon: Icon; tone: Tone }[] }) {
-  return <div className="crm-kpis">{items.map(({ label, value, icon: KpiIcon, tone }) => <div className="crm-kpi" key={label}>
+  return <div className={items.length === 5 ? "crm-kpis crm-kpis-5" : "crm-kpis"}>{items.map(({ label, value, icon: KpiIcon, tone }) => <div className="crm-kpi" key={label}>
     <span className={`crm-kpi-icon crm-tone-${tone}`}><KpiIcon size={16} aria-hidden /></span>
     <div><span>{label}</span><strong>{value}</strong></div>
   </div>)}</div>;
 }
 
+/** On phones the tab strip scrolls sideways: keep the active tab fully inside it (e.g. after a deep link). */
+function revealTab(tab: HTMLButtonElement | null) {
+  const strip = tab?.parentElement;
+  if (!tab || !strip) return;
+  const left = tab.offsetLeft - strip.offsetLeft;
+  if (left < strip.scrollLeft) strip.scrollLeft = left;
+  else if (left + tab.offsetWidth > strip.scrollLeft + strip.clientWidth) strip.scrollLeft = left + tab.offsetWidth - strip.clientWidth;
+}
 export function Tabs<T extends string>({ label, tabs, active, onChange }: { label: string; tabs: { id: T; label: string; count?: number }[]; active: T; onChange: (id: T) => void }) {
-  return <div className="crm-tabs" role="tablist" aria-label={label}>{tabs.map((tab) => <button key={tab.id} type="button" role="tab" id={`crm-tab-${tab.id}`} aria-selected={active === tab.id} className={active === tab.id ? "on" : ""} onClick={() => onChange(tab.id)}>{tab.label}{tab.count !== undefined && <span>{tab.count}</span>}</button>)}</div>;
+  return <div className="crm-tabs" role="tablist" aria-label={label}>{tabs.map((tab) => <button key={tab.id} type="button" role="tab" id={`crm-tab-${tab.id}`} aria-selected={active === tab.id} className={active === tab.id ? "on" : ""} ref={active === tab.id ? revealTab : undefined} onClick={() => onChange(tab.id)}>{tab.label}{tab.count !== undefined && <span>{tab.count}</span>}</button>)}</div>;
 }
 
 export function ProfileHeader({ name, status, contact, actions, stats }: { name: string; status: ReactNode; contact: ReactNode; actions: ReactNode; stats: { label: string; value: ReactNode }[] }) {

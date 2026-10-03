@@ -2,11 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, ArrowRight } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, CircleAlert, Clock3, ListChecks, Minus } from "lucide-react";
 import { getSupabase } from "@/lib/supabase/browser";
 import CrmShell from "../../pacientes/CrmShell";
 import { crmDate, errorMessage, loadCrmContext, type CrmContext } from "../../pacientes/crm";
 import { dateBounds } from "./dateRange";
+import { KpiStrip, PageHeader } from "@/components/crm/CrmUi";
+import { DetailList, RunStatusTag, RunsTable, runStatusLabels as labels, type RunRow } from "@/components/automation/AutomationUi";
 import "./runs.css";
 
 type Status = "scheduled" | "processing" | "completed" | "failed" | "cancelled" | "skipped";
@@ -15,7 +17,6 @@ type Period = "today" | "7d" | "30d" | "custom";
 type Run = { id: string; workspace_id: string; automation_rule_id: string; patient_id: string; professional_id: string; triggered_at: string; scheduled_for: string; executed_at: string | null; created_at: string; status: Status; action_type: string; result: { reason?: string; follow_up_id?: string }; attempt_count: number; follow_up_id: string | null };
 type Rule = { id: string; name: string; enabled: boolean };
 type Patient = { id: string; first_name: string; last_name: string };
-const labels: Record<Status,string> = { scheduled: "Programada", processing: "Procesando", completed: "Completada", failed: "Fallida", cancelled: "Cancelada", skipped: "Omitida" };
 const pageSize = 20;
 
 export default function AutomationRunsPage() {
@@ -116,6 +117,8 @@ export default function AutomationRunsPage() {
     void loadDeepLink(); return () => { cancelled = true; };
   }, [context]);
 
+  const selectedRunId = selected?.id;
+  useEffect(() => { if (selectedRunId) document.getElementById(`ejecucion-${selectedRunId}`)?.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, [selectedRunId]);
   const ruleNames = useMemo(() => new Map(rules.map((rule) => [rule.id, rule.name])), [rules]);
   const patientNames = useMemo(() => new Map(patients.map((patient) => [patient.id, `${patient.first_name} ${patient.last_name}`])), [patients]);
   const selectedRule = selected ? rules.find((rule) => rule.id === selected.automation_rule_id) : null;
@@ -128,15 +131,37 @@ export default function AutomationRunsPage() {
     setRevision((value) => value + 1); setNotice("Reintento programado para el próximo ciclo.");
   } catch (caught) { setError(errorMessage(caught)); } finally { setSaving(false); } }
 
+  const stamp = (value: string | null) => context ? crmDate(value, context.market) : "—";
+  const rows: RunRow[] = runs.map((run) => ({ id: run.id, created: stamp(run.created_at), rule: ruleNames.get(run.automation_rule_id) ?? "Regla", patient: patientNames.get(run.patient_id) ?? "Paciente", status: run.status, scheduled: stamp(run.scheduled_for), executed: stamp(run.executed_at),
+    result: run.status === "failed" ? "Requiere revisión" : run.status === "skipped" ? run.result?.reason ?? "Condición no vigente" : run.follow_up_id ? "Seguimiento creado" : "—" }));
+  const showDetail = (id: string) => { const run = runs.find((item) => item.id === id); if (!run) return; setSelected(run); setSelectedPatientName(patientNames.get(run.patient_id) ?? ""); };
+
   return <CrmShell context={context} breadcrumb="Ejecuciones">
-    <div className="demo-title-row"><div><p className="demo-date">MONITOREO</p><h1>Ejecuciones</h1><p>Revisá qué hizo Bellis y qué quedó pendiente.</p></div><Link className="live-secondary" href="/automatizaciones"><ArrowLeft size={16}/> Reglas</Link></div>
+    <PageHeader title="Ejecuciones" description="Revisá qué hizo Bellis y qué quedó pendiente."><Link className="crm-btn" href="/automatizaciones"><ArrowLeft size={15}/> Reglas</Link></PageHeader>
     {error && <p className="live-error" role="alert">{error}</p>}{notice && <p className="live-success" role="status">{notice}</p>}
-    <div className="run-metrics">{[["Procesadas hoy",summary.today],["Completadas hoy",summary.completed],["Omitidas hoy",summary.skipped],["Fallidas hoy",summary.failed],["Pendientes",summary.pending]].map(([label,value]) => <div className="demo-panel" key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>
-    <section className="demo-panel run-panel"><div className="run-filters"><label>Estado<select value={status} onChange={(event) => { setStatus(event.target.value as StatusFilter); setPage(0); }}><option value="all">Todas</option>{Object.entries(labels).map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select></label><label>Automatización<select value={ruleId} onChange={(event) => { setRuleId(event.target.value); setPage(0); }}><option value="all">Todas</option>{rules.map((rule) => <option key={rule.id} value={rule.id}>{rule.name}</option>)}</select></label><label>Fecha<select value={period} onChange={(event) => { setPeriod(event.target.value as Period); setPage(0); }}><option value="today">Hoy</option><option value="7d">Últimos 7 días</option><option value="30d">Últimos 30 días</option><option value="custom">Personalizado</option></select></label>{period === "custom" && <><label>Desde<input type="date" value={from} onChange={(event) => { setFrom(event.target.value); setPage(0); }}/></label><label>Hasta<input type="date" value={to} onChange={(event) => { setTo(event.target.value); setPage(0); }}/></label></>}</div>
+    <KpiStrip items={[
+      { label: "Procesadas hoy", value: summary.today, icon: ListChecks, tone: "petrol" },
+      { label: "Completadas hoy", value: summary.completed, icon: Check, tone: "sage" },
+      { label: "Omitidas hoy", value: summary.skipped, icon: Minus, tone: "neutral" },
+      { label: "Fallidas hoy", value: summary.failed, icon: CircleAlert, tone: summary.failed > 0 ? "coral" : "neutral" },
+      { label: "Pendientes", value: summary.pending, icon: Clock3, tone: "orange" },
+    ]}/>
+    <section className="crm-card"><div className="crm-filterbar"><label className="crm-select">Estado<select value={status} onChange={(event) => { setStatus(event.target.value as StatusFilter); setPage(0); }}><option value="all">Todas</option>{Object.entries(labels).map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="crm-select">Automatización<select value={ruleId} onChange={(event) => { setRuleId(event.target.value); setPage(0); }}><option value="all">Todas</option>{rules.map((rule) => <option key={rule.id} value={rule.id}>{rule.name}</option>)}</select></label><label className="crm-select">Fecha<select value={period} onChange={(event) => { setPeriod(event.target.value as Period); setPage(0); }}><option value="today">Hoy</option><option value="7d">Últimos 7 días</option><option value="30d">Últimos 30 días</option><option value="custom">Personalizado</option></select></label>{period === "custom" && <><label className="crm-select">Desde<input type="date" value={from} onChange={(event) => { setFrom(event.target.value); setPage(0); }}/></label><label className="crm-select">Hasta<input type="date" value={to} onChange={(event) => { setTo(event.target.value); setPage(0); }}/></label></>}</div>
       <p className="crm-hint">El período filtra por fecha de registro, según la zona horaria de tu espacio.</p>
-      {loading ? <p className="live-empty" role="status">Cargando ejecuciones…</p> : runs.length ? <><div className="run-table-wrap"><table className="crm-table"><thead><tr><th>Fecha</th><th>Automatización</th><th>Paciente</th><th>Estado</th><th>Programada</th><th>Ejecutada</th><th>Resultado</th><th/></tr></thead><tbody>{runs.map((run) => <tr key={run.id}><td>{context ? crmDate(run.created_at, context.market) : "—"}</td><td>{ruleNames.get(run.automation_rule_id) ?? "Regla"}</td><td>{patientNames.get(run.patient_id) ?? "Paciente"}</td><td><span className={`run-status run-${run.status}`}>{labels[run.status]}</span></td><td>{context ? crmDate(run.scheduled_for, context.market) : "—"}</td><td>{context ? crmDate(run.executed_at, context.market) : "—"}</td><td>{run.status === "failed" ? "Requiere revisión" : run.status === "skipped" ? run.result?.reason ?? "Condición no vigente" : run.follow_up_id ? "Seguimiento creado" : "—"}</td><td><button className="run-detail-button" onClick={() => { setSelected(run); setSelectedPatientName(patientNames.get(run.patient_id) ?? ""); }}>Ver detalle</button></td></tr>)}</tbody></table></div><div className="run-mobile-list">{runs.map((run) => <button type="button" className="run-mobile-card" key={run.id} onClick={() => { setSelected(run); setSelectedPatientName(patientNames.get(run.patient_id) ?? ""); }}><strong>{ruleNames.get(run.automation_rule_id) ?? "Regla"}</strong><span>{patientNames.get(run.patient_id) ?? "Paciente"} · {labels[run.status]}</span><small>{context ? crmDate(run.created_at, context.market) : ""}</small><span>Ver detalle <ArrowRight size={14}/></span></button>)}</div></> : <p className="live-empty">No hay ejecuciones con estos filtros.</p>}
-      {!loading && total > pageSize && <div className="run-pagination"><button className="live-secondary" disabled={page === 0} onClick={() => setPage((value) => value - 1)}>Anterior</button><span>{page * pageSize + 1}–{Math.min((page + 1) * pageSize,total)} de {total}</span><button className="live-secondary" disabled={(page + 1) * pageSize >= total} onClick={() => setPage((value) => value + 1)}>Siguiente</button></div>}
+      {loading ? <p className="live-empty" role="status">Cargando ejecuciones…</p> : runs.length ? <RunsTable rows={rows} onDetail={showDetail}/> : <p className="live-empty">No hay ejecuciones con estos filtros.</p>}
+      {!loading && total > pageSize && <div className="auto-pagination"><button className="crm-btn" disabled={page === 0} onClick={() => setPage((value) => value - 1)}>Anterior</button><span>{page * pageSize + 1}–{Math.min((page + 1) * pageSize,total)} de {total}</span><button className="crm-btn" disabled={(page + 1) * pageSize >= total} onClick={() => setPage((value) => value + 1)}>Siguiente</button></div>}
     </section>
-    {selected && <section id={`ejecucion-${selected.id}`} className="demo-panel run-detail"><div className="crm-section-head"><div><h2>Detalle de ejecución</h2><p className="crm-hint">{ruleNames.get(selected.automation_rule_id) ?? "Automatización"}</p></div><button className="live-secondary" onClick={() => setSelected(null)}>Cerrar</button></div><dl><div><dt>Paciente</dt><dd><Link href={`/pacientes/${selected.patient_id}`}>{selectedPatientName || patientNames.get(selected.patient_id) || "Ver paciente"}</Link></dd></div><div><dt>Estado</dt><dd>{labels[selected.status]}</dd></div><div><dt>Programada</dt><dd>{context ? crmDate(selected.scheduled_for, context.market) : "—"}</dd></div><div><dt>Ejecutada</dt><dd>{context ? crmDate(selected.executed_at, context.market) : "—"}</dd></div><div><dt>Acción</dt><dd>Crear seguimiento</dd></div><div><dt>Resultado</dt><dd>{selected.status === "failed" ? "No se pudo crear el seguimiento. La ejecución quedó registrada para revisión." : selected.status === "skipped" ? selected.result?.reason ?? "La condición dejó de cumplirse." : selected.follow_up_id ? "Seguimiento creado correctamente." : "Pendiente de ejecución."}</dd></div><div><dt>Intentos</dt><dd>{selected.attempt_count}</dd></div></dl>{selected.follow_up_id && <Link className="crm-dashboard-link" href={`/pacientes/${selected.patient_id}#seguimiento-${selected.follow_up_id}`}>Ver seguimiento <ArrowRight size={15}/></Link>}{selected.status === "failed" && selectedRule?.enabled && <button className="demo-primary" disabled={saving} onClick={() => void retry(selected)}>Reintentar ejecución</button>}</section>}
+    {selected && <section id={`ejecucion-${selected.id}`} className="crm-card"><div className="crm-card-head"><div><h2>Detalle de ejecución</h2><p>{ruleNames.get(selected.automation_rule_id) ?? "Automatización"}</p></div><button className="crm-btn" onClick={() => setSelected(null)}>Cerrar</button></div>
+      <DetailList items={[
+        { label: "Paciente", value: <Link href={`/pacientes/${selected.patient_id}`}>{selectedPatientName || patientNames.get(selected.patient_id) || "Ver paciente"}</Link> },
+        { label: "Estado", value: <RunStatusTag status={selected.status}/> },
+        { label: "Programada", value: stamp(selected.scheduled_for) },
+        { label: "Ejecutada", value: stamp(selected.executed_at) },
+        { label: "Acción", value: "Crear seguimiento" },
+        { label: "Intentos", value: selected.attempt_count },
+        { label: "Resultado", value: selected.status === "failed" ? "No se pudo crear el seguimiento. La ejecución quedó registrada para revisión." : selected.status === "skipped" ? selected.result?.reason ?? "La condición dejó de cumplirse." : selected.follow_up_id ? "Seguimiento creado correctamente." : "Pendiente de ejecución." },
+      ]}/>
+      {(selected.follow_up_id || (selected.status === "failed" && selectedRule?.enabled)) && <div className="auto-detail-foot">{selected.status === "failed" && selectedRule?.enabled && <button className="demo-primary" disabled={saving} onClick={() => void retry(selected)}>Reintentar ejecución</button>}{selected.follow_up_id && <Link className="crm-link" href={`/pacientes/${selected.patient_id}#seguimiento-${selected.follow_up_id}`}>Ver seguimiento <ArrowRight size={15}/></Link>}</div>}
+    </section>}
   </CrmShell>;
 }

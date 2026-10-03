@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, ArrowRight, Cake, CalendarDays, Check, Mail, MessageCircle, Phone, Plus, Search } from "lucide-react";
 import { FollowUpCard, OpportunityRow, PageHeader, PatientsTable, ProfileHeader, StatusTag, Tabs, Tag, Timeline, dateOnly } from "@/components/crm/CrmUi";
+import { useProfileTab } from "@/components/crm/useProfileTab";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/market";
 import { detectOpportunities, hasAttention, opportunityFilters, type OpportunityOverview } from "../pacientes/opportunities";
 import { buildPatientTimeline, followUpBucket, followUpLabels } from "../pacientes/timeline";
@@ -17,7 +18,7 @@ const appointmentLabels: Record<string, string> = { scheduled: "Programado", com
 const professionals = new Map([["pro", demoProfessional]]);
 
 /** Showroom mirror of /pacientes and /pacientes/[id]. Mock data only; nothing is saved. */
-export function DemoPatients({ state, profile, setProfile, followUps, automation }: { state: Showroom; profile: string | null; setProfile: (id: string | null) => void; followUps: () => void; automation: () => void }) {
+export function DemoPatients({ state, profile, setProfile, fromFollowUps, followUps, automation }: { state: Showroom; profile: string | null; setProfile: (id: string | null) => void; fromFollowUps: boolean; followUps: () => void; automation: () => void }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<Status | "all">("all");
   const [followUp, setFollowUp] = useState("all");
@@ -27,7 +28,7 @@ export function DemoPatients({ state, profile, setProfile, followUps, automation
   const patients = useMemo(() => demoPatients(state.tasks).map((item) => ({ ...item, status: statuses[item.id] ?? item.status })), [state.tasks, statuses]);
   const automatic = new Set(state.tasks.filter((task) => task.status === "pending" && task.source === "automation").map((task) => patients.find((item) => item.full_name === task.patient)?.id ?? ""));
   const selected = patients.find((item) => item.id === profile);
-  if (selected) return <DemoProfile key={selected.id} patient={selected} state={state} back={() => setProfile(null)} automation={automation} setStatus={(value) => setStatuses({ ...statuses, [selected.id]: value })}/>;
+  if (selected) return <DemoProfile key={selected.id} patient={selected} state={state} back={fromFollowUps ? followUps : () => setProfile(null)} backLabel={fromFollowUps ? "Volver a seguimientos" : "Volver a pacientes"} automation={automation} setStatus={(value) => setStatuses({ ...statuses, [selected.id]: value })}/>;
 
   const text = query.trim().toLocaleLowerCase("es-AR");
   const column = opportunityFilters.find((item) => item.kind === opportunity)?.column;
@@ -66,9 +67,10 @@ export function DemoPatients({ state, profile, setProfile, followUps, automation
   </>;
 }
 
-type ProfileTab = "resumen" | "seguimientos" | "turnos" | "cuestionarios";
-function DemoProfile({ patient, state, back, automation, setStatus }: { patient: OpportunityOverview; state: Showroom; back: () => void; automation: () => void; setStatus: (status: Status) => void }) {
-  const [tab, setTab] = useState<ProfileTab>("resumen");
+function DemoProfile({ patient, state, back, backLabel, automation, setStatus }: { patient: OpportunityOverview; state: Showroom; back: () => void; backLabel: string; automation: () => void; setStatus: (status: Status) => void }) {
+  // Same navigation as the real record; the demo is one page, so its entries are cleared on leaving.
+  const { tab, setTab, showFollowUp, clear } = useProfileTab(true);
+  useEffect(() => clear, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [notice, setNotice] = useState("");
   const data = demoDetails[patient.id];
   const followUps = state.tasks.filter((task) => task.patient === patient.full_name).map(demoFollowUp).sort((a, b) => a.due_date.localeCompare(b.due_date));
@@ -79,11 +81,10 @@ function DemoProfile({ patient, state, back, automation, setStatus }: { patient:
   const service = (intentId: string) => demoServiceNames.get(data.intents.find((item) => item.id === intentId)?.service_id ?? "") ?? "Servicio";
   const next = patient.next_turn ? data.appointments.find((item) => item.starts_at === patient.next_turn) : undefined;
   const sample = () => setNotice("Acción de ejemplo: en la demo no se crean registros nuevos.");
-  const showFollowUp = (id: string) => { setTab("seguimientos"); setTimeout(() => document.getElementById(`seguimiento-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 0); };
   const pendingList = pending.length ? <div className="crm-tasks">{pending.map((item) => <FollowUpCard key={item.id} item={item} today={demoToday}><button onClick={() => { state.complete(item.id); setNotice("Seguimiento completado en la demo."); }}><Check size={14}/> Completar</button>{item.source === "automation" && <button onClick={automation}>Ver automatización</button>}</FollowUpCard>)}</div> : <p className="live-empty">No hay seguimientos pendientes.</p>;
 
   return <>
-    <button className="crm-back showroom-text-button" onClick={back}><ArrowLeft size={15}/> Volver a pacientes</button>
+    <button className="crm-back showroom-text-button" onClick={back}><ArrowLeft size={15}/> {backLabel}</button>
     <ProfileHeader name={patient.full_name} status={<StatusTag status={patient.status}>{demoStatusLabels[patient.status]}</StatusTag>}
       contact={<><span><Mail size={14}/> {patient.email}</span>{patient.phone && <span><Phone size={14}/> {patient.phone}</span>}{patient.date_of_birth && <span><Cake size={14}/> {formatDate(patient.date_of_birth)}</span>}</>}
       actions={<><button className="crm-btn" onClick={sample}><Plus size={15}/> Registrar actividad</button><button className="demo-primary" onClick={sample}><Plus size={15}/> Nuevo seguimiento</button></>}

@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Bell } from "lucide-react";
 import { getSupabase } from "@/lib/supabase/browser";
 import { notificationHref, relativeNotificationTime, type InternalNotification } from "../notificaciones/notifications";
+import { NotificationItem, notificationKind } from "@/components/automation/AutomationUi";
 import "../notificaciones/notifications.css";
 
 export default function NotificationBell({ workspaceId }: { workspaceId: string | null }) {
@@ -41,6 +42,16 @@ export default function NotificationBell({ workspaceId }: { workspaceId: string 
     return () => { window.clearTimeout(initial); window.clearInterval(timer); window.removeEventListener("focus", onFocus); window.removeEventListener("bellis:notifications-updated", onChange); };
   }, [workspaceId, refresh, open]);
 
+  // Same dismissal as the demo bell: Escape (focus back on the button) or a press outside.
+  const wrap = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  useEffect(() => { if (!open) return;
+    const onPress = (event: PointerEvent) => { if (!wrap.current?.contains(event.target as Node)) setOpen(false); };
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") { setOpen(false); trigger.current?.focus(); } };
+    document.addEventListener("pointerdown", onPress); document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("pointerdown", onPress); document.removeEventListener("keydown", onKey); };
+  }, [open]);
+
   async function openNotification(item: InternalNotification) {
     if (!item.read_at) {
       try {
@@ -55,7 +66,7 @@ export default function NotificationBell({ workspaceId }: { workspaceId: string 
     window.location.assign(notificationHref(item));
   }
 
-  return <div className="bell-wrap"><button type="button" className="bell-button" aria-label={count ? `Notificaciones: ${count} sin leer` : "Notificaciones"} aria-expanded={open} onClick={() => { const next = !open; setOpen(next); if (next) void refresh(true); }}><Bell size={19}/>{count > 0 && <span className="bell-count">{count > 99 ? "99+" : count}</span>}</button>
-    {open && <div className="bell-dropdown"><div className="bell-dropdown-head"><strong>Notificaciones</strong><Link href="/notificaciones">Ver todas</Link></div>{error && <p className="live-error" role="alert">{error}</p>}{items.length ? <div className="bell-list">{items.map((item) => <button type="button" key={item.id} className={item.read_at ? "bell-item" : "bell-item unread"} onClick={() => void openNotification(item)}><span className="bell-item-icon">{item.type === "automation_failed" ? "!" : "⚙"}</span><span><strong>{item.title}</strong><small>{item.message}</small><time>{relativeNotificationTime(item.created_at)}</time></span></button>)}</div> : <p className="bell-empty">Todavía no hay notificaciones.</p>}</div>}
+  return <div className="bell-wrap" ref={wrap}><button ref={trigger} type="button" className="bell-button" aria-label={count ? `Notificaciones: ${count} sin leer` : "Notificaciones"} aria-expanded={open} onClick={() => { const next = !open; setOpen(next); if (next) void refresh(true); }}><Bell size={18}/>{count > 0 && <span className="bell-count">{count > 99 ? "99+" : count}</span>}</button>
+    {open && <div className="bell-dropdown"><div className="bell-dropdown-head"><span><strong>Notificaciones</strong>{count > 0 && <small>{count} sin leer</small>}</span><Link href="/notificaciones">Ver todas</Link></div>{error && <p className="live-error" role="alert">{error}</p>}{items.length ? <div className="bell-list">{items.map((item) => <NotificationItem compact key={item.id} kind={notificationKind(item.type)} title={item.title} message={item.message} time={relativeNotificationTime(item.created_at)} unread={!item.read_at} onClick={() => void openNotification(item)}/>)}</div> : <p className="bell-empty">Todavía no hay notificaciones.</p>}</div>}
   </div>;
 }

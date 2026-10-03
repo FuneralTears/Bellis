@@ -193,3 +193,8 @@
   .demo-shell .demo-mobile-nav .active { background: var(--sage-subtle); color: var(--primary); }
   .app-more-dialog { margin: auto auto calc(80px + env(safe-area-inset-bottom)); }
 }
+/* Appointment detail dialog: fits narrow phones without scrolling sideways. */
+.appointment-detail { min-width: 0; }
+.appointment-detail > div:not(.detail-actions) { grid-template-columns: 100px minmax(0, 1fr); overflow-wrap: anywhere; }
+.appointment-detail .detail-actions { flex-wrap: wrap; }
+@media (max-width: 400px) { .appointment-detail > div:not(.detail-actions) { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
