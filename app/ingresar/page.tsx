@@ -1,11 +1,16 @@
 "use client";
 
-import BellisLogo from "@/components/brand/BellisLogo";
-import { useEffect, useState } from "react";
-import { ArrowRight } from "lucide-react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { getSupabase } from "@/lib/supabase/browser";
 import { authMessage, landingRouteForUser } from "@/lib/auth/navigation";
-import "../registro/registro.css";
+import { AuthHeading, AuthLoading, AuthMessage, AuthShell, PasswordField, friendlyAuthError } from "@/components/auth/AuthUi";
+
+// The sign-up confirmation link lands here with ?confirmed=1. Read for display only; a link that came back with an error does not count.
+const subscribeToNothing = () => () => {};
+function arrivedFromConfirmation() {
+  const query = new URLSearchParams(window.location.search);
+  return query.get("confirmed") === "1" && !query.has("error") && !new URLSearchParams(window.location.hash.slice(1)).has("error");
+}
 
 export default function Ingresar() {
   const [email, setEmail] = useState("");
@@ -13,6 +18,7 @@ export default function Ingresar() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [checking, setChecking] = useState(true);
+  const confirmed = useSyncExternalStore(subscribeToNothing, arrivedFromConfirmation, () => false);
   useEffect(() => {
     let active = true;
     getSupabase().then(async (client) => {
@@ -37,5 +43,16 @@ export default function Ingresar() {
       setLoading(false);
     }
   };
-  return <main className="signup-shell"><header className="signup-header"><a className="brand" href="/"><BellisLogo /></a><a className="auth-link" href="/registro">Crear cuenta</a></header><div className="signup-body"><aside className="signup-aside"><span className="signup-kicker">TU ESPACIO PROFESIONAL</span><h2>Todo listo antes de atender.</h2><p>Ingresá para gestionar turnos, pacientes, cobros y preconsultas.</p></aside><section className="signup-card">{checking ? <p role="status">Comprobando tu sesión…</p> : <form onSubmit={submit}><span className="signup-step-label">BIENVENIDA DE NUEVO</span><h1>Ingresá a Bellis</h1><p className="signup-description">Usá el email y la contraseña de tu cuenta profesional.</p><div className="form-grid"><label className="full">Email<input type="email" autoComplete="email" required value={email} onChange={event => setEmail(event.target.value)} /></label><label className="full">Contraseña<input type="password" autoComplete="current-password" required value={password} onChange={event => setPassword(event.target.value)} /></label></div><a className="auth-recover" href="/recuperar">Olvidé mi contraseña</a>{error && <p className="signup-error" role="alert">{error}</p>}<div className="signup-actions"><button className="signup-next" disabled={loading} type="submit">{loading ? "Ingresando…" : "Ingresar"}<ArrowRight size={17}/></button></div><p className="auth-alt">¿No tenés cuenta? <a href="/registro">Crear cuenta</a></p></form>}</section></div></main>;
+  return <AuthShell>{checking ? <AuthLoading>Comprobando tu sesión…</AuthLoading> : <>
+    <AuthHeading title="Iniciá sesión">Entrá a tu espacio de Bellis.</AuthHeading>
+    {confirmed && !error && <AuthMessage tone="success">Tu email quedó confirmado. Ya podés iniciar sesión.</AuthMessage>}
+    <form className="auth-form" onSubmit={submit} aria-describedby={error ? "auth-error" : undefined}>
+      <label className="auth-field">Email<input type="email" autoComplete="email" required value={email} onChange={event => setEmail(event.target.value)} /></label>
+      <PasswordField label="Contraseña" autoComplete="current-password" required value={password} onChange={event => setPassword(event.target.value)} />
+      <a className="auth-link auth-forgot" href="/recuperar">¿Olvidaste tu contraseña?</a>
+      {error && <AuthMessage tone="error" id="auth-error">{friendlyAuthError(error)}</AuthMessage>}
+      <button className="auth-button" disabled={loading} type="submit">{loading ? "Ingresando…" : "Iniciar sesión"}</button>
+    </form>
+    <p className="auth-alt">¿Todavía no tenés cuenta? <a className="auth-link" href="/registro">Crear cuenta</a></p>
+  </>}</AuthShell>;
 }

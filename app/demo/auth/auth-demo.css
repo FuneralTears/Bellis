@@ -1,0 +1,70 @@
+/* Only the showroom bar. The screens themselves use components/auth/auth.css untouched. */
+.auth-demo {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--background);
+}
+.auth-demo .auth-shell {
+  flex: 1;
+  min-height: 0;
+}
+.auth-demo-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px 16px;
+  padding: 8px 16px 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+}
+.auth-demo-back {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--primary);
+  font-weight: 600;
+}
+.auth-demo-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+}
+.auth-demo-tabs button {
+  min-height: 44px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--muted-foreground);
+  font-weight: 600;
+}
+.auth-demo-tabs button:hover {
+  color: var(--primary);
+}
+.auth-demo-tabs button[aria-current] {
+  background: var(--sage-subtle);
+  border-color: var(--sage-soft);
+  color: var(--primary);
+}
+.auth-demo-note {
+  width: 100%;
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
+}
+.auth-demo-note span {
+  color: var(--sage);
+  font-weight: 600;
+}
+/* The product uses an inline <a> here; the demo needs a button, so it is put back in the text flow. */
+.auth-notice-copy button.auth-link {
+  display: inline;
+  min-height: 0;
+  font-size: inherit;
+}

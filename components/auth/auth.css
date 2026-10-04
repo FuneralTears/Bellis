@@ -1,0 +1,321 @@
+/* Sign-in, sign-up and password recovery. Colors, radii and shadows come from the tokens in globals.css. */
+.auth-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  padding: 40px 24px 56px;
+  background: var(--background);
+  color: var(--foreground);
+}
+.auth-header {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  text-align: center;
+}
+.auth-header a {
+  display: inline-flex;
+  border-radius: var(--radius-sm);
+}
+.auth-header p {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 14px;
+}
+.auth-card {
+  width: 100%;
+  max-width: 440px;
+  padding: 32px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+.auth-card-wide {
+  max-width: 680px;
+}
+.auth-heading h1,
+.auth-notice h1 {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 650;
+  line-height: 1.2;
+  letter-spacing: -0.03em;
+}
+.auth-heading p {
+  margin: 8px 0 0;
+  color: var(--muted-foreground);
+  font-size: 15px;
+  line-height: 1.55;
+}
+.auth-form {
+  display: grid;
+  gap: 16px;
+  margin-top: 24px;
+}
+.auth-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+}
+.auth-grid .auth-full {
+  grid-column: 1 / -1;
+}
+
+/* Fields */
+.auth-field {
+  min-width: 0;
+  display: grid;
+  /* Keep the control at its own height when a neighbour in the row is taller (it has a hint). */
+  align-content: start;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.auth-field :is(input, select) {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--foreground);
+  font-size: 16px;
+  font-weight: 400;
+}
+.auth-field select {
+  text-overflow: ellipsis;
+}
+.auth-field :is(input, select):hover {
+  border-color: #CBD0C9;
+}
+.auth-field input::placeholder {
+  color: #8A94A3;
+}
+/* A fixed value: field-sized so the grid stays even, on a muted surface so it does not read as editable. */
+.auth-fixed {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  padding: 8px 14px;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--foreground);
+  font-size: 16px;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+.auth-field small {
+  color: var(--muted-foreground);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.45;
+}
+.auth-password {
+  position: relative;
+  display: block;
+}
+.auth-password input {
+  padding-right: 52px;
+}
+.auth-password button {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--muted-foreground);
+}
+.auth-password button:hover {
+  color: var(--primary);
+}
+
+/* Actions and links */
+.auth-button {
+  width: 100%;
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 20px;
+  background: var(--primary);
+  border: 1px solid var(--primary);
+  border-radius: var(--radius-md);
+  color: var(--primary-foreground);
+  font-size: 15px;
+  font-weight: 600;
+  text-align: center;
+  transition: background-color .15s;
+}
+.auth-button:hover:not(:disabled) {
+  background: var(--primary-hover);
+}
+.auth-button:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
+.auth-shell .auth-link {
+  color: var(--primary);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.auth-shell .auth-link:hover {
+  color: var(--sage);
+}
+/* Standalone links keep a 44px touch area; the negative margins give back the space it adds. */
+.auth-forgot,
+.auth-alt .auth-link,
+button.auth-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
+.auth-forgot {
+  justify-self: start;
+  margin: -10px 0;
+  font-size: 14px;
+}
+button.auth-link {
+  padding: 0;
+  background: none;
+  border: 0;
+  font-size: 14px;
+}
+.auth-actions button.auth-link {
+  margin-bottom: -6px;
+}
+.auth-alt {
+  margin: 20px 0 -6px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: 14px;
+  line-height: 1.5;
+  text-align: center;
+}
+.auth-actions {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+}
+
+/* Messages and states */
+.auth-message {
+  display: flex;
+  gap: 10px;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid;
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.auth-message svg {
+  flex: none;
+  margin-top: 1px;
+}
+.auth-heading + .auth-message {
+  margin-top: 20px;
+}
+.auth-error {
+  background: var(--danger-subtle);
+  border-color: #F3CDD2;
+  color: var(--danger);
+}
+.auth-success {
+  background: var(--sage-subtle);
+  border-color: var(--sage-soft);
+  color: var(--success);
+}
+.auth-info {
+  background: var(--surface-muted);
+  border-color: var(--border);
+  color: var(--foreground);
+}
+.auth-info svg {
+  color: var(--sage);
+}
+.auth-loading {
+  margin: 0;
+  padding: 24px 0;
+  color: var(--muted-foreground);
+  font-size: 15px;
+  text-align: center;
+}
+.auth-notice {
+  text-align: center;
+}
+.auth-notice-mark {
+  width: 52px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  margin: 0 auto 16px;
+  background: var(--sage-subtle);
+  border-radius: 50%;
+  color: var(--sage);
+}
+.auth-notice-copy {
+  margin: 10px 0 24px;
+  color: var(--muted-foreground);
+  font-size: 15px;
+  line-height: 1.6;
+}
+.auth-notice-copy p {
+  margin: 0;
+}
+.auth-notice-copy p + p {
+  margin-top: 8px;
+}
+.auth-note {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+@media (max-width: 600px) {
+  .auth-shell {
+    gap: 16px;
+    padding: 20px 16px 40px;
+  }
+  .auth-header p {
+    font-size: 13px;
+  }
+  .auth-card {
+    padding: 24px 20px;
+  }
+  .auth-heading h1,
+  .auth-notice h1 {
+    font-size: 23px;
+  }
+  .auth-form {
+    margin-top: 20px;
+  }
+  .auth-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+/* On the narrowest phones the longest option ("Seleccioná una provincia") needs the extra width at 16px. */
+@media (max-width: 360px) {
+  .auth-shell {
+    padding: 16px 10px 32px;
+  }
+  .auth-card {
+    padding: 24px 16px;
+  }
+  .auth-field select {
+    padding: 0 4px 0 10px;
+  }
+}

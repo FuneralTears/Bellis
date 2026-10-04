@@ -14,6 +14,12 @@ export const DEFAULT_MARKET: MarketConfig = {
   paymentProvider: "mercado_pago_ar",
 };
 
+/**
+ * How the market's time zone reads to a person. Argentina keeps one official time (UTC−3, all year),
+ * so signup shows it as a fixed value. A market with several zones would offer a selector instead.
+ */
+export const DEFAULT_TIMEZONE_LABEL = "Argentina (UTC−3)";
+
 export function formatMoney(amount: number, market: MarketConfig = DEFAULT_MARKET): string {
   const number = new Intl.NumberFormat(market.locale, { maximumFractionDigits: 0 }).format(amount);
   return `$${number} ${market.currency}`;

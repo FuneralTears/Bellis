@@ -1,12 +1,10 @@
 "use client";
 
-import BellisLogo from "@/components/brand/BellisLogo";
 import { useEffect, useState } from "react";
-import { ArrowRight, Check, Clock3 } from "lucide-react";
-import { DEFAULT_MARKET } from "@/lib/market";
+import { DEFAULT_MARKET, DEFAULT_TIMEZONE_LABEL } from "@/lib/market";
 import { authMessage, landingRouteForUser } from "@/lib/auth/navigation";
 import { getSupabase } from "@/lib/supabase/browser";
-import "./registro.css";
+import { AuthFixedField, AuthHeading, AuthLoading, AuthMessage, AuthNotice, AuthShell, PasswordField, friendlyAuthError } from "@/components/auth/AuthUi";
 
 const specialties = ["Psicología", "Odontología", "Kinesiología", "Nutrición", "Psicopedagogía", "Otro"];
 const provinces = ["Buenos Aires", "CABA", "Córdoba", "Santa Fe", "Mendoza", "Tucumán", "Entre Ríos", "Salta", "Neuquén", "Misiones", "Santiago del Estero", "Catamarca", "Chaco", "Chubut", "Corrientes", "Formosa", "Jujuy", "La Pampa", "La Rioja", "Río Negro", "San Juan", "San Luis", "Santa Cruz", "Tierra del Fuego"];
@@ -51,5 +49,27 @@ export default function Registro() {
     finally { setLoading(false); }
   };
 
-  return <main className="signup-shell"><header className="signup-header"><a className="brand" href="/"><BellisLogo /></a><a className="auth-link" href="/ingresar">Iniciar sesión</a></header><div className="signup-body"><aside className="signup-aside"><span className="signup-kicker">TU ESPACIO COMIENZA ACÁ</span><h2>Más tiempo para tus pacientes.</h2><p>Configurá lo esencial para que tus pacientes puedan informarse, pagar y reservar en un mismo recorrido.</p><div className="signup-progress">{["Tu cuenta", "Primera sesión", "Horarios"].map((item, index) => <div key={item} className={index === 0 ? "progress-step on" : "progress-step"}><span>{index === 0 && needsEmail ? <Check size={16} /> : index + 1}</span>{item}</div>)}</div><div className="signup-footnote"><Clock3 size={18} /> Menos de 2 minutos para configurar tu espacio</div></aside><section className="signup-card"><div className="mobile-progress">Paso 1 de 3</div>{needsEmail ? <div className="signup-done"><span><Check size={30} /></span><h1>Revisá tu email</h1><p>Si la dirección puede registrarse, recibirás un enlace para confirmar la cuenta. Después ingresá para completar tu primera sesión y horarios.</p><p>Si ya tenés cuenta, <a href="/recuperar">recuperá tu contraseña</a>.</p><a className="signup-next" href="/ingresar">Ir a ingresar <ArrowRight size={17} /></a></div> : checking ? <p role="status">Comprobando tu sesión…</p> : <form onSubmit={submit}><p className="auth-alt">¿Ya tenés cuenta? <a href="/ingresar">Iniciá sesión</a></p><span className="signup-step-label">PASO 1 DE 3</span><h1>Activá tu agenda en menos de 2 minutos</h1><p className="signup-description">Empezá con tus datos básicos. Después podrás configurar tu sesión y horarios.</p><div className="form-grid"><label>Tu nombre<input required value={form.name} onChange={field("name")} placeholder="Ana López" autoComplete="name" /></label><label>Nombre profesional o consultorio<input required value={form.business} onChange={field("business")} placeholder="Dra. Ana López" /></label><label>Especialidad<select value={form.specialty} onChange={field("specialty")}>{specialties.map((item) => <option key={item}>{item}</option>)}</select></label><label>Email<input required type="email" value={form.email} onChange={field("email")} placeholder="ana@consultorio.com" autoComplete="email" /></label><label>Contraseña<input required type="password" minLength={8} value={form.password} onChange={field("password")} placeholder="Mínimo 8 caracteres" autoComplete="new-password" /></label><label>Provincia<select required value={form.province} onChange={field("province")}><option value="">Seleccioná una provincia</option>{provinces.map((item) => <option key={item}>{item}</option>)}</select></label><label>Ciudad<input required value={form.city} onChange={field("city")} placeholder="Tu ciudad" /></label><label className="full">Zona horaria<select value={form.timezone} onChange={field("timezone")}><option value="America/Argentina/Buenos_Aires">Argentina — Buenos Aires</option><option value="America/Argentina/Cordoba">Argentina — Córdoba</option><option value="America/Argentina/Mendoza">Argentina — Mendoza</option><option value="America/Argentina/Salta">Argentina — Salta</option><option value="America/Argentina/Ushuaia">Argentina — Tierra del Fuego</option></select></label></div>{error && <p className="signup-error" role="alert">{error}</p>}<div className="signup-actions"><button className="signup-next" type="submit" disabled={loading}>{loading ? "Creando cuenta…" : "Crear mi cuenta"}<ArrowRight size={17} /></button></div></form>}</section></div></main>;
+  return <AuthShell wide={!needsEmail && !checking}>{needsEmail ? <AuthNotice title="Revisá tu email" actions={<a className="auth-button" href="/ingresar">Ir a iniciar sesión</a>}>
+      <p>Si ese email puede registrarse, te enviamos un enlace para confirmar tu cuenta. Después iniciá sesión para terminar de configurar tu espacio.</p>
+      <p>Si no lo encontrás, revisá Spam o Correo no deseado.</p>
+      <p>¿Ya tenías cuenta? <a className="auth-link" href="/recuperar">Recuperá tu acceso</a>.</p>
+    </AuthNotice> : checking ? <AuthLoading>Comprobando tu sesión…</AuthLoading> : <>
+    <AuthHeading title="Creá tu cuenta">Empezá a organizar tu consulta con Bellis.</AuthHeading>
+    <form className="auth-form" onSubmit={submit} aria-describedby={error ? "auth-error" : undefined}>
+      <div className="auth-grid">
+        <label className="auth-field">Tu nombre<input required value={form.name} onChange={field("name")} placeholder="Ana López" autoComplete="name" /></label>
+        <label className="auth-field">Nombre profesional o consultorio<input required value={form.business} onChange={field("business")} placeholder="Dra. Ana López" /></label>
+        <label className="auth-field">Especialidad<select value={form.specialty} onChange={field("specialty")}>{specialties.map((item) => <option key={item}>{item}</option>)}</select></label>
+        <label className="auth-field">Email<input required type="email" value={form.email} onChange={field("email")} placeholder="ana@consultorio.com" autoComplete="email" /></label>
+        <PasswordField label="Contraseña" hint="Mínimo 8 caracteres." required minLength={8} value={form.password} onChange={field("password")} autoComplete="new-password" />
+        <label className="auth-field">Provincia<select required value={form.province} onChange={field("province")}><option value="">Seleccioná una provincia</option>{provinces.map((item) => <option key={item}>{item}</option>)}</select></label>
+        <label className="auth-field">Ciudad<input required value={form.city} onChange={field("city")} placeholder="Tu ciudad" /></label>
+        <AuthFixedField label="Zona horaria" value={DEFAULT_TIMEZONE_LABEL} />
+      </div>
+      {error && <AuthMessage tone="error" id="auth-error">{friendlyAuthError(error)}</AuthMessage>}
+      <button className="auth-button" type="submit" disabled={loading}>{loading ? "Creando cuenta…" : "Crear cuenta"}</button>
+      <p className="auth-note">Después vas a configurar tu primera sesión y tus horarios. Lleva menos de 2 minutos.</p>
+    </form>
+    <p className="auth-alt">¿Ya tenés cuenta? <a className="auth-link" href="/ingresar">Iniciá sesión</a></p>
+  </>}</AuthShell>;
 }
