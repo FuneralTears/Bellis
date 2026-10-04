@@ -8,7 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { QuestionnaireFlow, type PatientDraft } from "../profesional/ana-lopez/questionnaire-flow";
 import { DEFAULT_SECTION_LABELS, SECTION_KEYS, STARTER_SPECIALTIES, activeQuestions, conditionOperators, starterQuestionnaire, validateConditions, visibleQuestions, type AnswerValue, type ConditionOperator, type QuestionCondition, type QuestionType, type Questionnaire, type QuestionnaireAnswers, type QuestionnaireQuestion, type SectionKey } from "@/lib/questionnaires/model";
-import "../profesional/ana-lopez/profile.css";
+import "@/components/booking/booking.css";
 import "./questionnaire-builder.css";
 
 const TYPES: [QuestionType, string][] = [

@@ -50,7 +50,7 @@ export function DemoPatients({ state, profile, setProfile, fromFollowUps, follow
     <section className="crm-card">
       <div className="crm-filterbar">
         <label className="crm-search"><Search size={16}/><input aria-label="Buscar pacientes" placeholder="Buscar por nombre, email o teléfono" value={query} onChange={(event) => setQuery(event.target.value)}/></label>
-        <label className="crm-select">Oportunidad <select aria-label="Oportunidad de seguimiento" value={opportunity} onChange={(event) => setOpportunity(event.target.value)}>{opportunityFilters.map((item) => <option key={item.kind} value={item.kind}>{item.label}</option>)}</select></label>
+        <label className="crm-select">Para revisar <select aria-label="Filtrar por sugerencia de seguimiento" value={opportunity} onChange={(event) => setOpportunity(event.target.value)}>{opportunityFilters.map((item) => <option key={item.kind} value={item.kind}>{item.label}</option>)}</select></label>
         <label className="crm-select">Ordenar por <select value={sort} onChange={(event) => setSort(event.target.value)}><option value="last_turn">Último turno</option><option value="next_turn">Próximo turno</option><option value="full_name">Nombre</option></select></label>
       </div>
       <div className="crm-chip-rows">
@@ -81,7 +81,7 @@ function DemoProfile({ patient, state, back, backLabel, automation, setStatus }:
   const service = (intentId: string) => demoServiceNames.get(data.intents.find((item) => item.id === intentId)?.service_id ?? "") ?? "Servicio";
   const next = patient.next_turn ? data.appointments.find((item) => item.starts_at === patient.next_turn) : undefined;
   const sample = () => setNotice("Acción de ejemplo: en la demo no se crean registros nuevos.");
-  const pendingList = pending.length ? <div className="crm-tasks">{pending.map((item) => <FollowUpCard key={item.id} item={item} today={demoToday}><button onClick={() => { state.complete(item.id); setNotice("Seguimiento completado en la demo."); }}><Check size={14}/> Completar</button>{item.source === "automation" && <button onClick={automation}>Ver automatización</button>}</FollowUpCard>)}</div> : <p className="live-empty">No hay seguimientos pendientes.</p>;
+  const pendingList = pending.length ? <div className="crm-tasks">{pending.map((item) => <FollowUpCard key={item.id} item={item} today={demoToday}><button onClick={() => { state.complete(item.id); setNotice("Seguimiento completado en la demo."); }}><Check size={14}/> Completar</button>{item.source === "automation" && <button onClick={automation}>Ver actividad</button>}</FollowUpCard>)}</div> : <p className="live-empty">No hay seguimientos pendientes.</p>;
 
   return <>
     <button className="crm-back showroom-text-button" onClick={back}><ArrowLeft size={15}/> {backLabel}</button>
@@ -123,7 +123,7 @@ function DemoProfile({ patient, state, back, backLabel, automation, setStatus }:
     </div>}
 
     {tab === "seguimientos" && <div className="crm-stack" role="tabpanel" aria-labelledby="crm-tab-seguimientos">
-      <section className="crm-card"><div className="crm-card-head"><div><h2>Oportunidades de seguimiento</h2><p>Se actualizan según turnos, pagos y seguimientos. Revisá cada caso antes de actuar.</p></div></div>
+      <section className="crm-card"><div className="crm-card-head"><div><h2>Sugerencias de seguimiento</h2><p>Se actualizan según turnos, pagos y seguimientos. Revisá cada caso antes de actuar.</p></div></div>
         {opportunities.length ? <div className="crm-signals">{opportunities.map((item) => <OpportunityRow key={item.kind} item={item}>{item.level === "attention" && <button className="crm-link" onClick={sample}>Crear seguimiento</button>}</OpportunityRow>)}</div> : <p className="live-empty">No detectamos oportunidades de seguimiento en este momento.</p>}
       </section>
       <section className="crm-card"><div className="crm-card-head"><h2>Próximos seguimientos</h2><button className="crm-btn" onClick={sample}><Plus size={15}/> Nuevo</button></div>{pendingList}</section>

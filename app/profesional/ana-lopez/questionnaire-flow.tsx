@@ -6,7 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { normalizeArgentinePhone } from "@/lib/market";
-import { hasAnswer, visibleAnswers, visibleQuestions, type AnswerValue, type Questionnaire, type QuestionnaireAnswers, type QuestionnaireQuestion } from "@/lib/questionnaires/model";
+import { BookingAlert } from "@/components/booking/BookingUi";
+import { DEFAULT_SECTION_LABELS, hasAnswer, visibleAnswers, visibleQuestions, type AnswerValue, type Questionnaire, type QuestionnaireAnswers, type QuestionnaireQuestion } from "@/lib/questionnaires/model";
 
 export type PatientDraft = { firstName: string; lastName: string; email: string; phone: string };
 
@@ -33,6 +34,8 @@ export function QuestionnaireFlow({ questionnaire, initialAnswers, initialPatien
   const total = questions.length + 1;
   const progress = Math.round(((index + 1) / total) * 100);
   const sectionLabel = question ? questionnaire.sections.find((section) => section.key === question.section)?.label : "Casi listo";
+  // The default section names are the professional's working structure, not copy for patients: only custom names are shown.
+  const eyebrow = sectionLabel && !Object.values(DEFAULT_SECTION_LABELS).includes(sectionLabel) ? sectionLabel : null;
 
   const setAnswer = (value: AnswerValue) => {
     const updated = visibleAnswers(questionnaire, { ...answers, [question.id]: value });
@@ -87,23 +90,23 @@ export function QuestionnaireFlow({ questionnaire, initialAnswers, initialPatien
     }
   };
 
-  return <section className="booking-card smart-form" aria-labelledby="smart-form-title">
-    <div className="smart-form-top"><span className="profile-label">PRECONSULTA · {index + 1} DE {total}</span><span>{progress}%</span></div>
-    <div className="smart-progress" role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={index + 1} aria-label="Progreso de la preconsulta"><span style={{ width: `${progress}%` }} /></div>
-    {demoNote && <p className="smart-demo-note">Vista de demostración · tus respuestas no se guardan.</p>}
-    <div key={isPatientStep ? "patient" : question.id} className="smart-question">
-      <div className="smart-section-label">✦ {sectionLabel?.toUpperCase()}</div>
+  return <section className="bk-card bk-q" aria-labelledby="smart-form-title">
+    <div className="bk-q-top"><span>Preconsulta · {index + 1} de {total}</span><span>{progress}%</span></div>
+    <div className="bk-q-progress" role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={index + 1} aria-label="Progreso de la preconsulta"><span style={{ width: `${progress}%` }} /></div>
+    {demoNote && <p className="bk-q-demo">Vista de demostración · tus respuestas no se guardan.</p>}
+    <div key={isPatientStep ? "patient" : question.id} className="bk-q-body">
+      {eyebrow && <span className="bk-eyebrow">{eyebrow}</span>}
       <h1 id="smart-form-title">{isPatientStep ? "Tus datos para el turno" : question.title}</h1>
       <p>{isPatientStep ? "Completá tus datos de contacto. Todavía no se confirma ningún turno." : question.description || "Tu respuesta ayuda a preparar la atención."}</p>
-      {isPatientStep ? <div className="smart-patient-grid">
-        <label>Nombre <Input value={patient.firstName} autoComplete="given-name" onChange={(event) => setPatientField("firstName", event.target.value)} /></label>
-        <label>Apellido <Input value={patient.lastName} autoComplete="family-name" onChange={(event) => setPatientField("lastName", event.target.value)} /></label>
-        <label>Email <Input type="email" value={patient.email} autoComplete="email" onChange={(event) => setPatientField("email", event.target.value)} /></label>
-        <label>Celular argentino <Input type="tel" value={patient.phone} autoComplete="tel" placeholder="+54 9 11 1234 5678" onChange={(event) => setPatientField("phone", event.target.value)} /></label>
+      {isPatientStep ? <div className="bk-patient-grid">
+        <label>Nombre <Input className="bk-input" value={patient.firstName} autoComplete="given-name" onChange={(event) => setPatientField("firstName", event.target.value)} /></label>
+        <label>Apellido <Input className="bk-input" value={patient.lastName} autoComplete="family-name" onChange={(event) => setPatientField("lastName", event.target.value)} /></label>
+        <label>Email <Input className="bk-input" type="email" value={patient.email} autoComplete="email" onChange={(event) => setPatientField("email", event.target.value)} /></label>
+        <label>Celular argentino <Input className="bk-input" type="tel" value={patient.phone} autoComplete="tel" placeholder="+54 9 11 1234 5678" onChange={(event) => setPatientField("phone", event.target.value)} /></label>
       </div> : <QuestionInput question={question} value={answers[question.id]} onChange={setAnswer} />}
     </div>
-    {error && <p className="smart-error" role="alert">{error}</p>}
-    <div className="smart-actions"><button className="smart-back" type="button" onClick={goBack} disabled={loading}><ArrowLeft size={17}/> Volver</button><button className="book-next" type="button" onClick={goNext} disabled={loading}>{loading ? <><Loader2 className="smart-spin" size={17}/> Continuando…</> : <>{isPatientStep ? "Continuar al pago" : "Continuar"}<ArrowRight size={17}/></>}</button></div>
+    {error && <BookingAlert>{error}</BookingAlert>}
+    <div className="bk-q-actions"><button className="bk-back" type="button" onClick={goBack} disabled={loading}><ArrowLeft size={17}/> Volver</button><button className="bk-button" type="button" onClick={goNext} disabled={loading}>{loading ? <><Loader2 className="bk-spin" size={17}/> Continuando…</> : <>{isPatientStep ? "Continuar al pago" : "Continuar"}<ArrowRight size={17}/></>}</button></div>
   </section>;
 }
 
@@ -111,18 +114,18 @@ function QuestionInput({ question, value, onChange }: { question: QuestionnaireQ
   const current = value ?? "";
   if (question.type === "single_choice" || question.type === "yes_no" || question.type === "scale") {
     const choices = question.type === "yes_no" ? ["Sí", "No"] : question.type === "scale" ? ["1", "2", "3", "4", "5"] : question.options;
-    return <div className={question.type === "scale" ? "smart-options scale" : "smart-options"} role="group" aria-label={question.title}>{choices.map((choice) => {
+    return <div className={question.type === "scale" ? "bk-options scale" : "bk-options"} role="group" aria-label={question.title}>{choices.map((choice) => {
       const chosen = question.type === "yes_no" ? current === (choice === "Sí") : String(current) === choice;
-      return <button key={choice} type="button" className={chosen ? "smart-option chosen" : "smart-option"} aria-pressed={chosen} onClick={() => onChange(question.type === "scale" ? Number(choice) : question.type === "yes_no" ? choice === "Sí" : choice)}><span>{choice}</span>{chosen && <Check size={18}/>}</button>;
+      return <button key={choice} type="button" className={chosen ? "bk-option chosen" : "bk-option"} aria-pressed={chosen} onClick={() => onChange(question.type === "scale" ? Number(choice) : question.type === "yes_no" ? choice === "Sí" : choice)}><span>{choice}</span>{chosen && <Check size={18}/>}</button>;
     })}</div>;
   }
   if (question.type === "multiple_choice") {
     const selected = Array.isArray(current) ? current : [];
-    return <div className="smart-options" role="group" aria-label={question.title}>{question.options.map((choice) => {
+    return <div className="bk-options" role="group" aria-label={question.title}>{question.options.map((choice) => {
       const checked = selected.includes(choice);
-      return <label key={choice} className={checked ? "smart-option chosen" : "smart-option"}><Checkbox checked={checked} onCheckedChange={() => onChange(checked ? selected.filter((item) => item !== choice) : [...selected, choice])} /><span>{choice}</span></label>;
+      return <label key={choice} className={checked ? "bk-option chosen" : "bk-option"}><Checkbox checked={checked} onCheckedChange={() => onChange(checked ? selected.filter((item) => item !== choice) : [...selected, choice])} /><span>{choice}</span></label>;
     })}</div>;
   }
-  if (question.type === "long_text") return <Textarea className="smart-textarea" rows={5} value={String(current)} onChange={(event) => onChange(event.target.value)} placeholder="Escribí tu respuesta" />;
-  return <Input className="smart-input" type={question.type === "number" ? "number" : question.type === "date" ? "date" : "text"} value={String(current)} onChange={(event) => onChange(question.type === "number" && event.target.value !== "" ? Number(event.target.value) : event.target.value)} placeholder={question.type === "text" ? "Escribí tu respuesta" : undefined} />;
+  if (question.type === "long_text") return <Textarea className="bk-input" rows={5} value={String(current)} onChange={(event) => onChange(event.target.value)} placeholder="Escribí tu respuesta" />;
+  return <Input className="bk-input" type={question.type === "number" ? "number" : question.type === "date" ? "date" : "text"} value={String(current)} onChange={(event) => onChange(question.type === "number" && event.target.value !== "" ? Number(event.target.value) : event.target.value)} placeholder={question.type === "text" ? "Escribí tu respuesta" : undefined} />;
 }

@@ -96,7 +96,7 @@ const features = [
   [
     Settings2,
     "Automatizaciones",
-    "Configurá reglas y consultá sus ejecuciones recientes.",
+    "Activá tareas automáticas y revisá fácilmente qué hizo Bellis por vos.",
     "sage",
   ],
 ] as const;

@@ -111,18 +111,45 @@ export function OpportunityTag({ item, more = 0 }: { item: Opportunity; more?: n
   const look = opportunityLook[item.kind];
   return <Tag tone={look.tone} icon={look.icon}>{item.title}{more > 0 ? ` +${more}` : ""}</Tag>;
 }
+/** A suggestion as a sentence about the patient, plus the next step when there is one to recommend. */
+const opportunityCopy: Record<OpportunityKind, { headline: (name: string) => string; next?: string }> = {
+  pending_payment: { headline: (name) => `${name} tiene un pago para verificar.`, next: "Revisá el pago en su ficha." },
+  overdue_follow_up: { headline: (name) => `${name} tiene un seguimiento vencido.`, next: "Completalo o cambiale la fecha." },
+  first_without_next: { headline: (name) => `${name} tuvo su primera consulta y no reservó otra.`, next: "Podés contactarlo para coordinar la próxima." },
+  inactive: { headline: (name) => `${name} lleva más de 60 días sin volver.`, next: "Podés contactarlo para saber cómo sigue." },
+  without_next: { headline: (name) => `${name} no tiene un próximo turno.`, next: "Podés ofrecerle un nuevo turno." },
+  upcoming: { headline: (name) => `${name} tiene un turno reservado.` },
+  new: { headline: (name) => `${name} es paciente nuevo.` },
+  recurrent: { headline: (name) => `${name} ya vino dos o más veces.` },
+};
+/** With `patientName` (lists across patients) the row leads with the patient; inside a patient's own record it keeps the short title. */
 export function OpportunityRow({ item, patientName, children }: { item: Opportunity; patientName?: string; children?: ReactNode }) {
   const look = opportunityLook[item.kind];
   const KindIcon = look.icon;
+  const copy = opportunityCopy[item.kind];
   return <article className="crm-signal">
     <span className={`crm-signal-icon crm-tone-${look.tone}`}><KindIcon size={16} aria-hidden /></span>
     <div className="crm-signal-body">
-      <strong>{patientName ? <>{patientName} <span aria-hidden="true">·</span> </> : null}{item.title}</strong>
-      <p>{item.reason}</p>
+      <strong>{patientName ? copy.headline(patientName) : item.title}</strong>
+      <p>{patientName && <b>¿Por qué veo esto? </b>}{item.reason}{patientName && copy.next ? ` ${copy.next}` : ""}</p>
     </div>
-    <Tag tone={item.level === "attention" ? "orange" : "neutral"}>{item.level === "attention" ? "Atención pendiente" : "Información"}</Tag>
+    <Tag tone={item.level === "attention" ? "orange" : "neutral"}>{item.level === "attention" ? "Para revisar" : "Para tener en cuenta"}</Tag>
     {children && <div className="crm-signal-action">{children}</div>}
   </article>;
+}
+
+/** Splits follow-ups into the groups a professional thinks in. Uses only their status and due date; empty groups are left out. */
+export function groupFollowUps<T extends Pick<FollowUp, "status" | "due_date">>(items: T[], today: string): { key: string; label: string; items: T[] }[] {
+  const due = (item: T) => followUpBucket(item.due_date, today);
+  return [
+    { key: "attention", label: "Necesitan atención", items: items.filter((item) => item.status === "pending" && (due(item) === "overdue" || due(item) === "today")) },
+    { key: "upcoming", label: "Próximos seguimientos", items: items.filter((item) => item.status === "pending" && due(item) !== "overdue" && due(item) !== "today") },
+    { key: "completed", label: "Completados", items: items.filter((item) => item.status === "completed") },
+    { key: "cancelled", label: "Cancelados", items: items.filter((item) => item.status === "cancelled") },
+  ].filter((group) => group.items.length > 0);
+}
+export function GroupTitle({ label, count }: { label: string; count: number }) {
+  return <h3 className="crm-group-title">{label} <span>{count}</span></h3>;
 }
 
 export function PageHeader({ title, description, children }: { title: string; description: string; children?: ReactNode }) {
@@ -200,7 +227,7 @@ export function PatientsTable({ patients, today, automaticIds, formatDate, statu
   patients: OpportunityOverview[]; today: string; automaticIds: Set<string>;
   formatDate: (value: string | null) => string; statusLabel: (status: PatientStatus) => string; renderOpen: Wrap<OpportunityOverview>;
 }) {
-  return <div className="crm-table-wrap"><table className="crm-table crm-stack-table"><thead><tr><th>Paciente</th><th>Teléfono</th><th>Último turno</th><th>Próximo turno</th><th>Turnos</th><th>Estado</th><th>Oportunidades</th><th>Seguimiento</th><th><span className="sr-only">Abrir</span></th></tr></thead><tbody>{patients.map((patient) => {
+  return <div className="crm-table-wrap"><table className="crm-table crm-stack-table"><thead><tr><th>Paciente</th><th>Teléfono</th><th>Último turno</th><th>Próximo turno</th><th>Turnos</th><th>Estado</th><th>Para revisar</th><th>Seguimiento</th><th><span className="sr-only">Abrir</span></th></tr></thead><tbody>{patients.map((patient) => {
     const signals = detectOpportunities(patient);
     const primary = signals.find((signal) => signal.level === "attention") ?? signals[0];
     return <tr key={patient.id}>
@@ -210,7 +237,7 @@ export function PatientsTable({ patients, today, automaticIds, formatDate, statu
       <td data-label="Próximo turno">{formatDate(patient.next_turn)}</td>
       <td data-label="Turnos">{patient.turn_count}</td>
       <td data-label="Estado"><StatusTag status={patient.status}>{statusLabel(patient.status)}</StatusTag></td>
-      <td data-label="Oportunidades">{primary ? <OpportunityTag item={primary} more={signals.length - 1} /> : "—"}</td>
+      <td data-label="Para revisar">{primary ? <OpportunityTag item={primary} more={signals.length - 1} /> : "—"}</td>
       <td data-label="Seguimiento"><span className="crm-tag-group"><FollowUpBucketTag dueDate={patient.follow_up_due_date} today={today} />{automaticIds.has(patient.id) && <OriginTag source="automation" />}</span></td>
       <td className="crm-cell-open">{renderOpen(patient, <ArrowRight size={16} />, { className: "crm-open", label: `Ver ficha de ${patient.full_name}` })}</td>
     </tr>;

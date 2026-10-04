@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { BellOff, CheckCheck } from "lucide-react";
+import { CheckCheck, CircleCheck } from "lucide-react";
 import { getSupabase } from "@/lib/supabase/browser";
 import CrmShell from "../pacientes/CrmShell";
 import { crmDate, errorMessage, loadCrmContext, type CrmContext } from "../pacientes/crm";
 import { notificationHref, relativeNotificationTime, type InternalNotification } from "./notifications";
 import { PageHeader } from "@/components/crm/CrmUi";
-import { NotificationItem, notificationKind } from "@/components/automation/AutomationUi";
+import { NotificationGroups, notificationKind } from "@/components/automation/AutomationUi";
 import "./notifications.css";
 
 type Filter = "all" | "unread" | "read";
@@ -86,10 +86,10 @@ export default function NotificationsPage() {
   }
 
   return <CrmShell context={context} breadcrumb="Notificaciones">
-    <PageHeader title="Notificaciones" description={unread ? `${unread} sin leer · Acciones de seguimiento que Bellis registró para vos.` : "Acciones de seguimiento que Bellis registró para vos."}/>
+    <PageHeader title="Notificaciones" description={unread ? `Acá vas a encontrar cosas que necesitan tu atención. Tenés ${unread} sin leer.` : "Acá vas a encontrar cosas que necesitan tu atención."}/>
     {error && <p className="live-error" role="alert">{error}</p>}
     <div className="notif-head"><div className="crm-chips" role="group" aria-label="Filtrar notificaciones">{(["all","unread","read"] as Filter[]).map((value) => <button type="button" key={value} aria-pressed={filter === value} className={filter === value ? "on" : ""} onClick={() => { setFilter(value); setPage(0); }}>{value === "all" ? "Todas" : value === "unread" ? `No leídas${unread ? ` (${unread})` : ""}` : "Leídas"}</button>)}</div><button className="crm-btn" disabled={saving || unread === 0} onClick={() => void markAll()}><CheckCheck size={15}/> Marcar todas como leídas</button></div>
-    {loading ? <p className="live-empty" role="status">Cargando notificaciones…</p> : items.length ? <div className="notif-list">{items.map((item) => <NotificationItem key={item.id} kind={notificationKind(item.type)} title={item.title} message={item.message} time={`${relativeNotificationTime(item.created_at)} · ${context ? crmDate(item.created_at, context.market) : ""}`} unread={!item.read_at} onClick={() => void open(item)}/>)}</div> : <div className="notif-empty"><BellOff size={22}/><strong>Sin notificaciones</strong><p>No hay notificaciones con este filtro.</p></div>}
+    {loading ? <p className="live-empty" role="status">Cargando notificaciones…</p> : items.length ? <NotificationGroups items={items.map((item) => ({ id: item.id, kind: notificationKind(item.type), time: `${relativeNotificationTime(item.created_at)} · ${context ? crmDate(item.created_at, context.market) : ""}`, unread: !item.read_at, onClick: () => void open(item) }))}/> : <div className="notif-empty"><CircleCheck size={22}/><strong>{filter === "read" ? "Todavía no leíste ninguna notificación" : "Estás al día"}</strong><p>{filter === "read" ? "Acá vas a ver las que ya abriste." : "No hay nada que necesite tu atención."}</p></div>}
     {!loading && total > pageSize && <div className="auto-pagination"><button className="crm-btn" disabled={page === 0} onClick={() => setPage((value) => value - 1)}>Anterior</button><span>{page * pageSize + 1}–{Math.min((page + 1) * pageSize, total)} de {total}</span><button className="crm-btn" disabled={(page + 1) * pageSize >= total} onClick={() => setPage((value) => value + 1)}>Siguiente</button></div>}
   </CrmShell>;
 }

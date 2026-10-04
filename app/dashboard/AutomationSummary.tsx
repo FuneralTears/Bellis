@@ -25,11 +25,11 @@ export default function AutomationSummary({ workspaceId, timezone }: { workspace
     finally { if (!cancelled) setLoading(false); } }
     void load(); return () => { cancelled = true; };
   }, [workspaceId, timezone]);
-  return <section className="demo-panel crm-dashboard-opportunities"><div className="crm-section-head"><div><h2>Automatizaciones</h2><p className="crm-hint">Actividad interna de hoy.</p></div><Link className="crm-dashboard-link" href="/automatizaciones/ejecuciones">Ver ejecuciones <ArrowRight size={15}/></Link></div>
+  return <section className="demo-panel crm-dashboard-opportunities"><div className="crm-section-head"><div><h2>Automatizaciones</h2><p className="crm-hint">Lo que Bellis hizo hoy por vos.</p></div><Link className="crm-dashboard-link" href="/automatizaciones/ejecuciones">Ver actividad <ArrowRight size={15}/></Link></div>
     {loading ? <p className="live-empty">Cargando resumen…</p> : error ? <p className="live-error" role="alert">{error}</p> : <div className="crm-dashboard-counts">
-      <div><strong>{metrics.active}</strong><span>Reglas activas</span></div><div><strong>{metrics.processed}</strong><span>Ejecuciones hoy</span></div>
-      <div><strong>{metrics.created}</strong><span>Seguimientos creados</span></div><div><strong>{metrics.skipped}</strong><span>Acciones omitidas</span></div>
-      <div><strong>{metrics.failed}</strong><span>Errores</span></div>
+      <div><strong>{metrics.active}</strong><span>Funcionando</span></div><div><strong>{metrics.processed}</strong><span>Actividad de hoy</span></div>
+      <div><strong>{metrics.created}</strong><span>Seguimientos creados</span></div><div><strong>{metrics.skipped}</strong><span>No fue necesario</span></div>
+      <div><strong>{metrics.failed}</strong><span>Para revisar</span></div>
     </div>}
   </section>;
 }

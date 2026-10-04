@@ -7,7 +7,7 @@ import { getSupabase } from "@/lib/supabase/browser";
 import CrmShell from "../pacientes/CrmShell";
 import { errorMessage, fetchPages, loadCrmContext, type CrmContext } from "../pacientes/crm";
 import { followUpBucket, priorityLabels, todayInTimezone, type FollowUp } from "../pacientes/timeline";
-import { FollowUpsTable, KpiStrip, OpportunityRow, PageHeader } from "@/components/crm/CrmUi";
+import { FollowUpsTable, GroupTitle, KpiStrip, OpportunityRow, PageHeader, groupFollowUps } from "@/components/crm/CrmUi";
 import { detectOpportunities, hasAttention, opportunityFilters, type OpportunityKind, type OpportunityOverview } from "../pacientes/opportunities";
 
 type PatientName = { id: string; full_name: string };
@@ -94,7 +94,7 @@ export default function FollowUpsPage() {
   }
 
   return <CrmShell context={context} breadcrumb="Seguimientos">
-    <PageHeader title="Seguimientos" description="Lo que necesita atención en tu espacio profesional."/>
+    <PageHeader title="Seguimientos" description="Bellis te muestra pacientes que podrían necesitar seguimiento según su actividad. Vos decidís qué hacer."/>
     {error && <p className="live-error" role="alert">{error}</p>}{notice && <p className="live-success" role="status">{notice}</p>}
     <KpiStrip items={[
       { label: "Pendientes", value: loading ? "—" : counts.pending, icon: ListChecks, tone: "petrol" },
@@ -102,18 +102,18 @@ export default function FollowUpsPage() {
       { label: "Vencidos", value: loading ? "—" : counts.overdue, icon: CircleAlert, tone: "coral" },
       { label: "Completados", value: loading ? "—" : counts.completed, icon: Check, tone: "sage" },
     ]}/>
-    <section className="crm-card"><div className="crm-card-head"><div><h2>Oportunidades detectadas</h2><p>{loading ? "Analizando registros…" : `${attentionPatients} ${attentionPatients === 1 ? "paciente necesita" : "pacientes necesitan"} atención.`} Las señales se actualizan con tus datos.</p></div><label className="crm-select">Mostrar <select value={signalFilter} onChange={(event) => setSignalFilter(event.target.value as SignalFilter)}>{opportunityFilters.map((item) => <option key={item.kind} value={item.kind}>{item.label}</option>)}</select></label></div>
-      {loading ? <p className="live-empty" role="status">Buscando oportunidades…</p> : signalRows.length ? <div className="crm-signals">{signalRows.map(({ patient, item }) => <OpportunityRow key={`${patient.id}:${item.kind}`} item={item} patientName={patient.full_name}><Link className="crm-link" href={`/pacientes/${patient.id}?from=seguimientos`}>Ver paciente <ArrowRight size={15}/></Link></OpportunityRow>)}</div> : <p className="live-empty">No hay oportunidades con ese filtro.</p>}
+    <section className="crm-card"><div className="crm-card-head"><div><h2>Pacientes para revisar</h2><p>{loading ? "Revisando la actividad de tus pacientes…" : attentionPatients ? `Bellis te sugiere revisar a ${attentionPatients} ${attentionPatients === 1 ? "paciente" : "pacientes"}.` : "Por ahora no hay pacientes para revisar."} La lista se actualiza sola.</p></div><label className="crm-select">Mostrar <select value={signalFilter} onChange={(event) => setSignalFilter(event.target.value as SignalFilter)}>{opportunityFilters.map((item) => <option key={item.kind} value={item.kind}>{item.label}</option>)}</select></label></div>
+      {loading ? <p className="live-empty" role="status">Buscando pacientes para revisar…</p> : signalRows.length ? <div className="crm-signals">{signalRows.map(({ patient, item }) => <OpportunityRow key={`${patient.id}:${item.kind}`} item={item} patientName={patient.full_name}><Link className="crm-link" href={`/pacientes/${patient.id}?from=seguimientos`}>Ver paciente <ArrowRight size={15}/></Link></OpportunityRow>)}</div> : <p className="live-empty">{signalFilter === "attention" || signalFilter === "all" ? "No hay pacientes que necesiten seguimiento por ahora." : "No hay pacientes en esa situación por ahora."}</p>}
     </section>
-    <section className="crm-card"><div className="crm-card-head"><div><h2>Tareas de seguimiento</h2></div></div><div className="crm-filterbar">
+    <section className="crm-card"><div className="crm-card-head"><div><h2>Tus seguimientos</h2><p>Recordatorios para volver a contactar a un paciente. Los podés crear vos o Bellis, si activaste una automatización.</p></div></div><div className="crm-filterbar">
       <label className="crm-search"><Search size={16}/><input aria-label="Buscar paciente" placeholder="Buscar paciente" value={search} onChange={(event) => setSearch(event.target.value)}/></label>
       <label className="crm-select">Prioridad<select value={priority} onChange={(event) => setPriority(event.target.value as PriorityFilter)}><option value="all">Todas</option>{Object.entries(priorityLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
       <label className="crm-select">Estado<select value={status} onChange={(event) => setStatus(event.target.value as StatusFilter)}><option value="pending">Pendientes</option><option value="completed">Completados</option><option value="cancelled">Cancelados</option><option value="all">Todos</option></select></label>
-      <label className="crm-select">Origen<select value={source} onChange={(event) => setSource(event.target.value as SourceFilter)}><option value="all">Todos</option><option value="manual">Manuales</option><option value="automation">Automáticos</option></select></label>
+      <label className="crm-select">Origen<select value={source} onChange={(event) => setSource(event.target.value as SourceFilter)}><option value="all">Todos</option><option value="manual">Creados por vos</option><option value="automation">Creados por Bellis</option></select></label>
     </div>
-      {loading ? <p className="live-empty" role="status">Cargando seguimientos…</p> : visible.length ? <FollowUpsTable items={visible} today={today} patientName={(item) => patientById.get(item.patient_id)}
+      {loading ? <p className="live-empty" role="status">Cargando seguimientos…</p> : visible.length ? groupFollowUps(visible, today).map((group) => <div key={group.key}><GroupTitle label={group.label} count={group.items.length}/><FollowUpsTable items={group.items} today={today} patientName={(item) => patientById.get(item.patient_id)}
         renderPatient={(item, content, { className }) => <Link className={className} href={`/pacientes/${item.patient_id}?from=seguimientos`}>{content}</Link>}
-        renderActions={(item) => <>{item.status === "pending" && <button disabled={savingId === item.id} onClick={() => void complete(item)}><Check size={14}/> Completar</button>}{item.automation_run_id && <Link href={`/automatizaciones/ejecuciones?run=${item.automation_run_id}`}>Ver automatización</Link>}<Link href={`/pacientes/${item.patient_id}?from=seguimientos`} aria-label={`Ver paciente ${patientById.get(item.patient_id)}`}><ArrowRight size={16}/></Link></>}/> : <p className="live-empty">No hay seguimientos con esos filtros.</p>}
+        renderActions={(item) => <>{item.status === "pending" && <button disabled={savingId === item.id} onClick={() => void complete(item)}><Check size={14}/> Completar</button>}{item.automation_run_id && <Link href={`/automatizaciones/ejecuciones?run=${item.automation_run_id}`}>Ver actividad</Link>}<Link href={`/pacientes/${item.patient_id}?from=seguimientos`} aria-label={`Ver paciente ${patientById.get(item.patient_id)}`}><ArrowRight size={16}/></Link></>}/></div>) : <p className="live-empty">{status === "pending" && priority === "all" && source === "all" && !search.trim() ? "No tenés seguimientos pendientes por ahora." : "No hay seguimientos con esos filtros."}</p>}
     </section>
   </CrmShell>;
 }

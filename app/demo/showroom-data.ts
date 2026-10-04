@@ -184,7 +184,7 @@ export const demoRuns: DemoRun[] = [
     scheduled: "02/10/2026, 17:30",
     executed: "02/10/2026, 17:30",
     attempts: 1,
-    result: "El paciente ya tiene un próximo turno",
+    result: "Ya tiene un próximo turno",
     detail: "El paciente ya tiene un próximo turno.",
   },
   {
@@ -220,8 +220,8 @@ export const demoRuns: DemoRun[] = [
     scheduled: "12/09/2026, 17:00",
     executed: "12/09/2026, 17:00",
     attempts: 1,
-    result: "La regla estaba desactivada",
-    detail: "La regla estaba desactivada al momento de ejecutar.",
+    result: "Regla desactivada o reactivada después del evento",
+    detail: "Regla desactivada o reactivada después del evento.",
   },
   {
     id: "demo-run-8",
@@ -238,8 +238,7 @@ export const demoRuns: DemoRun[] = [
 ];
 export type DemoNotification = {
   id: string;
-  title: string;
-  message: string;
+  patient: string;
   time: string;
   read: boolean;
   kind: "created" | "failed" | "skipped" | "completed";
@@ -249,8 +248,7 @@ export type DemoNotification = {
 export const demoNotifications: DemoNotification[] = [
   {
     id: "demo-notification-2",
-    title: "Una automatización requiere revisión",
-    message: "Primera consulta sin próximo turno · Carlos Ruiz.",
+    patient: "Carlos Ruiz",
     time: "hoy, 08:10",
     read: false,
     kind: "failed",
@@ -258,24 +256,21 @@ export const demoNotifications: DemoNotification[] = [
   },
   {
     id: "demo-notification-1",
-    title: "Seguimiento creado",
-    message: "Lucía Pérez · Verificar pago pendiente.",
+    patient: "Lucía Pérez",
     time: "ayer, 08:15",
     read: false,
     kind: "created",
   },
   {
     id: "demo-notification-3",
-    title: "Seguimiento creado",
-    message: "Mariana López · Revisar evolución.",
+    patient: "Mariana López",
     time: "ayer, 16:00",
     read: true,
     kind: "created",
   },
   {
     id: "demo-notification-5",
-    title: "Automatización omitida",
-    message: "Paciente inactivo · Tomás Méndez.",
+    patient: "Tomás Méndez",
     time: "ayer, 17:30",
     read: true,
     kind: "skipped",
@@ -283,8 +278,7 @@ export const demoNotifications: DemoNotification[] = [
   },
   {
     id: "demo-notification-6",
-    title: "Automatización completada",
-    message: "Primera consulta sin próximo turno · Valentina Ríos.",
+    patient: "Valentina Ríos",
     time: "hace 4 días",
     read: true,
     kind: "completed",
@@ -292,8 +286,7 @@ export const demoNotifications: DemoNotification[] = [
   },
   {
     id: "demo-notification-4",
-    title: "Seguimiento creado",
-    message: "Valentina Ríos · Coordinar próxima consulta.",
+    patient: "Valentina Ríos",
     time: "hace 4 días",
     read: true,
     kind: "created",

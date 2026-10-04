@@ -1,11 +1,69 @@
 "use client";
-import BellisLogo from "@/components/brand/BellisLogo";
-import { formatMoney, normalizeArgentinePhone } from "@/lib/market";
+
+import Link from "next/link";
 import { useState } from "react";
+import { ArrowLeft, ArrowRight, CreditCard } from "lucide-react";
+import { Badge, BookingCard, BookingContext, BookingPanel, BookingShell, BookingStepper, HowItWorks, Notice, ProfessionalIntro, ServiceCard, SlotPicker, SuccessMark, SummaryList } from "@/components/booking/BookingUi";
+import { formatMoney } from "@/lib/market";
 import { starterQuestionnaire, type QuestionnaireAnswers } from "@/lib/questionnaires/model";
 import { QuestionnaireFlow, type PatientDraft } from "./questionnaire-flow";
-import { ArrowLeft, ArrowRight, CalendarDays, Check, Clock3, CreditCard, Globe2, MapPin, ShieldCheck } from "lucide-react";
-import "./profile.css";
-const services=[{name:"Consulta psicológica",description:"Un espacio para trabajar lo que hoy necesitás.",price:25000,duration:60},{name:"Primera consulta",description:"Nos conocemos y definimos juntos el mejor camino.",price:30000,duration:75}];
-const slots=["09:00","10:30","12:00","15:00","16:30"];
-export default function PublicProfile(){const[step,setStep]=useState(0);const[service,setService]=useState(0);const[date,setDate]=useState(0);const[slot,setSlot]=useState("");const[patient,setPatient]=useState<PatientDraft>({firstName:"",lastName:"",email:"",phone:""});const[answers,setAnswers]=useState<QuestionnaireAnswers>({});const[paymentChecked,setPaymentChecked]=useState(false);const questionnaire=starterQuestionnaire(`service-${service}`);const start=(i:number)=>{setService(i);setStep(1);window.scrollTo({top:0,behavior:"smooth"})};return <main className="public-shell"><header className="public-header"><a className="brand" href="/"><BellisLogo /></a><span>Turnos simples y seguros</span></header><div className="public-wrap">{step===0?<><div className="profile-top"><div className="profile-avatar">AL</div><div><span className="profile-label">PERFIL PROFESIONAL</span><h1>Dra. Ana López</h1><p>Psicóloga clínica</p><div className="profile-meta"><span><Globe2 size={17}/> Online</span><span><MapPin size={17}/> Córdoba, Córdoba</span></div></div></div><div className="profile-grid"><div><section className="public-card"><h2>Un espacio para vos</h2><p>Te acompaño en procesos de ansiedad, autoestima y relaciones, con una escucha cercana y herramientas adaptadas a tu momento.</p></section><section className="public-card services-card"><h2>Servicios disponibles</h2>{services.map((s,i)=><div className="public-service" key={s.name}><span className="service-symbol"><CalendarDays size={22}/></span><div><h3>{s.name}</h3><p>{s.description}</p><span><Clock3 size={15}/> {s.duration} minutos</span></div><div className="service-action"><strong>{formatMoney(s.price)}</strong><button onClick={()=>start(i)}>Reservar turno <ArrowRight size={16}/></button></div></div>)}</section></div><aside className="profile-aside public-card"><span className="aside-icon"><ShieldCheck size={25}/></span><h3>Tu turno, paso a paso</h3><p>Elegí un servicio, contanos lo que necesitás, completá el pago y seleccioná tu horario.</p><div><Check size={16}/> Tus datos se comparten solo con tu profesional</div><div><Check size={16}/> Horarios según disponibilidad</div></aside></div></>:<div className="booking-wrap">{step!==2&&<button className="booking-back" onClick={()=>setStep(step-1)}><ArrowLeft size={17}/> {step===1?"Volver al perfil":"Volver"}</button>}<div className="booking-progress">{["Servicio","Preconsulta","Pago","Horario","Confirmación"].map((x,i)=><span key={x} className={i<=step-1?"on":""}><b>{i<step-1?<Check size={12}/>:i+1}</b>{x}</span>)}</div>{step===1&&<section className="booking-card"><span className="profile-label">PASO 1 DE 5</span><h1>Elegí tu servicio</h1><p>Seleccioná la sesión que mejor se ajuste a lo que necesitás.</p>{services.map((s,i)=><button className={service===i?"book-service selected":"book-service"} key={s.name} onClick={()=>setService(i)}><span><b>{s.name}</b><small>{s.duration} minutos · Online</small></span><strong>{formatMoney(s.price)}</strong></button>)}<button className="book-next" onClick={()=>setStep(2)}>Continuar <ArrowRight size={17}/></button></section>}{step===2&&<QuestionnaireFlow questionnaire={questionnaire} initialAnswers={answers} initialPatient={patient} onAnswersChange={setAnswers} onPatientChange={setPatient} onBack={()=>setStep(1)} onComplete={(completedAnswers, completedPatient)=>{setAnswers(completedAnswers);setPatient(completedPatient);setStep(3);window.scrollTo({top:0,behavior:"smooth"})}}/>}{step===3&&<section className="booking-card"><span className="profile-label">PASO 3 DE 5</span><h1>Revisá tu turno</h1><p>Confirmá los datos antes de continuar con el pago.</p><div className="booking-summary"><div><span>Servicio</span><b>{services[service].name}</b></div><div><span>Duración</span><b>{services[service].duration} minutos</b></div><div><span>Paciente</span><b>{patient.firstName} {patient.lastName}</b></div><div><span>Respuestas</span><b>Completadas en esta demo ✓</b></div><div className="summary-total"><span>Total</span><strong>{formatMoney(services[service].price)}</strong></div></div><div className="payment-demo"><CreditCard size={21}/><div><b>Pago de demostración</b><p>No se realizará ningún cobro. En la versión real, el horario se desbloquea únicamente al confirmar el pago desde el proveedor.</p></div></div><label className="payment-check"><input type="checkbox" checked={paymentChecked} onChange={e=>setPaymentChecked(e.target.checked)}/> Simular pago confirmado para continuar</label><button className="book-next" disabled={!paymentChecked} onClick={()=>setStep(4)}>Continuar a horarios <ArrowRight size={17}/></button></section>}{step===4&&<section className="booking-card"><span className="profile-label">PASO 4 DE 5</span><h1>Elegí el horario de tu turno</h1><p>Horarios de ejemplo para {services[service].name}.</p><div className="date-options">{["Jue 24","Vie 25","Lun 28","Mar 29"].map((d,i)=><button key={d} className={date===i?"on":""} onClick={()=>{setDate(i);setSlot("")}}>{d}<small>sep</small></button>)}</div><h3>Horarios disponibles</h3><div className="slot-options">{slots.filter((_,i)=>date===0?i!==1:true).map(s=><button className={slot===s?"on":""} key={s} onClick={()=>setSlot(s)}>{s}</button>)}</div><button className="book-next" disabled={!slot} onClick={()=>setStep(5)}>Confirmar turno de ejemplo <ArrowRight size={17}/></button></section>}{step===5&&<section className="booking-card booking-success"><span className="success-mark"><Check size={34}/></span><h1>Así se vería tu confirmación</h1><p>Tu recorrido de demostración terminó. Este turno no se guardó ni se notificó a la profesional.</p><div className="booking-summary"><div><span>Servicio</span><b>{services[service].name}</b></div><div><span>Fecha</span><b>{["Jueves 24","Viernes 25","Lunes 28","Martes 29"][date]} de septiembre de 2026 · {slot}</b></div><div><span>Paciente</span><b>{patient.firstName} {patient.lastName}</b></div><div><span>Pago</span><b>Simulado</b></div></div><a className="book-next" href="/">Volver a Bellis <ArrowRight size={17}/></a></section>}</div>}</div><footer className="public-footer">Bellis · Turnos para profesionales</footer></main>}
+
+// Showroom of the public booking (/p/[slug]): same screens and steps, mock data only.
+// Nothing here calls the backend, creates a booking or starts a payment.
+const professional = { name: "Dra. Ana López", specialty: "Psicóloga clínica", location: "Córdoba, Córdoba", biography: "Te acompaño en procesos de ansiedad, autoestima y relaciones, con una escucha cercana y herramientas adaptadas a tu momento." };
+const services = [
+  { name: "Consulta psicológica", description: "Un espacio para trabajar lo que hoy necesitás.", price: 25000, duration: 60 },
+  { name: "Primera consulta", description: "Nos conocemos y definimos juntos el mejor camino.", price: 30000, duration: 75 },
+];
+const exampleSlots = ["09:00", "10:30", "12:00", "15:00", "16:30"];
+/** Example availability: nothing on weekends, so the empty state can be seen too. */
+function slotsFor(day: string) {
+  const weekday = new Date(`${day}T12:00:00Z`).getUTCDay();
+  return weekday === 0 || weekday === 6 ? [] : exampleSlots.filter((_, index) => weekday % 2 === 0 || index !== 1);
+}
+const longDate = (day: string) => new Intl.DateTimeFormat("es-AR", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${day}T12:00:00Z`));
+
+export default function PublicProfile() {
+  const [step, setStep] = useState(0);
+  const [service, setService] = useState(0);
+  const [patient, setPatient] = useState<PatientDraft>({ firstName: "", lastName: "", email: "", phone: "" });
+  const [answers, setAnswers] = useState<QuestionnaireAnswers>({});
+  const [consent, setConsent] = useState(false);
+  const [day, setDay] = useState("");
+  const [slot, setSlot] = useState("");
+  const chosen = services[service];
+  const go = (next: number) => { setStep(next); window.scrollTo(0, 0); };
+  const stage = [0, 1, 2, 2, 3, 4][step];
+  return <BookingShell professional={professional.name} banner={<p className="bk-demo-banner">Vista de demostración: no se guardan datos ni se realizan cobros. <Link href="/demo">Volver a la demo</Link></p>}>
+    {step === 0 ? <>
+      <ProfessionalIntro name={professional.name} specialty={professional.specialty} modalities={["Online"]} location={professional.location} />
+      <div className="bk-profile-grid"><div className="bk-profile-main">
+        <BookingPanel title="Sobre la consulta"><p>{professional.biography}</p></BookingPanel>
+        <BookingPanel title="Servicios disponibles"><div className="bk-services">
+          {services.map((item, index) => <ServiceCard key={item.name} name={item.name} description={item.description} duration={item.duration} modality="Online" price={formatMoney(item.price)} onReserve={() => { setService(index); setAnswers({}); go(1); }} />)}
+        </div></BookingPanel>
+      </div><HowItWorks points={["Información disponible solo para el equipo autorizado", "Horarios calculados según disponibilidad real"]} /></div>
+    </> : <div className="bk-flow">{step < 3 && <button className="bk-back" type="button" onClick={() => setStep(step - 1)}><ArrowLeft size={17}/> Volver</button>}<BookingStepper current={stage} complete={step === 5} />
+      {step < 5 && <BookingContext name={professional.name} detail={`${chosen.name} · ${chosen.duration} min · ${formatMoney(chosen.price)}`} />}
+      {step === 1 && <QuestionnaireFlow key={service} questionnaire={starterQuestionnaire(`service-${service}`)} initialAnswers={answers} initialPatient={patient} onAnswersChange={setAnswers} onPatientChange={setPatient} onBack={() => setStep(0)} onComplete={(nextAnswers, nextPatient) => { setAnswers(nextAnswers); setPatient(nextPatient); go(2); }} />}
+      {step === 2 && <BookingCard eyebrow="Revisá tu solicitud" title="Antes de pagar" description="El horario se habilita cuando se confirme el cobro.">
+        <SummaryList rows={[["Servicio", chosen.name], ["Duración", `${chosen.duration} minutos`], ["Paciente", `${patient.firstName} ${patient.lastName}`]]} total={["Total", formatMoney(chosen.price)]} />
+        <label className="bk-consent"><input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} /> <span>Autorizo compartir mis respuestas de preconsulta con este profesional para preparar mi turno.</span></label>
+        <div className="bk-actions"><button className="bk-button" type="button" disabled={!consent} onClick={() => go(3)}>Continuar al pago <ArrowRight size={17}/></button></div>
+      </BookingCard>}
+      {step === 3 && <BookingCard eyebrow="Pago" title="Realizá el pago" description="En la versión real, acá se abre el medio de pago del profesional y el horario se habilita cuando el cobro queda confirmado.">
+        <SummaryList rows={[["Servicio", chosen.name], ["Estado del pago", <Badge key="status" tone="warning">Pago pendiente</Badge>]]} total={["Total", formatMoney(chosen.price)]} />
+        <Notice tone="info" icon={<CreditCard size={20}/>} title="Pago de demostración">No se realiza ningún cobro ni se abre un proveedor de pagos.</Notice>
+        <div className="bk-actions"><button className="bk-button" type="button" onClick={() => go(4)}>Simular pago confirmado <ArrowRight size={17}/></button></div>
+      </BookingCard>}
+      {step === 4 && <BookingCard eyebrow="Horario" badge={<Badge tone="success">Pago confirmado</Badge>} title="Elegí el horario de tu turno" description={`Horarios de ejemplo para ${chosen.name}.`}>
+        <SlotPicker day={day} onDay={(next) => { setDay(next); setSlot(""); }} busy={false} slots={day ? slotsFor(day).map((item) => ({ value: item, label: item })) : []} selected={slot} onSelect={setSlot} />
+        <div className="bk-actions"><button className="bk-button" type="button" disabled={!slot} onClick={() => go(5)}>Confirmar turno de ejemplo <ArrowRight size={17}/></button></div>
+      </BookingCard>}
+      {step === 5 && <BookingCard center icon={<SuccessMark />} title="Así se vería tu confirmación" description="Tu recorrido de demostración terminó. Este turno no se guardó ni se notificó a la profesional.">
+        <SummaryList rows={[["Profesional", professional.name], ["Servicio", chosen.name], ["Fecha y hora", `${longDate(day)} · ${slot}`], ["Modalidad", "Online"], ["Pago", "Simulado"]]} />
+        <div className="bk-actions"><Link className="bk-button" href="/demo">Volver a la demo <ArrowRight size={17}/></Link></div>
+      </BookingCard>}
+    </div>}
+  </BookingShell>;
+}

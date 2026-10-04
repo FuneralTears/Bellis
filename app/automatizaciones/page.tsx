@@ -2,13 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, Check, CircleAlert, History, Minus, Settings2, ShieldCheck } from "lucide-react";
+import { ArrowRight, Check, CircleAlert, History, Pause, Settings2, ShieldCheck } from "lucide-react";
 import { getSupabase } from "@/lib/supabase/browser";
 import CrmShell from "../pacientes/CrmShell";
 import { crmDate, errorMessage, loadCrmContext, type CrmContext } from "../pacientes/crm";
 import { priorityLabels } from "../pacientes/timeline";
 import { KpiStrip, PageHeader } from "@/components/crm/CrmUi";
-import { DetailList, RuleRow, RunStatusTag } from "@/components/automation/AutomationUi";
+import { DetailList, RuleRow, RunStatusTag, ruleSentence, ruleStateLabel, runExplanation } from "@/components/automation/AutomationUi";
 import { Switch } from "@/components/ui/switch";
 import "./automations.css";
 
@@ -96,27 +96,27 @@ export default function AutomationsPage() {
   const wait = (rule: Rule) => `${rule.delay_minutes / descriptions[rule.rule_key].factor} ${descriptions[rule.rule_key].unit}`;
 
   return <CrmShell context={context} breadcrumb="Automatizaciones">
-    <PageHeader title="Automatizaciones" description="Bellis crea tareas de seguimiento cuando se cumplen tus reglas."><Link className="crm-btn" href="/automatizaciones/ejecuciones"><History size={15}/> Ver ejecuciones</Link></PageHeader>
+    <PageHeader title="Automatizaciones" description="Bellis puede hacer algunas tareas por vos para que no tengas que revisar paciente por paciente."><Link className="crm-btn" href="/automatizaciones/ejecuciones"><History size={15}/> Ver actividad</Link></PageHeader>
     {error && <p className="live-error" role="alert">{error}</p>}{notice && <p className="live-success" role="status">{notice}</p>}
     <KpiStrip items={[
-      { label: "Reglas", value: loading ? "—" : rules.length, icon: Settings2, tone: "petrol" },
-      { label: "Activas", value: loading ? "—" : active, icon: Check, tone: "sage" },
-      { label: "Inactivas", value: loading ? "—" : rules.length - active, icon: Minus, tone: "neutral" },
-      { label: "Requieren revisión", value: loading ? "—" : failedCount, icon: CircleAlert, tone: failedCount > 0 ? "coral" : "neutral" },
+      { label: "Automatizaciones", value: loading ? "—" : rules.length, icon: Settings2, tone: "petrol" },
+      { label: "Funcionando", value: loading ? "—" : active, icon: Check, tone: "sage" },
+      { label: "Pausadas", value: loading ? "—" : rules.length - active, icon: Pause, tone: "neutral" },
+      { label: "Para revisar", value: loading ? "—" : failedCount, icon: CircleAlert, tone: failedCount > 0 ? "coral" : "neutral" },
     ]}/>
-    {failedCount > 0 && <div className="auto-alert"><CircleAlert size={16}/><strong>Hay {failedCount} {failedCount === 1 ? "ejecución que requiere" : "ejecuciones que requieren"} revisión.</strong><Link className="crm-link" href="/automatizaciones/ejecuciones?status=failed">Ver ejecuciones <ArrowRight size={15}/></Link></div>}
-    <p className="auto-note"><ShieldCheck size={15}/> <span>Las reglas empiezan desactivadas. No envían mensajes ni toman decisiones clínicas. Al activarlas, se consideran los eventos nuevos desde ese momento.{!loading && !canEdit ? " Solo quienes administran este espacio pueden cambiar las reglas." : ""}</span></p>
+    {failedCount > 0 && <div className="auto-alert"><CircleAlert size={16}/><strong>{failedCount === 1 ? "Hay 1 tarea automática que necesita tu revisión." : `Hay ${failedCount} tareas automáticas que necesitan tu revisión.`}</strong><Link className="crm-link" href="/automatizaciones/ejecuciones?status=failed">Ver actividad <ArrowRight size={15}/></Link></div>}
+    <p className="auto-note"><ShieldCheck size={15}/> <span>Cuando una automatización está activa, Bellis revisa esto automáticamente y te deja el seguimiento listo. No envía mensajes a tus pacientes ni toma decisiones clínicas. Empiezan pausadas y, al activarlas, tienen en cuenta lo que pase desde ese momento.{!loading && !canEdit ? " Solo quienes administran este espacio pueden cambiarlas." : ""}</span></p>
     {loading ? <p className="live-empty" role="status">Cargando automatizaciones…</p> : <>
-      <div className="auto-rules">{rules.map((rule) => <RuleRow key={rule.id} kind={rule.rule_key} name={rule.name} description={rule.description} enabled={rule.enabled} wait={wait(rule)} action={`Crear seguimiento · prioridad ${priorityLabels[rule.action_priority].toLowerCase()}`}
-        toggle={canEdit ? <Switch checked={rule.enabled} disabled={saving} aria-label={`${rule.enabled ? "Desactivar" : "Activar"} ${rule.name}`} onCheckedChange={() => void save(rule, { enabled: !rule.enabled })}/> : undefined}>
+      <div className="auto-rules">{rules.map((rule) => <RuleRow key={rule.id} kind={rule.rule_key} name={rule.name} description={rule.description} enabled={rule.enabled} wait={wait(rule)} action={`Crea un seguimiento con prioridad ${priorityLabels[rule.action_priority].toLowerCase()}`}
+        toggle={canEdit ? <Switch checked={rule.enabled} disabled={saving} aria-label={`${rule.enabled ? "Pausar" : "Activar"} ${rule.name}`} onCheckedChange={() => void save(rule, { enabled: !rule.enabled })}/> : undefined}>
         <button className="crm-link" onClick={() => { setSelectedId(rule.id); setDraft(null); }}>Ver detalle</button>{canEdit && <button className="crm-link" onClick={() => { setSelectedId(rule.id); setDraft({ ...rule }); }}>Configurar</button>}
       </RuleRow>)}</div>
-      {selected && <section id="auto-detail" className="crm-card" style={{ marginTop: 12 }}><div className="crm-card-head"><div><h2>{selected.name}</h2><p>{selected.enabled ? "Activa" : "Inactiva"} · Última actualización: {context ? crmDate(selected.updated_at, context.market) : "—"}</p></div><button className="crm-btn" onClick={() => { setSelectedId(null); setDraft(null); }}>Cerrar</button></div>
+      {selected && <section id="auto-detail" className="crm-card" style={{ marginTop: 12 }}><div className="crm-card-head"><div><h2>{ruleSentence(selected.rule_key, wait(selected))}</h2><p>{selected.name} · {ruleStateLabel(selected.enabled)} · Última actualización: {context ? crmDate(selected.updated_at, context.market) : "—"}</p></div><button className="crm-btn" onClick={() => { setSelectedId(null); setDraft(null); }}>Cerrar</button></div>
         <DetailList columns={4} items={[
-          { label: "Se activa cuando", value: descriptions[selected.rule_key].trigger },
-          { label: "Condición", value: descriptions[selected.rule_key].condition },
-          { label: "Espera", value: wait(selected) },
-          { label: "Acción", value: `${selected.action_title} · prioridad ${priorityLabels[selected.action_priority].toLowerCase()}` },
+          { label: "Empieza a contar cuando", value: descriptions[selected.rule_key].trigger },
+          { label: "Te avisa si", value: descriptions[selected.rule_key].condition },
+          { label: "Cuánto espera", value: wait(selected) },
+          { label: "Qué hace", value: `Crea el seguimiento «${selected.action_title}» con prioridad ${priorityLabels[selected.action_priority].toLowerCase()}` },
         ]}/>
         {draft && canEdit && <form className="auto-form" onSubmit={(event) => { event.preventDefault(); const unit = Number((event.currentTarget.elements.namedItem("delay") as HTMLInputElement).value); if (!Number.isInteger(unit) || unit < 1 || unit * descriptions[draft.rule_key].factor > 525600) { setError("Ingresá un plazo válido."); return; } void save(draft, { name: draft.name.trim(), description: draft.description.trim(), action_title: draft.action_title.trim(), action_priority: draft.action_priority, delay_minutes: unit * descriptions[draft.rule_key].factor }); }}>
           <div className="crm-form-grid">
@@ -127,9 +127,9 @@ export default function AutomationsPage() {
             <label>Prioridad<select value={draft.action_priority} onChange={(event) => setDraft({ ...draft, action_priority: event.target.value as Rule["action_priority"] })}>{Object.entries(priorityLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           </div>
           <div className="crm-note-actions"><button className="demo-primary" disabled={saving}>Guardar cambios</button><button type="button" className="live-secondary" onClick={() => setDraft(null)}>Cancelar</button></div>
-          <p className="crm-hint">El nuevo plazo se aplicará a los eventos futuros. Las tareas ya programadas conservan su fecha.</p>
+          <p className="crm-hint">El nuevo plazo vale de ahora en adelante. Lo que ya estaba pendiente conserva su fecha.</p>
         </form>}
-        <h3 className="auto-subtitle">Historial de ejecuciones</h3>{history.length ? <div className="auto-history">{history.map((run) => <div key={run.id}><time>{context ? crmDate(run.executed_at ?? run.scheduled_for, context.market) : "—"}</time><strong>{nameById.get(run.patient_id) ?? "Paciente no disponible"}{run.result?.reason && <small>{run.result.reason}</small>}</strong><RunStatusTag status={run.status}/><Link className="crm-link" href={`/automatizaciones/ejecuciones?run=${run.id}`}>Ver detalle <ArrowRight size={14}/></Link></div>)}</div> : <p className="live-empty">Todavía no hay ejecuciones para esta regla.</p>}
+        <h3 className="auto-subtitle">Actividad reciente</h3>{history.length ? <div className="auto-history">{history.map((run) => <div key={run.id}><time>{context ? crmDate(run.executed_at ?? run.scheduled_for, context.market) : "—"}</time><strong>{nameById.get(run.patient_id) ?? "Paciente no disponible"}{run.status === "skipped" && <small>{runExplanation(run.status, run.result?.reason)}</small>}</strong><RunStatusTag status={run.status}/><Link className="crm-link" href={`/automatizaciones/ejecuciones?run=${run.id}`}>Ver detalle <ArrowRight size={14}/></Link></div>)}</div> : <p className="live-empty">Todavía no hay actividad automática para mostrar.</p>}
       </section>}
     </>}
   </CrmShell>;

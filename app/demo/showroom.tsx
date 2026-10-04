@@ -22,9 +22,11 @@ import {
 } from "../pacientes/opportunities";
 import {
   FollowUpsTable,
+  GroupTitle,
   KpiStrip,
   OpportunityRow,
   PageHeader,
+  groupFollowUps,
 } from "@/components/crm/CrmUi";
 import { demoFollowUp, demoPatients } from "./crm-data";
 import {
@@ -266,7 +268,7 @@ export function DemoDashboard({
           <div className="panel-head">
             <h2>Automatizaciones</h2>
             <button onClick={() => navigate("Automatizaciones")}>
-              Ver reglas <ArrowRight size={15} />
+              Ver automatizaciones <ArrowRight size={15} />
             </button>
           </div>
           <div className="crm-dashboard-counts">
@@ -274,19 +276,19 @@ export function DemoDashboard({
               <strong>
                 {state.rules.filter((rule) => rule.enabled).length}
               </strong>
-              <span>Reglas activas</span>
+              <span>Funcionando</span>
             </div>
             <div>
               <strong>{state.runs.length}</strong>
-              <span>Ejecuciones de ejemplo</span>
+              <span>Actividad de ejemplo</span>
             </div>
             <div>
               <strong>{runCount("completed")}</strong>
-              <span>Completadas</span>
+              <span>Hechas</span>
             </div>
             <div>
               <strong>{runCount("failed")}</strong>
-              <span>Fallidas</span>
+              <span>Para revisar</span>
             </div>
             <div>
               <strong>{runCount("scheduled", "processing")}</strong>
@@ -373,7 +375,7 @@ export function DemoFollowUps({
     <>
       <PageHeader
         title="Seguimientos"
-        description="Lo que necesita atención en tu espacio profesional."
+        description="Bellis te muestra pacientes que podrían necesitar seguimiento según su actividad. Vos decidís qué hacer."
       />
       {notice && (
         <p className="live-success" role="status">
@@ -415,11 +417,12 @@ export function DemoFollowUps({
       <section className="crm-card">
         <div className="crm-card-head">
           <div>
-            <h2>Oportunidades detectadas</h2>
+            <h2>Pacientes para revisar</h2>
             <p>
-              {attention}{" "}
-              {attention === 1 ? "paciente necesita" : "pacientes necesitan"}{" "}
-              atención. Las señales se actualizan con tus datos.
+              {attention
+                ? `Bellis te sugiere revisar a ${attention} ${attention === 1 ? "paciente" : "pacientes"}.`
+                : "Por ahora no hay pacientes para revisar."}{" "}
+              La lista se actualiza sola.
             </p>
           </div>
           <label className="crm-select">
@@ -451,13 +454,21 @@ export function DemoFollowUps({
             ))}
           </div>
         ) : (
-          <p className="live-empty">No hay oportunidades con ese filtro.</p>
+          <p className="live-empty">
+            {signal === "attention" || signal === "all"
+              ? "No hay pacientes que necesiten seguimiento por ahora."
+              : "No hay pacientes en esa situación por ahora."}
+          </p>
         )}
       </section>
       <section className="crm-card">
         <div className="crm-card-head">
           <div>
-            <h2>Tareas de seguimiento</h2>
+            <h2>Tus seguimientos</h2>
+            <p>
+              Recordatorios para volver a contactar a un paciente. Los podés
+              crear vos o Bellis, si activaste una automatización.
+            </p>
           </div>
         </div>
         <div className="crm-filterbar">
@@ -497,14 +508,17 @@ export function DemoFollowUps({
             Origen
             <select value={source} onChange={(e) => setSource(e.target.value)}>
               <option value="all">Todos</option>
-              <option value="manual">Manuales</option>
-              <option value="automation">Automáticos</option>
+              <option value="manual">Creados por vos</option>
+              <option value="automation">Creados por Bellis</option>
             </select>
           </label>
         </div>
         {visible.length ? (
+          groupFollowUps(visible, demoToday).map((group) => (
+          <div key={group.key}>
+          <GroupTitle label={group.label} count={group.items.length} />
           <FollowUpsTable
-            items={visible}
+            items={group.items}
             today={demoToday}
             patientName={(item) => names.get(item.patient_id)}
             renderPatient={(item, content, { className }) => (
@@ -530,7 +544,7 @@ export function DemoFollowUps({
                   </button>
                 )}
                 {item.source === "automation" && (
-                  <button onClick={automation}>Ver automatización</button>
+                  <button onClick={automation}>Ver actividad</button>
                 )}
                 <button
                   aria-label={`Ver paciente ${names.get(item.patient_id)}`}
@@ -541,8 +555,14 @@ export function DemoFollowUps({
               </>
             )}
           />
+          </div>
+          ))
         ) : (
-          <p className="live-empty">No hay seguimientos con esos filtros.</p>
+          <p className="live-empty">
+            {status === "pending" && priority === "all" && source === "all" && !text
+              ? "No tenés seguimientos pendientes por ahora."
+              : "No hay seguimientos con esos filtros."}
+          </p>
         )}
       </section>
     </>

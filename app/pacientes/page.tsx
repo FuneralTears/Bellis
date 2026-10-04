@@ -77,7 +77,7 @@ export default function PatientsPage() {
     <section className="crm-card">
       <div className="crm-filterbar">
         <label className="crm-search"><Search size={16}/><input aria-label="Buscar pacientes" placeholder="Buscar por nombre, email o teléfono" value={query} onChange={(event) => setQuery(event.target.value)}/></label>
-        <label className="crm-select">Oportunidad <select aria-label="Oportunidad de seguimiento" value={opportunityFilter} onChange={(event) => { setOpportunityFilter(event.target.value as OpportunityFilter); setPage(0); }}>{opportunityFilters.map((item) => <option key={item.kind} value={item.kind}>{item.label}</option>)}</select></label>
+        <label className="crm-select">Para revisar <select aria-label="Filtrar por sugerencia de seguimiento" value={opportunityFilter} onChange={(event) => { setOpportunityFilter(event.target.value as OpportunityFilter); setPage(0); }}>{opportunityFilters.map((item) => <option key={item.kind} value={item.kind}>{item.label}</option>)}</select></label>
         <label className="crm-select">Ordenar por <select value={sort} onChange={(event) => { setSort(event.target.value as Sort); setPage(0); }}><option value="last_turn">Último turno</option><option value="next_turn">Próximo turno</option><option value="full_name">Nombre</option></select></label>
       </div>
       <div className="crm-chip-rows">

@@ -103,6 +103,9 @@
 .crm-signal-body strong { display: block; font-size: 13px; font-weight: 600; color: var(--foreground); }
 .crm-main .crm-signal-body p { margin: 2px 0 0; font-size: 12px; line-height: 1.5; color: var(--muted-foreground); }
 .crm-signal-action { flex: none; }
+.crm-signal-body p b { font-weight: 600; color: var(--foreground); }
+.crm-main .crm-group-title { display: flex; align-items: center; gap: 8px; margin: 16px 0 4px; font-size: 13px; font-weight: 600; color: var(--foreground); }
+.crm-filterbar + .crm-group-title { margin-top: 12px; }
 
 /* Follow-up cards */
 .crm-tasks { display: grid; gap: 8px; }
