@@ -53,7 +53,8 @@ export function FormsWorkspace({ embedded = false }: { embedded?: boolean }) {
     setForms(null);
     window.location.replace("/ingresar");
   };
-  const content = error ? <div className="live-form-message" role="alert"><h1>No pudimos abrir tus formularios</h1><p>{error}</p><a href="/ingresar">Volver a ingresar</a></div> : !forms ? <div className="live-form-message" role="status">Cargando tus servicios y formularios…</div> : <QuestionnaireBuilder serviceOptions={forms.services} initialQuestionnaires={forms.questionnaires} onSave={save} />;
+  // Having no services yet is not a failure: it is the step before the first preconsultation.
+  const content = error === "Tu espacio todavía no tiene servicios activos." ? <div className="live-form-message" role="status"><h1>Todavía no hay servicios disponibles para asignar</h1><p>Una preconsulta se usa en una o más de tus consultas. Creá primero un servicio y volvé para armarla.</p><a href="/dashboard?section=Servicios">Ir a Servicios</a></div> : error ? <div className="live-form-message" role="alert"><h1>No pudimos abrir tus preconsultas</h1><p>{error}</p><a href="/ingresar">Volver a ingresar</a></div> : !forms ? <div className="live-form-message" role="status">Cargando tus preconsultas…</div> : <QuestionnaireBuilder serviceOptions={forms.services} initialQuestionnaires={forms.questionnaires} onSave={save} />;
   if (embedded) return content;
   return <main className="live-form-shell"><header className="live-form-header"><a className="brand" href="/"><BellisLogo /></a><div><span>{forms?.professionalName ?? "Mi espacio"}</span>{forms && <button onClick={signOut}>Cerrar sesión</button>}</div></header><div className="live-form-main"><div className="live-form-intro"><span>ESPACIO PROFESIONAL</span><a href="/dashboard">Volver al panel <ArrowRight size={15}/></a></div>{content}</div></main>;
 }

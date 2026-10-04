@@ -19,7 +19,8 @@ type Props = {
   onPatientChange: (patient: PatientDraft) => void;
   onBack: () => void;
   onComplete: (answers: QuestionnaireAnswers, patient: PatientDraft) => void | Promise<void>;
-  demoNote?: boolean;
+  /** `true` shows the showroom note; a string replaces it (the builder preview says its own). */
+  demoNote?: boolean | string;
 };
 
 export function QuestionnaireFlow({ questionnaire, initialAnswers, initialPatient, onAnswersChange, onPatientChange, onBack, onComplete, demoNote = true }: Props) {
@@ -93,7 +94,7 @@ export function QuestionnaireFlow({ questionnaire, initialAnswers, initialPatien
   return <section className="bk-card bk-q" aria-labelledby="smart-form-title">
     <div className="bk-q-top"><span>Preconsulta · {index + 1} de {total}</span><span>{progress}%</span></div>
     <div className="bk-q-progress" role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={index + 1} aria-label="Progreso de la preconsulta"><span style={{ width: `${progress}%` }} /></div>
-    {demoNote && <p className="bk-q-demo">Vista de demostración · tus respuestas no se guardan.</p>}
+    {demoNote && <p className="bk-q-demo">{demoNote === true ? "Vista de demostración · tus respuestas no se guardan." : demoNote}</p>}
     <div key={isPatientStep ? "patient" : question.id} className="bk-q-body">
       {eyebrow && <span className="bk-eyebrow">{eyebrow}</span>}
       <h1 id="smart-form-title">{isPatientStep ? "Tus datos para el turno" : question.title}</h1>
