@@ -1,0 +1,293 @@
+/* First steps after sign-up. Card, fields, buttons and messages come from components/auth/auth.css; this file only adds what is specific to the flow. */
+.onb-header,
+.onb-main {
+  width: 100%;
+  max-width: 680px;
+}
+.onb-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.onb-header a {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+}
+.onb-signout {
+  min-height: 44px;
+  padding: 0 4px;
+  background: none;
+  border: 0;
+  color: var(--muted-foreground);
+  font-size: 14px;
+  font-weight: 600;
+}
+.onb-signout:hover {
+  color: var(--primary);
+}
+.onb-main {
+  display: grid;
+  gap: 16px;
+}
+
+/* Progress */
+.onb-progress p {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2px 12px;
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+.onb-progress p span {
+  color: var(--muted-foreground);
+}
+.onb-bar {
+  height: 6px;
+  background: var(--sage-soft);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.onb-bar span {
+  display: block;
+  height: 100%;
+  background: var(--sage);
+  border-radius: inherit;
+  transition: width .2s;
+}
+.onb-progress ol {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  line-height: 1.4;
+}
+.onb-progress li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.onb-progress li:nth-child(2) {
+  justify-content: center;
+}
+.onb-progress li:nth-child(3) {
+  justify-content: flex-end;
+}
+.onb-progress li.done {
+  color: var(--success);
+}
+.onb-progress li.current {
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+/* Fields the auth screens do not have */
+.auth-field textarea {
+  width: 100%;
+  min-height: 88px;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--foreground);
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 1.5;
+  resize: vertical;
+}
+.auth-field textarea::placeholder {
+  color: #8A94A3;
+}
+.onb-days {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.onb-days legend {
+  margin-bottom: 6px;
+  padding: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.onb-days div {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+.onb-days button {
+  min-height: 48px;
+  padding: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--muted-foreground);
+  font-size: 14px;
+  font-weight: 600;
+}
+.onb-days button[aria-pressed="true"] {
+  background: var(--sage-subtle);
+  border-color: var(--sage);
+  color: var(--primary);
+}
+.onb-why {
+  display: flex;
+  gap: 10px;
+  margin: 0;
+  padding: 12px 14px;
+  background: var(--surface-muted);
+  border-radius: var(--radius-md);
+  color: var(--muted-foreground);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.onb-why svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--sage);
+}
+
+/* Actions: the main button first in the markup so it is the first thing reached on a phone. */
+.onb-actions {
+  display: grid;
+  gap: 4px;
+  justify-items: center;
+}
+.onb-back {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  background: none;
+  border: 0;
+  color: var(--primary);
+  font-size: 14px;
+  font-weight: 600;
+}
+.onb-back:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
+
+/* Final screen */
+.onb-done {
+  text-align: center;
+}
+.onb-done h1 {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 650;
+  line-height: 1.2;
+  letter-spacing: -0.03em;
+}
+.onb-done-lead {
+  margin: 8px 0 0;
+  color: var(--muted-foreground);
+  font-size: 15px;
+  line-height: 1.55;
+}
+.onb-summary,
+.onb-later ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  text-align: left;
+}
+.onb-summary {
+  display: grid;
+  gap: 12px;
+  margin: 24px 0 16px;
+  padding: 16px;
+  background: var(--sage-subtle);
+  border-radius: var(--radius-md);
+}
+.onb-summary li {
+  display: flex;
+  gap: 10px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.onb-summary svg {
+  flex: none;
+  margin-top: 3px;
+  color: var(--success);
+}
+.onb-summary span,
+.onb-later li {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.onb-summary b,
+.onb-later b {
+  display: block;
+  font-weight: 600;
+}
+.onb-later {
+  margin-bottom: 24px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  text-align: left;
+}
+.onb-later h2 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.onb-later ul {
+  display: grid;
+  gap: 10px;
+  color: var(--muted-foreground);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.onb-later b {
+  color: var(--foreground);
+}
+
+@media (min-width: 601px) {
+  /* Wide screens: "Volver" on the left, the main button takes the rest. */
+  .onb-actions {
+    grid-template-columns: auto 1fr;
+    align-items: center;
+    gap: 12px;
+  }
+  .onb-actions .auth-button {
+    order: 2;
+  }
+  .onb-actions .auth-button:only-child {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 600px) {
+  .onb-done h1 {
+    font-size: 23px;
+  }
+}
+/* Ranges stay in pairs on a phone ("desde" and "hasta" belong together), except where a time field no longer fits in half the card. */
+@media (min-width: 361px) and (max-width: 600px) {
+  .auth-grid.onb-pairs {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 12px;
+  }
+}
+@media (max-width: 360px) {
+  .onb-days div {
+    gap: 4px;
+  }
+  .onb-days button {
+    font-size: 13px;
+  }
+  .onb-progress ol {
+    font-size: 12px;
+  }
+}
