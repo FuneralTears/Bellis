@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { AlertCircle, ArrowRight, CalendarDays, Check, Clock3, Globe2, MapPin } from "lucide-react";
+import { AlertCircle, ArrowRight, CalendarDays, Check, Clock3, CreditCard, Globe2, MapPin } from "lucide-react";
 import BellisLogo from "@/components/brand/BellisLogo";
 import "./booking.css";
 
@@ -125,8 +125,9 @@ export function Badge({ tone = "neutral", children }: { tone?: Tone; children: R
   return <span className={`bk-badge bk-tone-${tone}`}>{children}</span>;
 }
 
-export function Notice({ tone = "info", icon, title, children }: { tone?: Tone; icon?: ReactNode; title: string; children?: ReactNode }) {
-  return <div className={`bk-notice bk-tone-${tone}`}>{icon}<div><b>{title}</b>{children && <p>{children}</p>}</div></div>;
+/** `live` announces the notice when it changes, for states the patient is waiting on. */
+export function Notice({ tone = "info", icon, title, children, live = false }: { tone?: Tone; icon?: ReactNode; title: string; children?: ReactNode; live?: boolean }) {
+  return <div className={`bk-notice bk-tone-${tone}`} role={live ? "status" : undefined}>{icon}<div><b>{title}</b>{children && <p>{children}</p>}</div></div>;
 }
 
 export function BookingAlert({ children }: { children: ReactNode }) {
@@ -149,9 +150,36 @@ export function BookingLoading({ label }: { label: string }) {
   return <section className="bk-card bk-loading" role="status"><span className="bk-skeleton bk-skeleton-avatar" /><span className="bk-skeleton bk-skeleton-title" /><span className="bk-skeleton bk-skeleton-line" /><span className="bk-skeleton bk-skeleton-line short" /><p>{label}</p></section>;
 }
 
-/** Full-card message for dead ends such as a profile that does not exist. */
-export function BookingMessage({ title, children }: { title: string; children: ReactNode }) {
-  return <section className="bk-card bk-card-center bk-message" role="alert"><span className="bk-mark bk-tone-neutral"><CalendarDays size={26}/></span><h1>{title}</h1><p className="bk-card-description">{children}</p></section>;
+/** Full-card message for dead ends such as a profile that does not exist. `action` offers the way out when there is one. */
+export function BookingMessage({ title, children, action }: { title: string; children: ReactNode; action?: ReactNode }) {
+  return <section className="bk-card bk-card-center bk-message" role="alert"><span className="bk-mark bk-tone-neutral"><CalendarDays size={26}/></span><h1>{title}</h1><p className="bk-card-description">{children}</p>{action && <div className="bk-actions">{action}</div>}</section>;
+}
+
+const failedPayment: Record<string, string> = { rejected: "El pago no pudo completarse.", cancelled: "El pago fue cancelado.", expired: "El pago venció." };
+/**
+ * Whether the patient should be offered to pay again. `hint` is how the checkout said it ended when they came back:
+ * it only changes the wording while no payment has been recorded yet. The status is what the server holds.
+ */
+export function paymentNeedsRetry(status: string, returned = false, hint: string | null = null): boolean {
+  return status in failedPayment || (returned && hint === "failure" && status === "pending");
+}
+
+/**
+ * The payment step, before paying and after coming back from the checkout. It never unlocks anything by itself:
+ * the page moves on to the schedule only when the server says the payment is approved.
+ */
+export function PaymentStep({ status, returned = false, hint = null, guidance, summary, alert, children }: {
+  status: string; returned?: boolean; hint?: string | null; guidance: string; summary?: ReactNode; alert?: ReactNode; children: ReactNode;
+}) {
+  const retry = paymentNeedsRetry(status, returned, hint);
+  return <BookingCard eyebrow="Pago" title={retry ? "No pudimos confirmar el pago" : returned ? "Tu pago está pendiente de confirmación" : "Realizá el pago"} description={retry || returned ? undefined : guidance}>
+    {summary}
+    {retry ? <Notice live tone="danger" icon={<CreditCard size={20}/>} title={failedPayment[status] ?? "Todavía no recibimos tu pago."}>Podés intentarlo de nuevo. El turno se reserva recién cuando el pago queda confirmado.</Notice>
+      : returned ? <Notice live tone="warning" icon={<CreditCard size={20}/>} title="Estamos esperando la confirmación del pago.">Puede tardar unos minutos. Esta pantalla se actualiza sola.</Notice>
+      : <Notice live tone="warning" icon={<CreditCard size={20}/>} title="El turno todavía no está reservado">Volvé a esta pantalla después de pagar y consultá el estado.</Notice>}
+    {alert}
+    <div className="bk-actions">{children}</div>
+  </BookingCard>;
 }
 
 export function SuccessMark() {

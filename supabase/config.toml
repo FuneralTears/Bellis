@@ -1,0 +1,14 @@
+# Only what the Edge Functions need. JWT verification stays on by default for any other function.
+
+# Patients have no account: the function checks the origin, rate limits and the intent token itself.
+[functions.bellis-public]
+verify_jwt = false
+
+# Called by Mercado Pago's servers: authenticated by the HMAC signature of each notification.
+[functions.bellis-mp-webhook]
+verify_jwt = false
+
+# Every action requires a signed-in person and verifies that session in code, against Supabase Auth.
+# Gateway verification stays off so the browser's CORS preflight, which carries no session, is not rejected.
+[functions.bellis-mp-oauth]
+verify_jwt = false

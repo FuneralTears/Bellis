@@ -29,10 +29,18 @@ export async function publicRequest<T>(action: string, options: { method?: "GET"
     body: options.body ? JSON.stringify(options.body) : undefined,
     cache: "no-store",
   });
-  const result = await response.json() as T & { error?: string };
-  if (!response.ok) throw new Error(result.error ?? "No pudimos completar la solicitud");
+  const result = await response.json() as T & { error?: string; code?: string };
+  // `status` and `code` let the page tell an expired or unknown request from a passing failure; the text is already for the patient.
+  if (!response.ok) throw Object.assign(new Error(result.error ?? "No pudimos completar la solicitud"), { status: response.status, code: result.code });
   return result;
 }
+
+/** What the server returns for the token a patient comes back from the checkout with. */
+export type ResumedBooking = {
+  step: "payment" | "schedule" | "done"; paymentStatus: string;
+  service: { id: string; name: string; modality: string; duration_minutes: number; price_minor: number; currency_code: string };
+  checkoutUrl: string | null; appointment: { starts_at: string; ends_at: string } | null;
+};
 
 export function submittedAnswers(answers: QuestionnaireAnswers) {
   return Object.entries(answers).map(([question_id, answer]) => ({ question_id, answer }));

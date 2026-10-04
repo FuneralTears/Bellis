@@ -1,10 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, ArrowRight, CreditCard } from "lucide-react";
-import { Badge, BookingAlert, BookingCard, BookingContext, BookingLoading, BookingMessage, BookingPanel, BookingShell, BookingStepper, HowItWorks, Notice, ProfessionalIntro, ServiceCard, SlotPicker, SuccessMark, SummaryList, paymentStatusInfo } from "@/components/booking/BookingUi";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ArrowLeft, ArrowRight } from "lucide-react";
+import { Badge, BookingAlert, BookingCard, BookingContext, BookingLoading, BookingMessage, BookingPanel, BookingShell, BookingStepper, HowItWorks, PaymentStep, ProfessionalIntro, ServiceCard, SlotPicker, SuccessMark, SummaryList, paymentNeedsRetry, paymentStatusInfo } from "@/components/booking/BookingUi";
 import { formatMoney, formatDateTime } from "@/lib/market";
-import { publicRequest, submittedAnswers, type PublicProfile, type PublicService } from "@/lib/bellis-public";
+import { publicRequest, submittedAnswers, type PublicProfile, type PublicService, type ResumedBooking } from "@/lib/bellis-public";
 import { QuestionnaireFlow, type PatientDraft } from "@/app/profesional/ana-lopez/questionnaire-flow";
 import type { QuestionnaireAnswers } from "@/lib/questionnaires/model";
 
@@ -28,6 +28,34 @@ export function LivePublicProfile({ slug }: { slug: string }) {
   const [slots, setSlots] = useState<string[]>([]);
   const [slot, setSlot] = useState("");
   const [appointment, setAppointment] = useState<AppointmentResult["appointment"] | null>(null);
+  // Coming back from the checkout with ?resume=: the request is recovered from the server, never from this address.
+  const [recovery, setRecovery] = useState<"none" | "verifying" | "invalid" | "expired">(() =>
+    typeof window !== "undefined" && new URLSearchParams(window.location.search).has("resume") ? "verifying" : "none");
+  const [returned, setReturned] = useState(false);
+  // How the checkout said it ended. Wording only: it never decides the step.
+  const [hint, setHint] = useState<string | null>(null);
+  const resumed = useRef(false);
+  useEffect(() => {
+    if (!profile || resumed.current) return;
+    const query = new URLSearchParams(window.location.search);
+    const resume = query.get("resume");
+    if (!resume) return;
+    resumed.current = true;
+    const arrivedWith = query.get("mp");
+    // The token must not stay in the address bar or the browser history.
+    window.history.replaceState(null, "", window.location.pathname);
+    publicRequest<ResumedBooking>("resume", { method: "POST", body: { resume, slug } }).then((result) => {
+      setService({ ...result.service, description: null, can_checkout: true });
+      setToken(resume); setCheckoutUrl(result.checkoutUrl ?? ""); setPaymentStatus(result.paymentStatus);
+      setReturned(true); setHint(arrivedWith);
+      if (result.step === "done" && result.appointment) { window.sessionStorage.removeItem(`bellis-intent:${slug}`); setAppointment(result.appointment); setStep(5); }
+      else {
+        window.sessionStorage.setItem(`bellis-intent:${slug}`, JSON.stringify({ token: resume, checkoutUrl: result.checkoutUrl ?? "", serviceId: result.service.id }));
+        setStep(result.step === "schedule" ? 4 : 3);
+      }
+      setRecovery("none");
+    }).catch((caught) => setRecovery((caught as { code?: string }).code === "expired" ? "expired" : "invalid"));
+  }, [profile, slug]);
   useEffect(() => {
     let active = true;
     publicRequest<PublicProfile>("profile", { params: { slug } })
@@ -37,7 +65,7 @@ export function LivePublicProfile({ slug }: { slug: string }) {
     return () => { active = false; };
   }, [slug]);
   useEffect(() => {
-    if (!profile || token) return;
+    if (!profile || token || recovery !== "none") return;
     try {
       const saved = JSON.parse(window.sessionStorage.getItem(`bellis-intent:${slug}`) ?? "null") as { token?: string; checkoutUrl?: string; serviceId?: string } | null;
       if (saved?.token && /^[a-f0-9]{64}$/.test(saved.token)) {
@@ -45,13 +73,19 @@ export function LivePublicProfile({ slug }: { slug: string }) {
         if (previousService) { setService(previousService); setToken(saved.token); setCheckoutUrl(saved.checkoutUrl ?? ""); setStep(3); }
       }
     } catch { window.sessionStorage.removeItem(`bellis-intent:${slug}`); }
-  }, [profile, slug, token]);
+  }, [profile, slug, token, recovery]);
   const refreshStatus = useCallback(async () => {
     if (!token) return;
-    const result = await publicRequest<{ status: string; paymentStatus: string }>("status", { token });
+    let result: { status: string; paymentStatus: string };
+    try { result = await publicRequest<{ status: string; paymentStatus: string }>("status", { token }); }
+    catch (caught) {
+      // The request is gone or expired: stop asking, and say so instead of waiting forever.
+      if ((caught as { status?: number }).status === 404) { window.sessionStorage.removeItem(`bellis-intent:${slug}`); setToken(""); setRecovery("expired"); return; }
+      throw caught;
+    }
     setPaymentStatus(result.paymentStatus);
     if (result.status === "awaiting_schedule" || result.status === "payment_confirmed") setStep(4);
-  }, [token]);
+  }, [token, slug]);
   useEffect(() => {
     if (step !== 3 || !token) return;
     const timer = window.setInterval(() => { refreshStatus().catch(() => undefined); }, 8000);
@@ -108,7 +142,10 @@ export function LivePublicProfile({ slug }: { slug: string }) {
   // Stage shown in the stepper for each internal step: the review before paying belongs to "Pago".
   const stage = [0, 1, 2, 2, 3, 4][step];
   return <BookingShell professional={profile ? fullName : undefined}>
-    {loading ? <BookingLoading label="Cargando agenda…" /> : !profile ? <BookingMessage title="Agenda no disponible">{error || "No encontramos este perfil."}</BookingMessage> : step === 0 ? <>
+    {loading ? <BookingLoading label="Cargando agenda…" /> : !profile ? <BookingMessage title="Agenda no disponible">{error || "No encontramos este perfil."}</BookingMessage>
+      : recovery === "verifying" ? <BookingLoading label="Estamos verificando tu pago…" />
+      : recovery !== "none" ? <BookingMessage title={recovery === "expired" ? "Esta reserva venció" : "No pudimos recuperar esta reserva"} action={<button className="bk-button" type="button" onClick={() => { setRecovery("none"); setStep(0); setError(""); }}>Volver a empezar <ArrowRight size={17}/></button>}>{recovery === "expired" ? "Pasó el tiempo para completar el pago. Empezá de nuevo para elegir un turno." : "El enlace no es válido o la reserva ya no está disponible. Si ya pagaste, escribile al profesional."}</BookingMessage>
+      : step === 0 ? <>
       <ProfessionalIntro name={fullName} specialty={profile.professional.specialty} modalities={modalities} location={location} />
       <div className="bk-profile-grid"><div className="bk-profile-main">
         {profile.professional.biography && <BookingPanel title="Sobre la consulta"><p>{profile.professional.biography}</p></BookingPanel>}
@@ -126,12 +163,11 @@ export function LivePublicProfile({ slug }: { slug: string }) {
         {alert}
         <div className="bk-actions"><button className="bk-button" type="button" disabled={!consent || busy} onClick={startPayment}>{busy ? "Preparando cobro…" : "Continuar al pago"} <ArrowRight size={17}/></button></div>
       </BookingCard>}
-      {step === 3 && <BookingCard eyebrow="Pago" title="Realizá el pago" description={profile.paymentFlow.guidance}>
-        {service && <SummaryList rows={[["Servicio", service.name], ["Estado del pago", <Badge key="status" tone={payment.tone}>{payment.label}</Badge>]]} total={["Total", money(service.price_minor)]} />}
-        <Notice tone={payment.tone === "danger" ? "danger" : "warning"} icon={<CreditCard size={20}/>} title="El turno todavía no está reservado">Volvé a esta pantalla después de pagar y consultá el estado.</Notice>
-        {alert}
-        <div className="bk-actions"><a className="bk-button" href={checkoutUrl} target="_blank" rel="noopener noreferrer">{profile.paymentFlow.actionLabel} <ArrowRight size={17}/></a><button className="bk-button bk-button-secondary" type="button" onClick={() => refreshStatus().catch((caught) => setError(caught.message))}>Consultar estado del pago</button></div>
-      </BookingCard>}
+      {step === 3 && <PaymentStep status={paymentStatus} returned={returned} hint={hint} guidance={profile.paymentFlow.guidance} alert={alert}
+        summary={service && <SummaryList rows={[["Servicio", service.name], ["Estado del pago", <Badge key="status" tone={payment.tone}>{payment.label}</Badge>]]} total={["Total", money(service.price_minor)]} />}>
+        {checkoutUrl && <a className="bk-button" href={checkoutUrl} target="_blank" rel="noopener noreferrer">{paymentNeedsRetry(paymentStatus, returned, hint) ? "Reintentar el pago" : profile.paymentFlow.actionLabel} <ArrowRight size={17}/></a>}
+        <button className="bk-button bk-button-secondary" type="button" onClick={() => refreshStatus().catch((caught) => setError(caught.message))}>Consultar estado del pago</button>
+      </PaymentStep>}
       {step === 4 && <BookingCard eyebrow="Horario" badge={<Badge tone="success">Pago confirmado</Badge>} title="Elegí el horario de tu turno" description="Estos horarios se calculan a partir de la disponibilidad real y se verifican de nuevo al confirmar.">
         <SlotPicker day={day} onDay={loadSlots} busy={busy} slots={slots.map((item) => ({ value: item, label: new Intl.DateTimeFormat(profile.market.locale, { hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: profile.market.timezone }).format(new Date(item)) }))} selected={slot} onSelect={(value) => { setSlot(value); setError(""); }} />
         {alert}

@@ -5,6 +5,7 @@ export interface PaymentProvider {
   createCheckout(order: {
     intentId: string; serviceId: string; title: string; amountMinor: number;
     currency: string; returnUrl: string; notificationUrl: string; environment: "test" | "production";
+    expiresAt?: string; returnUrls?: { success: string; pending: string; failure: string };
   }): Promise<CheckoutSession>;
 }
 export type VerifiedMercadoPagoPayment = {
@@ -63,6 +64,7 @@ export class MercadoPagoArgentinaProvider implements PaymentProvider {
   async createCheckout(order: {
     intentId: string; serviceId: string; title: string; amountMinor: number;
     currency: string; returnUrl: string; notificationUrl: string; environment: "test" | "production";
+    expiresAt?: string; returnUrls?: { success: string; pending: string; failure: string };
   }): Promise<{ providerOrderId: string; redirectUrl: string }> {
     if (order.currency.trim() !== "ARS" || order.amountMinor <= 0 || !Number.isInteger(order.amountMinor))
       throw new Error("invalid_mercado_pago_amount");
@@ -73,8 +75,11 @@ export class MercadoPagoArgentinaProvider implements PaymentProvider {
           unit_price: order.amountMinor / 100 }],
         external_reference: order.intentId,
         notification_url: order.notificationUrl,
-        back_urls: { success: order.returnUrl, pending: order.returnUrl, failure: order.returnUrl },
+        back_urls: order.returnUrls ?? { success: order.returnUrl, pending: order.returnUrl, failure: order.returnUrl },
         auto_return: "approved",
+        // The checkout stops accepting payments when the request it belongs to expires.
+        ...(order.expiresAt && Number.isFinite(Date.parse(order.expiresAt))
+          ? { expires: true, expiration_date_to: new Date(order.expiresAt).toISOString().replace("Z", "+00:00") } : {}),
       }),
     });
     const redirectUrl = order.environment === "test" ? result.sandbox_init_point : result.init_point;

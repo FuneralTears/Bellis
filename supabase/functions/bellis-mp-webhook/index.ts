@@ -1,9 +1,13 @@
 import { createClient } from "npm:@supabase/supabase-js@2.117.2";
-import { mercadoPagoAccount, mercadoPagoProvider, recordVerifiedPayment } from "../_shared/bellis-payment.ts";
+import { recordVerifiedPayment, withSellerAccount } from "../_shared/bellis-payment.ts";
 import { verifyMercadoPagoSignature } from "../_shared/mercado-pago.ts";
+import { getValidMercadoPagoAccessToken, oauthConfigFromEnv, supabaseConnectionStore, type ValidAccount } from "../_shared/mercado-pago-oauth.ts";
 
 const db = createClient(Deno.env.get("SUPABASE_URL") ?? "", Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
   { auth: { persistSession: false } });
+// Reading the payment back from Mercado Pago needs the seller's token, renewed here when it is about to expire.
+const connections = supabaseConnectionStore(db);
+const oauth = oauthConfigFromEnv((name) => Deno.env.get(name), Deno.env.get("BELLIS_SITE_ORIGIN") ?? "");
 
 Deno.serve(async (request) => {
   if (request.method !== "POST") return new Response(null, { status: 405 });
@@ -20,9 +24,11 @@ Deno.serve(async (request) => {
       .select("id,workspace_id,price_minor,currency_code").eq("id", intentId).maybeSingle();
     if (error) throw error;
     if (!intent) return new Response(null, { status: 200 });
-    const account = await mercadoPagoAccount(db, intent.workspace_id);
-    if (!account) return new Response(null, { status: 503 });
-    const payment = await mercadoPagoProvider(account).getPayment(paymentId);
+    // No usable account right now (disconnected, renewal failing): answer 503 so Mercado Pago sends the notification again.
+    let account: ValidAccount;
+    try { account = await getValidMercadoPagoAccessToken(connections, oauth, intent.workspace_id); }
+    catch { return new Response(null, { status: 503 }); }
+    const payment = await withSellerAccount(connections, intent.workspace_id, account, (provider) => provider.getPayment(paymentId));
     await recordVerifiedPayment(db, intent, account, payment, `webhook:${String(event.id ?? paymentId)}`);
     return new Response(null, { status: 200 });
   } catch {

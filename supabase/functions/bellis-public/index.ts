@@ -1,7 +1,9 @@
 import { createClient } from "npm:@supabase/supabase-js@2.117.2";
-import { mercadoPagoAccount, mercadoPagoProvider, recordVerifiedPayment } from "../_shared/bellis-payment.ts";
+import { createMercadoPagoCheckout, mercadoPagoAccount, recordVerifiedPayment, withSellerAccount } from "../_shared/bellis-payment.ts";
 import { ExternalPaymentLinkProvider } from "../_shared/mercado-pago.ts";
+import { getValidMercadoPagoAccessToken, oauthConfigFromEnv, supabaseConnectionStore, type ValidAccount } from "../_shared/mercado-pago-oauth.ts";
 import { checkoutReturnOrigin, configuredOrigins, isAllowedOrigin } from "../_shared/origin-policy.ts";
+import { checkoutReturnUrls, newResumeToken, resumeAnswer, resumeTokenPattern } from "../_shared/bellis-return.ts";
 
 const db = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
@@ -10,6 +12,12 @@ const db = createClient(
 );
 const siteOrigin = Deno.env.get("BELLIS_SITE_ORIGIN") ?? "https://bellis-agenda.pint-solutio-0057.chatgpt.site";
 const allowedOrigins = configuredOrigins(siteOrigin, Deno.env.get("BELLIS_ADDITIONAL_ORIGINS") ?? "");
+// Seller tokens are read, and renewed when they are about to expire, only here on the server.
+const connections = supabaseConnectionStore(db);
+const oauth = oauthConfigFromEnv((name) => Deno.env.get(name), siteOrigin);
+const paymentUnavailable = "No pudimos iniciar el pago en este momento. Intentá nuevamente más tarde.";
+/** Short code for the log. Never a token, a request body or what Mercado Pago answered. */
+const reason = (caught: unknown) => caught instanceof Error ? caught.message.slice(0, 60) : "unknown";
 
 function cors(request: Request) {
   const origin = request.headers.get("origin") ?? "";
@@ -42,11 +50,26 @@ async function getIntent(request: Request) {
   const token = request.headers.get("x-bellis-intent") ?? "";
   if (!/^[a-f0-9]{64}$/.test(token)) return null;
   const hash = await sha256(token);
+  // The request is reached with the token its first tab holds, or with the one that came back from the checkout.
   const { data } = await db.from("booking_intents")
     .select("id,workspace_id,professional_id,service_id,patient_id,status,price_minor,currency_code,duration_minutes,expires_at")
-    .eq("access_token_hash", hash).maybeSingle();
+    .or(`access_token_hash.eq.${hash},resume_token_hash.eq.${hash}`).maybeSingle();
   if (!data || new Date(data.expires_at).getTime() < Date.now()) return null;
   return data;
+}
+type Intent = NonNullable<Awaited<ReturnType<typeof getIntent>>>;
+/** Asks Mercado Pago whether the request has been paid and records what it verifies. A slow or failed answer leaves it pending. */
+async function reconcile(intent: Intent) {
+  const { data: stored } = await db.from("payments").select("status,provider,provider_order_id")
+    .eq("booking_intent_id", intent.id).maybeSingle();
+  if (stored?.provider !== "mercado_pago_ar" || !stored.provider_order_id || stored.status === "approved") return;
+  try {
+    const account = await getValidMercadoPagoAccessToken(connections, oauth, intent.workspace_id);
+    const matches = await withSellerAccount(connections, intent.workspace_id, account, (provider) => provider.findPayments(intent.id));
+    const selected = matches.filter((item) => item.preferenceId === stored.provider_order_id)
+      .sort((a, b) => Number(b.status === "approved") - Number(a.status === "approved"))[0];
+    if (selected) await recordVerifiedPayment(db, intent, account, selected, `status:${selected.id}:${selected.status}`);
+  } catch { /* A delayed provider response leaves the order pending. */ }
 }
 async function profile(request: Request, slug: string) {
   if (!/^[a-z0-9-]{3,100}$/.test(slug)) return json(request, { error: "Perfil no encontrado" }, 404);
@@ -121,6 +144,21 @@ Deno.serve(async (request) => {
       const body = await request.json();
       if (!/^[a-f0-9-]{36}$/i.test(body.serviceId ?? "") || !Array.isArray(body.answers) || body.answers.length > 50)
         return json(request, { error: "Revisá los datos de la preconsulta" }, 400);
+      // With Mercado Pago, make sure the workspace's own account has a usable token before creating anything.
+      // The workspace comes from the service stored on the server, never from the request.
+      const { data: target } = await db.from("services").select("workspace_id").eq("id", body.serviceId).maybeSingle();
+      const { data: method } = target
+        ? await db.from("workspaces").select("payment_provider").eq("id", target.workspace_id).maybeSingle() : { data: null };
+      let account: ValidAccount | null = null;
+      if (target && method?.payment_provider === "mercado_pago_ar") {
+        try {
+          if (!Deno.env.get("MERCADO_PAGO_WEBHOOK_SECRET")) throw new Error("webhook_secret_missing");
+          account = await getValidMercadoPagoAccessToken(connections, oauth, target.workspace_id);
+        } catch (caught) {
+          console.warn(`bellis-public checkout unavailable: ${reason(caught)}`);
+          return json(request, { error: paymentUnavailable }, 503);
+        }
+      }
       const token = [...crypto.getRandomValues(new Uint8Array(32))].map((byte) => byte.toString(16).padStart(2, "0")).join("");
       const { data: intentId, error } = await db.rpc("create_checkout_intent", {
         p_service: body.serviceId,
@@ -133,7 +171,7 @@ Deno.serve(async (request) => {
       });
       if (error) return json(request, { error: "No pudimos crear la solicitud. Revisá el formulario y que el cobro esté configurado." }, 400);
       const { data: intent } = await db.from("booking_intents")
-        .select("id,workspace_id,service_id,professional_id,price_minor,currency_code").eq("id", intentId).single();
+        .select("id,workspace_id,service_id,professional_id,price_minor,currency_code,expires_at").eq("id", intentId).single();
       if (!intent) throw new Error("intent_unavailable");
       const [{ data: workspace }, { data: service }, { data: professional }] = await Promise.all([
         db.from("workspaces").select("payment_provider,external_payment_url").eq("id", intent.workspace_id).single(),
@@ -146,21 +184,51 @@ Deno.serve(async (request) => {
           .createCheckout({ intentId: intent.id });
         return json(request, { token, checkoutUrl: checkout.redirectUrl });
       }
-      if (workspace.payment_provider !== "mercado_pago_ar" || !Deno.env.get("MERCADO_PAGO_WEBHOOK_SECRET"))
+      if (workspace.payment_provider !== "mercado_pago_ar" || !account || intent.workspace_id !== target?.workspace_id)
         throw new Error("checkout_unavailable");
-      const account = await mercadoPagoAccount(db, intent.workspace_id);
-      if (!account) throw new Error("checkout_unavailable");
-      const checkout = await mercadoPagoProvider(account).createCheckout({
-        intentId: intent.id, serviceId: intent.service_id, title: service.name,
-        amountMinor: intent.price_minor, currency: intent.currency_code, environment: account.environment,
-        returnUrl: `${checkoutReturnOrigin(origin, siteOrigin, allowedOrigins)}/p/${professional.public_slug}`,
-        notificationUrl: `${Deno.env.get("SUPABASE_URL")}/functions/v1/bellis-mp-webhook?intent=${intent.id}`,
-      });
-      const { error: preferenceError } = await db.rpc("set_mercado_pago_preference", {
-        p_intent: intent.id, p_preference: checkout.providerOrderId,
-      });
-      if (preferenceError) throw preferenceError;
-      return json(request, { token, checkoutUrl: checkout.redirectUrl });
+      try {
+        // Amount, currency and service come from the stored request; the seller is the workspace's own account.
+        // The return address carries only the slug and an opaque token for this request.
+        const resumeToken = newResumeToken();
+        const returnOrigin = checkoutReturnOrigin(origin, siteOrigin, allowedOrigins);
+        const checkoutUrl = await createMercadoPagoCheckout(connections, account, {
+          intentId: intent.id, workspaceId: intent.workspace_id, serviceId: intent.service_id, title: service.name,
+          amountMinor: intent.price_minor, currency: intent.currency_code, expiresAt: intent.expires_at,
+          returnUrl: `${returnOrigin}/p/${professional.public_slug}`,
+          returnUrls: checkoutReturnUrls(returnOrigin, professional.public_slug, resumeToken),
+          notificationUrl: `${Deno.env.get("SUPABASE_URL")}/functions/v1/bellis-mp-webhook?intent=${intent.id}`,
+        }, async (preferenceId, redirectUrl) => {
+          const { error: attachError } = await db.rpc("attach_mercado_pago_checkout", {
+            p_intent: intent.id, p_preference: preferenceId, p_checkout_url: redirectUrl, p_resume_hash: await sha256(resumeToken),
+          });
+          if (attachError) throw new Error("checkout_not_saved");
+        }, async (intentId) => { await db.rpc("cancel_unpaid_intent", { p_intent: intentId }); });
+        return json(request, { token, checkoutUrl });
+      } catch (caught) {
+        console.warn(`bellis-public checkout failed: ${reason(caught)}`);
+        return json(request, { error: paymentUnavailable }, 503);
+      }
+    }
+    if (action === "resume" && request.method === "POST") {
+      if (!await limit(request, action, 60, 10)) return json(request, { error: "Intentá nuevamente más tarde" }, 429);
+      const body = await request.json().catch(() => null) as { resume?: unknown; slug?: unknown } | null;
+      const resume = typeof body?.resume === "string" && resumeTokenPattern.test(body.resume) ? body.resume : "";
+      const slug = typeof body?.slug === "string" ? body.slug : "";
+      // Who the request belongs to, what it costs and whether it is paid all come from the stored request.
+      const { data: found } = resume ? await db.from("booking_intents")
+        .select("id,workspace_id,professional_id,service_id,patient_id,status,price_minor,currency_code,duration_minutes,expires_at")
+        .eq("resume_token_hash", await sha256(resume)).maybeSingle() : { data: null };
+      const { data: owner } = found ? await db.from("professionals").select("public_slug").eq("id", found.professional_id).maybeSingle() : { data: null };
+      if (!found || !owner || owner.public_slug !== slug) return json(request, { error: "No pudimos recuperar esta reserva.", code: "invalid" }, 404);
+      if (found.status === "pending_payment" && new Date(found.expires_at).getTime() > Date.now()) await reconcile(found);
+      const [{ data: latest }, { data: payment }, { data: service }, { data: appointment }] = await Promise.all([
+        db.from("booking_intents").select("status,expires_at,price_minor,currency_code,duration_minutes,service_id").eq("id", found.id).single(),
+        db.from("payments").select("status,checkout_url").eq("booking_intent_id", found.id).maybeSingle(),
+        db.from("services").select("name,modality").eq("id", found.service_id).maybeSingle(),
+        db.from("appointments").select("starts_at,ends_at").eq("booking_intent_id", found.id).maybeSingle(),
+      ]);
+      const answer = resumeAnswer(latest && service ? { intent: latest, slug: owner.public_slug, service, payment, appointment } : null, slug, Date.now());
+      return answer.ok ? json(request, answer.body) : json(request, answer.body, answer.status);
     }
     if (["status", "slots", "book"].includes(action)) {
       if (!await limit(request, action, action === "book" ? 15 : 120, 10))
@@ -168,20 +236,7 @@ Deno.serve(async (request) => {
       const intent = await getIntent(request);
       if (!intent) return json(request, { error: "La solicitud venció o no existe" }, 404);
       if (action === "status" && request.method === "GET") {
-        const { data: stored } = await db.from("payments").select("status,provider,provider_order_id")
-          .eq("booking_intent_id", intent.id).maybeSingle();
-        if (stored?.provider === "mercado_pago_ar" && stored.provider_order_id && stored.status !== "approved") {
-          try {
-            const account = await mercadoPagoAccount(db, intent.workspace_id);
-            if (account) {
-              const matches = await mercadoPagoProvider(account).findPayments(intent.id);
-              const selected = matches.filter((item) => item.preferenceId === stored.provider_order_id)
-                .sort((a, b) => Number(b.status === "approved") - Number(a.status === "approved"))[0];
-              if (selected) await recordVerifiedPayment(db, intent, account, selected,
-                `status:${selected.id}:${selected.status}`);
-            }
-          } catch { /* A delayed provider response leaves the order pending. */ }
-        }
+        await reconcile(intent);
         const [{ data: latestIntent }, { data: payment }] = await Promise.all([
           db.from("booking_intents").select("status").eq("id", intent.id).single(),
           db.from("payments").select("status").eq("booking_intent_id", intent.id).maybeSingle(),
