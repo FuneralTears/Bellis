@@ -1,6 +1,6 @@
 # Base de datos Bellis
 
-Proyecto de desarrollo: `pinfdbvfzoratsntjgah` (`sa-east-1`). Las migraciones de `migrations/` ya están aplicadas a este proyecto; no repetirlas manualmente allí.
+Hay dos proyectos: **producción** `pinfdbvfzoratsntjgah` (`sa-east-1`, el que este documento llamaba "desarrollo") y **Staging** `hbvmcvemrkfovzhlpgys`. Las migraciones de Mercado Pago están aplicadas solo en Staging. Las pruebas `.sql` se corren en Staging o en una base local, nunca en producción. Ver "Separación de entornos" en `MERCADO_PAGO.md`.
 
 Entidades reales: `workspaces`, `workspace_members`, `professionals`, `services`, `availability_rules`, `availability_blocks`, `patients`, `questionnaires`, `questionnaire_sections`, `questionnaire_questions`, `questionnaire_conditions`, `questionnaire_answers`, `booking_intents`, `payments`, `appointments`, `notification_outbox`, `audit_events` y `public_request_limits`. Las tablas antiguas `forms`/`form_questions` no se usan en el flujo actual.
 

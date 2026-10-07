@@ -25,7 +25,8 @@ export type ValidAccount = { seller_user_id: string; access_token: string; envir
 export type CompletionOutcome = "connected" | "invalid_state" | "error";
 
 type Fetch = typeof fetch;
-type Clock = { fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise<void> };
+/** `report` receives the short internal reason of a failure, for the log. Never a token or a code. */
+type Clock = { fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise<void>; report?: (reason: string) => void };
 
 /** `permanent` means Mercado Pago rejected the grant itself: retrying will not help, the owner has to reconnect. */
 export class MercadoPagoOAuthError extends Error {
@@ -69,9 +70,15 @@ async function requestTokens(config: OAuthConfig, grant: Record<string, string |
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({ client_id: config.clientId, client_secret: config.clientSecret, ...grant }),
   });
-  // The body of a failed answer is never read: it can echo what was sent.
-  if (!response.ok)
+  if (!response.ok) {
+    // Only the short `error` code of a failed answer is looked at, against a fixed list. The rest can echo what was sent.
+    const refused = response.status === 400 || response.status === 401
+      ? String(((await response.json().catch(() => null)) as { error?: unknown } | null)?.error ?? "") : "";
+    // Mercado Pago refusing Bellis's own credentials says nothing about the seller's authorization: never permanent.
+    if (refused === "invalid_client" || refused === "unauthorized_client")
+      throw new MercadoPagoOAuthError("mercado_pago_oauth_invalid_client", false);
     throw new MercadoPagoOAuthError(`mercado_pago_oauth_http_${response.status}`, response.status === 400 || response.status === 401);
+  }
   const body = await response.json() as {
     access_token?: unknown; refresh_token?: unknown; expires_in?: unknown; user_id?: unknown; live_mode?: unknown;
   };
@@ -118,7 +125,8 @@ export async function completeOAuth(
     const tokens = await requestTokens(config, grant, (clock.now ?? Date.now)(), clock.fetch ?? fetch);
     await store.saveConnection(workspaceId, params.userId, tokens);
     return "connected";
-  } catch {
+  } catch (caught) {
+    clock.report?.(caught instanceof MercadoPagoOAuthError ? caught.message : "connection_not_saved");
     return "error";
   }
 }

@@ -1,23 +1,25 @@
 import { createClient } from "npm:@supabase/supabase-js@2.117.2";
-import { createMercadoPagoCheckout, mercadoPagoAccount, recordVerifiedPayment, withSellerAccount } from "../_shared/bellis-payment.ts";
+import { createMercadoPagoCheckout, mercadoPagoConnected, recordVerifiedPayment, withSellerAccount } from "../_shared/bellis-payment.ts";
 import { ExternalPaymentLinkProvider } from "../_shared/mercado-pago.ts";
 import { getValidMercadoPagoAccessToken, oauthConfigFromEnv, supabaseConnectionStore, type ValidAccount } from "../_shared/mercado-pago-oauth.ts";
 import { checkoutReturnOrigin, configuredOrigins, isAllowedOrigin } from "../_shared/origin-policy.ts";
-import { checkoutReturnUrls, newResumeToken, resumeAnswer, resumeTokenPattern } from "../_shared/bellis-return.ts";
+import { bookingAnswer, checkoutReturnUrls, newResumeToken, resumeAnswer, resumeTokenPattern } from "../_shared/bellis-return.ts";
+import { logEvent, patientMessage, paymentErrorCode, type LogFields, type PaymentErrorCode } from "../_shared/payment-errors.ts";
 
 const db = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
   { auth: { persistSession: false } },
 );
-const siteOrigin = Deno.env.get("BELLIS_SITE_ORIGIN") ?? "https://bellis-agenda.pint-solutio-0057.chatgpt.site";
+// No default: an environment that does not say where its site is must not send patients to another environment's.
+const siteOrigin = Deno.env.get("BELLIS_SITE_ORIGIN") ?? "";
 const allowedOrigins = configuredOrigins(siteOrigin, Deno.env.get("BELLIS_ADDITIONAL_ORIGINS") ?? "");
 // Seller tokens are read, and renewed when they are about to expire, only here on the server.
 const connections = supabaseConnectionStore(db);
 const oauth = oauthConfigFromEnv((name) => Deno.env.get(name), siteOrigin);
-const paymentUnavailable = "No pudimos iniciar el pago en este momento. Intentá nuevamente más tarde.";
-/** Short code for the log. Never a token, a request body or what Mercado Pago answered. */
-const reason = (caught: unknown) => caught instanceof Error ? caught.message.slice(0, 60) : "unknown";
+/** Ids and codes only. Never a token, a request body or what Mercado Pago answered. */
+const log = (level: "info" | "warn" | "error", event: string, fields: LogFields = {}) => logEvent("bellis-public", level, event, fields);
+if (!siteOrigin) log("error", "config_missing", { error_code: "mp_config_missing" });
 
 function cors(request: Request) {
   const origin = request.headers.get("origin") ?? "";
@@ -31,6 +33,10 @@ function cors(request: Request) {
 }
 function json(request: Request, data: unknown, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: { ...cors(request), "Content-Type": "application/json" } });
+}
+/** A refusal the page can tell apart by `code`. The sentence is for the patient and never carries technical detail. */
+function refuse(request: Request, code: PaymentErrorCode, status: number) {
+  return json(request, { error: patientMessage(code), code }, status);
 }
 async function sha256(value: string) {
   const bytes = new TextEncoder().encode(value);
@@ -62,14 +68,22 @@ type Intent = NonNullable<Awaited<ReturnType<typeof getIntent>>>;
 async function reconcile(intent: Intent) {
   const { data: stored } = await db.from("payments").select("status,provider,provider_order_id")
     .eq("booking_intent_id", intent.id).maybeSingle();
-  if (stored?.provider !== "mercado_pago_ar" || !stored.provider_order_id || stored.status === "approved") return;
+  if (intent.status !== "pending_payment" || stored?.provider !== "mercado_pago_ar" || !stored.provider_order_id ||
+    stored.status === "approved") return;
   try {
     const account = await getValidMercadoPagoAccessToken(connections, oauth, intent.workspace_id);
-    const matches = await withSellerAccount(connections, intent.workspace_id, account, (provider) => provider.findPayments(intent.id));
+    const matches = await withSellerAccount(connections, intent.workspace_id, account, (provider) => provider.findPayments(intent.id,
+      (paymentId, reason) => log("warn", "payment_skipped", { workspace_id: intent.workspace_id, intent_id: intent.id, payment_id: paymentId,
+        provider: "mercado_pago_ar", error_code: paymentErrorCode(reason, "mp_payment_lookup_failed") })));
     const selected = matches.filter((item) => item.preferenceId === stored.provider_order_id)
       .sort((a, b) => Number(b.status === "approved") - Number(a.status === "approved"))[0];
-    if (selected) await recordVerifiedPayment(db, intent, account, selected, `status:${selected.id}:${selected.status}`);
-  } catch { /* A delayed provider response leaves the order pending. */ }
+    if (selected && await recordVerifiedPayment(db, intent, account, selected, `status:${selected.id}:${selected.status}`))
+      log("info", "payment_recorded", { workspace_id: intent.workspace_id, intent_id: intent.id, payment_id: selected.id, provider: "mercado_pago_ar", status: selected.status, changed: true });
+  } catch (caught) {
+    // A slow or failed answer leaves the request pending; the patient's page asks again.
+    log("warn", "payment_lookup_deferred", { workspace_id: intent.workspace_id, intent_id: intent.id, provider: "mercado_pago_ar",
+      error_code: paymentErrorCode(caught, "mp_payment_lookup_failed") });
+  }
 }
 async function profile(request: Request, slug: string) {
   if (!/^[a-z0-9-]{3,100}$/.test(slug)) return json(request, { error: "Perfil no encontrado" }, 404);
@@ -111,7 +125,7 @@ async function profile(request: Request, slug: string) {
   }]));
   const mercadoPagoReady = workspace.payment_provider === "mercado_pago_ar" &&
     !!Deno.env.get("MERCADO_PAGO_WEBHOOK_SECRET") &&
-    !!await mercadoPagoAccount(db, workspace.id);
+    await mercadoPagoConnected(db, workspace.id);
   const externalReady = workspace.payment_provider === "external_link";
   return json(request, {
     professional: { ...professional, workspace_id: undefined, id: undefined },
@@ -135,11 +149,11 @@ Deno.serve(async (request) => {
   const action = new URL(request.url).searchParams.get("action") ?? "";
   try {
     if (action === "profile" && request.method === "GET") {
-      if (!await limit(request, action, 120, 10)) return json(request, { error: "Intentá nuevamente más tarde" }, 429);
+      if (!await limit(request, action, 120, 10)) return refuse(request, "rate_limited", 429);
       return profile(request, new URL(request.url).searchParams.get("slug") ?? "");
     }
     if (action === "create_intent" && request.method === "POST") {
-      if (!await limit(request, action, 8, 60)) return json(request, { error: "Intentá nuevamente más tarde" }, 429);
+      if (!await limit(request, action, 8, 60)) return refuse(request, "rate_limited", 429);
       if (Number(request.headers.get("content-length") ?? "0") > 100000) return json(request, { error: "Formulario demasiado grande" }, 413);
       const body = await request.json();
       if (!/^[a-f0-9-]{36}$/i.test(body.serviceId ?? "") || !Array.isArray(body.answers) || body.answers.length > 50)
@@ -155,8 +169,9 @@ Deno.serve(async (request) => {
           if (!Deno.env.get("MERCADO_PAGO_WEBHOOK_SECRET")) throw new Error("webhook_secret_missing");
           account = await getValidMercadoPagoAccessToken(connections, oauth, target.workspace_id);
         } catch (caught) {
-          console.warn(`bellis-public checkout unavailable: ${reason(caught)}`);
-          return json(request, { error: paymentUnavailable }, 503);
+          const code = paymentErrorCode(caught, "mp_refresh_failed");
+          log("warn", "checkout_unavailable", { workspace_id: target.workspace_id, provider: "mercado_pago_ar", error_code: code });
+          return refuse(request, code, 503);
         }
       }
       const token = [...crypto.getRandomValues(new Uint8Array(32))].map((byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -203,14 +218,16 @@ Deno.serve(async (request) => {
           });
           if (attachError) throw new Error("checkout_not_saved");
         }, async (intentId) => { await db.rpc("cancel_unpaid_intent", { p_intent: intentId }); });
+        log("info", "checkout_created", { workspace_id: intent.workspace_id, intent_id: intent.id, provider: "mercado_pago_ar", environment: account.environment });
         return json(request, { token, checkoutUrl });
       } catch (caught) {
-        console.warn(`bellis-public checkout failed: ${reason(caught)}`);
-        return json(request, { error: paymentUnavailable }, 503);
+        const code = paymentErrorCode(caught, "mp_preference_failed");
+        log("warn", "checkout_failed", { workspace_id: intent.workspace_id, intent_id: intent.id, provider: "mercado_pago_ar", error_code: code });
+        return refuse(request, code, 503);
       }
     }
     if (action === "resume" && request.method === "POST") {
-      if (!await limit(request, action, 60, 10)) return json(request, { error: "Intentá nuevamente más tarde" }, 429);
+      if (!await limit(request, action, 60, 10)) return refuse(request, "rate_limited", 429);
       const body = await request.json().catch(() => null) as { resume?: unknown; slug?: unknown } | null;
       const resume = typeof body?.resume === "string" && resumeTokenPattern.test(body.resume) ? body.resume : "";
       const slug = typeof body?.slug === "string" ? body.slug : "";
@@ -219,7 +236,7 @@ Deno.serve(async (request) => {
         .select("id,workspace_id,professional_id,service_id,patient_id,status,price_minor,currency_code,duration_minutes,expires_at")
         .eq("resume_token_hash", await sha256(resume)).maybeSingle() : { data: null };
       const { data: owner } = found ? await db.from("professionals").select("public_slug").eq("id", found.professional_id).maybeSingle() : { data: null };
-      if (!found || !owner || owner.public_slug !== slug) return json(request, { error: "No pudimos recuperar esta reserva.", code: "invalid" }, 404);
+      if (!found || !owner || owner.public_slug !== slug) return refuse(request, "booking_resume_invalid", 404);
       if (found.status === "pending_payment" && new Date(found.expires_at).getTime() > Date.now()) await reconcile(found);
       const [{ data: latest }, { data: payment }, { data: service }, { data: appointment }] = await Promise.all([
         db.from("booking_intents").select("status,expires_at,price_minor,currency_code,duration_minutes,service_id").eq("id", found.id).single(),
@@ -232,9 +249,9 @@ Deno.serve(async (request) => {
     }
     if (["status", "slots", "book"].includes(action)) {
       if (!await limit(request, action, action === "book" ? 15 : 120, 10))
-        return json(request, { error: "Intentá nuevamente más tarde" }, 429);
+        return refuse(request, "rate_limited", 429);
       const intent = await getIntent(request);
-      if (!intent) return json(request, { error: "La solicitud venció o no existe" }, 404);
+      if (!intent) return refuse(request, "booking_intent_invalid", 404);
       if (action === "status" && request.method === "GET") {
         await reconcile(intent);
         const [{ data: latestIntent }, { data: payment }] = await Promise.all([
@@ -244,7 +261,7 @@ Deno.serve(async (request) => {
         return json(request, { status: latestIntent?.status ?? intent.status, paymentStatus: payment?.status ?? "pending" });
       }
       if (intent.status !== "awaiting_schedule" && intent.status !== "payment_confirmed" && action !== "book")
-        return json(request, { error: "El pago todavía no está confirmado" }, 403);
+        return refuse(request, "booking_payment_pending", 403);
       if (action === "slots" && request.method === "GET") {
         const day = new URL(request.url).searchParams.get("day") ?? "";
         if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return json(request, { error: "Fecha inválida" }, 400);
@@ -263,13 +280,20 @@ Deno.serve(async (request) => {
         const { data: appointmentId, error } = await db.rpc("schedule_paid_intent", {
           p_intent: intent.id, p_starts_at: body.startsAt,
         });
-        if (error) return json(request, { error: "Ese horario ya no está disponible. Elegí otro." }, 409);
-        const { data: appointment } = await db.from("appointments").select("starts_at,ends_at").eq("id", appointmentId).single();
-        return json(request, { appointment });
+        const { data: created } = error ? { data: null }
+          : await db.from("appointments").select("starts_at,ends_at").eq("id", appointmentId).single();
+        // Refused because another tab of the same patient confirmed first: they get that appointment, not an error.
+        const { data: existing } = created ? { data: null }
+          : await db.from("appointments").select("starts_at,ends_at").eq("booking_intent_id", intent.id).maybeSingle();
+        const answer = bookingAnswer(created, error, existing);
+        if (answer.ok) return json(request, { appointment: answer.appointment });
+        log("info", "booking_refused", { workspace_id: intent.workspace_id, intent_id: intent.id, error_code: answer.code });
+        return json(request, { error: answer.error, code: answer.code }, answer.status);
       }
     }
     return json(request, { error: "Acción no disponible" }, 404);
-  } catch {
-    return json(request, { error: "No pudimos completar la solicitud. Intentá nuevamente." }, 500);
+  } catch (caught) {
+    log("error", "request_failed", { action: action || "none", error_code: paymentErrorCode(caught) });
+    return refuse(request, "internal_error", 500);
   }
 });

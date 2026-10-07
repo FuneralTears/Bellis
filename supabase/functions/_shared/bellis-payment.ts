@@ -3,11 +3,14 @@ import { MercadoPagoArgentinaProvider, type VerifiedMercadoPagoPayment } from ".
 import { MercadoPagoOAuthError, type ConnectionStore, type ValidAccount } from "./mercado-pago-oauth.ts";
 
 export type MercadoPagoAccount = { seller_user_id: string; access_token: string; environment: "test" | "production" };
-/** Whether the workspace has a connected account at all. For a token that is safe to use, see getValidMercadoPagoAccessToken. */
-export async function mercadoPagoAccount(db: SupabaseClient, workspaceId: string): Promise<MercadoPagoAccount | null> {
-  const { data, error } = await db.rpc("mercado_pago_account", { p_workspace: workspaceId });
+/**
+ * Whether the workspace has a connected account at all, without reading its token.
+ * For a token that is safe to use, see getValidMercadoPagoAccessToken.
+ */
+export async function mercadoPagoConnected(db: SupabaseClient, workspaceId: string): Promise<boolean> {
+  const { data, error } = await db.rpc("mercado_pago_checkout_ready", { p_workspace: workspaceId });
   if (error) throw error;
-  return (data?.[0] as MercadoPagoAccount | undefined) ?? null;
+  return data === true;
 }
 
 export async function recordVerifiedPayment(
@@ -16,7 +19,7 @@ export async function recordVerifiedPayment(
   account: MercadoPagoAccount,
   providerPayment: VerifiedMercadoPagoPayment,
   eventId: string,
-) {
+): Promise<boolean> {
   const { data: stored, error } = await db.from("payments")
     .select("id,workspace_id,provider,provider_order_id,amount_minor,currency_code")
     .eq("booking_intent_id", intent.id).maybeSingle();
@@ -27,7 +30,7 @@ export async function recordVerifiedPayment(
     providerPayment.intentId !== intent.id || providerPayment.sellerUserId !== account.seller_user_id ||
     providerPayment.amountMinor !== intent.price_minor || providerPayment.currency !== intent.currency_code.trim())
     throw new Error("payment_verification_mismatch");
-  const { error: recordError } = await db.rpc("record_mercado_pago_payment", {
+  const { data: changed, error: recordError } = await db.rpc("record_mercado_pago_payment", {
     p_intent: intent.id,
     p_preference: providerPayment.preferenceId,
     p_payment_id: providerPayment.id,
@@ -37,10 +40,8 @@ export async function recordVerifiedPayment(
     p_currency: providerPayment.currency,
   });
   if (recordError) throw recordError;
-}
-
-export function mercadoPagoProvider(account: MercadoPagoAccount) {
-  return new MercadoPagoArgentinaProvider(account.access_token);
+  // False when this status was already on record: a repeated notification changes nothing.
+  return changed === true;
 }
 
 /**

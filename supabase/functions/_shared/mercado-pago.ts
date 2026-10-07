@@ -24,12 +24,15 @@ type PaymentResponse = {
   transaction_amount?: unknown; currency_id?: unknown; status?: unknown;
 };
 type MerchantOrderResponse = { id?: unknown; preference_id?: unknown; external_reference?: unknown; collector?: { id?: unknown } };
+/** What getPayment throws when a payment was read but is not what it should be. Reading it again changes nothing. */
+const unverifiable = ["invalid_mercado_pago_payment", "invalid_payment_amount", "invalid_payment_id", "unsupported_payment_status"];
 const numericId = (value: unknown) =>
   (typeof value === "number" || typeof value === "string") && /^\d{1,24}$/.test(String(value)) ? String(value) : "";
 
 function paymentStatus(value: string): ProviderStatus {
   if (value === "approved") return "approved";
-  if (["pending", "in_process", "authorized"].includes(value)) return "pending";
+  // A dispute opened on a payment is not a refund yet. Recorded as pending, it never undoes an approved payment.
+  if (["pending", "in_process", "authorized", "in_mediation"].includes(value)) return "pending";
   if (value === "rejected") return "rejected";
   if (value === "cancelled") return "cancelled";
   if (["refunded", "charged_back"].includes(value)) return "refunded";
@@ -124,12 +127,29 @@ export class MercadoPagoArgentinaProvider implements PaymentProvider {
     };
   }
 
-  async findPayments(intentId: string): Promise<VerifiedMercadoPagoPayment[]> {
+  /**
+   * The verified payments of a request. Each payment is verified on its own: one that does not verify is left
+   * out (and told to `skipped`), it is never recorded and it never hides a valid payment of the same request.
+   */
+  async findPayments(intentId: string, skipped: (paymentId: string, reason: unknown) => void = () => {}): Promise<VerifiedMercadoPagoPayment[]> {
     const result = await this.api<{ results?: Array<{ id?: number | string }> }>(
       `/v1/payments/search?external_reference=${encodeURIComponent(intentId)}&limit=10`);
     const ids = (Array.isArray(result.results) ? result.results : []).map((item) => String(item.id ?? ""))
       .filter((id: string) => /^\d{1,24}$/.test(id));
-    return Promise.all(ids.map((id: string) => this.getPayment(id)));
+    const settled = await Promise.allSettled(ids.map((id: string) => this.getPayment(id)));
+    const verified: VerifiedMercadoPagoPayment[] = [];
+    let unread: unknown;
+    settled.forEach((outcome, index) => {
+      if (outcome.status === "fulfilled") return void verified.push(outcome.value);
+      // The seller's token was refused: that is about the connection, not about one payment.
+      if (outcome.reason instanceof Error && outcome.reason.message === "mercado_pago_http_401") throw outcome.reason;
+      if (outcome.reason instanceof Error && unverifiable.includes(outcome.reason.message)) skipped(ids[index], outcome.reason);
+      else unread ??= outcome.reason;
+    });
+    // A payment that could not be read right now may be the approved one. Unless an approved payment was
+    // verified anyway, nothing is decided from the rest: whoever asked will ask again.
+    if (unread !== undefined && !verified.some((payment) => payment.status === "approved")) throw unread;
+    return verified;
   }
 }
 
@@ -144,15 +164,19 @@ export class ExternalPaymentLinkProvider implements PaymentProvider {
   }
 }
 
+/**
+ * The `data.id` of a notification signed by Mercado Pago with the application's secret, or null.
+ * Payments carry a numeric id; other topics may carry letters, which Mercado Pago signs in lowercase.
+ */
 export async function verifyMercadoPagoSignature(request: Request, secret: string): Promise<string | null> {
   const url = new URL(request.url);
-  const paymentId = url.searchParams.get("data.id") ?? "";
+  const paymentId = (url.searchParams.get("data.id") ?? "").toLowerCase();
   const requestId = request.headers.get("x-request-id") ?? "";
   const parts: Record<string, string> = Object.fromEntries((request.headers.get("x-signature") ?? "").split(",")
     .map((part) => part.trim().split("=", 2)));
   const timestamp = parts.ts ?? "";
   const signature = parts.v1 ?? "";
-  if (!secret || !/^\d{1,24}$/.test(paymentId) || !requestId || !/^\d{10,13}$/.test(timestamp) ||
+  if (!secret || !/^[a-z0-9_-]{1,64}$/.test(paymentId) || !requestId || !/^\d{10,13}$/.test(timestamp) ||
     !/^[a-f0-9]{64}$/i.test(signature)) return null;
   const seconds = Number(timestamp.slice(0, 10));
   if (Math.abs(Date.now() / 1000 - seconds) > 600) return null;

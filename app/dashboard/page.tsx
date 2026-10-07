@@ -25,14 +25,14 @@ type Section = "Resumen" | "Agenda" | "Pacientes" | "Servicios" | "Disponibilida
 type Service = { id: string; workspace_id: string; professional_id: string; name: string; description: string | null; price_minor: number; currency_code: string; duration_minutes: number; modality: string; min_notice_minutes: number; external_payment_url: string | null; active: boolean };
 type Appointment = { id: string; booking_intent_id: string; patient_id: string; service_id?: string; starts_at: string; ends_at: string; status: string };
 type Patient = { id: string; first_name: string; last_name: string; email: string; phone: string | null; created_at: string };
-type Intent = { id: string; service_id: string; patient_id: string; status: string; price_minor: number; currency_code: string; created_at: string };
+type Intent = { id: string; service_id: string; patient_id: string; status: string; price_minor: number; currency_code: string; created_at: string; expires_at: string };
 type Payment = { id: string; booking_intent_id: string; provider: string; amount_minor: number; currency_code: string; status: string; manual_reference: string | null };
 type Answer = { booking_intent_id: string; question_title: string; section_label: string; answer: unknown };
 type Rule = { id: string; weekday: number; starts_at: string; ends_at: string; buffer_minutes: number };
 type Block = { id: string; starts_at: string; ends_at: string; reason: string | null };
 type Workspace = { id: string; name: string; timezone: string; currency_code: string; locale: string; payment_provider: string; external_payment_url: string | null; status: string; trial_ends_at: string };
 type Professional = { id: string; workspace_id: string; display_name: string; specialty: string; biography: string | null; public_slug: string; province: string | null; city: string | null; address: string | null; offers_online: boolean; offers_in_person: boolean };
-type Data = { workspace: Workspace; professional: Professional; services: Service[]; appointments: Appointment[]; patients: Patient[]; intents: Intent[]; payments: Payment[]; answers: Answer[]; rules: Rule[]; blocks: Block[] };
+type Data = { workspace: Workspace; professional: Professional; services: Service[]; appointments: Appointment[]; patients: Patient[]; intents: Intent[]; payments: Payment[]; answers: Answer[]; rules: Rule[]; blocks: Block[]; /** When this was read, to tell open requests from ones that ran out of time. */ loadedAt: number };
 const sections: Section[] = [...dashboardSections, "Pacientes"];
 const weekdayNames = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
 const blankService = { name: "", description: "", price: "", duration: "60", modality: "online", notice: "24", paymentUrl: "" };
@@ -52,7 +52,7 @@ async function loadData(): Promise<Data> {
     client.from("services").select("*").eq("workspace_id", workspaceId).eq("professional_id", professional.id).order("created_at"),
     client.from("appointments").select("id,booking_intent_id,patient_id,starts_at,ends_at,status").eq("workspace_id", workspaceId).order("starts_at", { ascending: false }).limit(300),
     client.from("patients").select("id,first_name,last_name,email,phone,created_at").eq("workspace_id", workspaceId).order("created_at", { ascending: false }).limit(300),
-    client.from("booking_intents").select("id,service_id,patient_id,status,price_minor,currency_code,created_at").eq("workspace_id", workspaceId).order("created_at", { ascending: false }).limit(300),
+    client.from("booking_intents").select("id,service_id,patient_id,status,price_minor,currency_code,created_at,expires_at").eq("workspace_id", workspaceId).order("created_at", { ascending: false }).limit(300),
     client.from("payments").select("id,booking_intent_id,provider,amount_minor,currency_code,status,manual_reference").eq("workspace_id", workspaceId).limit(300),
     client.from("questionnaire_answers").select("booking_intent_id,question_title,section_label,answer").eq("workspace_id", workspaceId).limit(500),
     client.from("availability_rules").select("id,weekday,starts_at,ends_at,buffer_minutes").eq("professional_id", professional.id).order("weekday"),
@@ -62,7 +62,7 @@ async function loadData(): Promise<Data> {
   return { workspace: results[0].data as Workspace, professional: professional as Professional,
     services: results[1].data as Service[] ?? [], appointments: results[2].data as Appointment[] ?? [],
     patients: results[3].data as Patient[] ?? [], intents: results[4].data as Intent[] ?? [],
-    payments: results[5].data as Payment[] ?? [], answers: results[6].data as Answer[] ?? [],
+    loadedAt: Date.now(), payments: results[5].data as Payment[] ?? [], answers: results[6].data as Answer[] ?? [],
     rules: results[7].data as Rule[] ?? [], blocks: results[8].data as Block[] ?? [] };
 }
 
@@ -119,7 +119,11 @@ export default function LiveDashboard() {
   const saveProfile = () => action(async () => { if (!data) return; const client = await getSupabase(); const { error: updateError } = await client.from("professionals").update(profileForm).eq("id", data.professional.id).eq("workspace_id", data.workspace.id); if (updateError) throw updateError; }, "Perfil actualizado.");
   const signOut = async () => { const client = await getSupabase(); const { error: signOutError } = await client.auth.signOut(); if (signOutError) { setError("No pudimos cerrar la sesión. Intentá nuevamente."); return; } setData(null); window.location.replace("/ingresar"); };
   // Same list the old Cobros section showed; now also the badge on Perfil → Cobros y pagos.
-  const pendingPayments = data?.intents.filter((item) => item.status === "pending_payment" && paymentByIntent(item.id)?.status === "pending") ?? [];
+  // Requests still open and waiting for a payment. One that ran out of time can no longer be paid or approved.
+  const openPending = data?.intents.filter((item) => item.status === "pending_payment" && paymentByIntent(item.id)?.status === "pending" && Date.parse(item.expires_at) > data.loadedAt) ?? [];
+  // Only payments through an external link wait for the professional; Mercado Pago confirms its own.
+  const pendingPayments = openPending.filter((item) => paymentByIntent(item.id)?.provider === "external_link");
+  const pendingMercadoPago = openPending.filter((item) => paymentByIntent(item.id)?.provider === "mercado_pago_ar").length;
   const local = Object.fromEntries(dashboardSections.map((name) => [name, () => { setSection(name); setError(""); setNotice(""); }])) as Partial<Record<NavKey, () => void>>;
   return <div className="demo-shell bellis-phase-a"><aside className="demo-sidebar"><Link className="brand" href="/"><BellisLogo /></Link><div className="workspace-label">MI ESPACIO</div><div className="workspace-card"><span className="workspace-avatar">{data?.professional.display_name.slice(0, 2).toUpperCase() ?? "B"}</span><span><b>{data?.professional.display_name ?? "Cargando…"}</b><small>{data?.professional.specialty ?? "Profesional"}</small></span></div><nav aria-label="Panel profesional">{navItems({ active: section, variant: "sidebar", local })}</nav><div className="demo-side-bottom">{data && <a href={`/p/${data.professional.public_slug}`} target="_blank" rel="noreferrer">Ver página pública <ArrowRight size={16}/></a>}<button onClick={signOut}><LogOut size={16}/> Cerrar sesión</button></div></aside><div className="demo-content"><AppTopbar breadcrumb={section}><NotificationBell workspaceId={data?.workspace.id ?? null}/>{data && <a className="demo-top-link" href={`/p/${data.professional.public_slug}`} target="_blank" rel="noreferrer">Ver mi página pública <ArrowRight size={16}/></a>}{data && <button className="app-user" onClick={() => setSection("Perfil")} aria-label="Ver mi perfil"><span className="app-user-avatar">{data.professional.display_name.slice(0, 1).toUpperCase()}</span><span className="app-user-name">{data.professional.display_name.split(" ")[0]}</span></button>}</AppTopbar><AppMobileNav activeKey={section}>{navItems({ active: section, variant: "mobile", local })}{data && <a href={`/p/${data.professional.public_slug}`} target="_blank" rel="noreferrer">Página pública <ArrowRight size={14}/></a>}<button onClick={signOut}><LogOut size={14}/> Cerrar sesión</button></AppMobileNav><main className={section === "Resumen" ? "demo-main bellis-dashboard" : section === "Agenda" ? "demo-main bellis-agenda" : "demo-main"}>
     {!data ? <div className="demo-panel live-state" role={error ? "alert" : "status"}>{error || "Cargando tus datos…"}{error && <a href="/ingresar">Ingresar</a>}</div> : <>{section !== "Agenda" && <div className="demo-title-row"><div>{section !== "Resumen" && <p className="demo-date">ESPACIO PROFESIONAL · ARGENTINA</p>}<h1>{section === "Resumen" ? `Hola, ${data.professional.display_name.split(" ")[0]}` : section}</h1><p>{section === "Resumen" ? "Acá tenés un resumen de tu consulta." : "Gestioná tu consultorio desde acá."}</p></div>{section === "Resumen" && <span className="dashboard-date"><CalendarDays size={16}/>{new Intl.DateTimeFormat(data.workspace.locale, { timeZone: data.workspace.timezone, day: "numeric", month: "long" }).format(new Date())}</span>}</div>}{error && <p className="live-error" role="alert">{error}</p>}{notice && <p className="live-success" role="status">{notice}</p>}
@@ -168,7 +172,7 @@ export default function LiveDashboard() {
         {profileTab === "pagina" && <div className="live-grid" role="tabpanel" aria-labelledby="crm-tab-pagina"><section className="demo-panel"><h2>Compartí tu link</h2><a className="live-link" href={`/p/${data.professional.public_slug}`} target="_blank" rel="noreferrer">/p/{data.professional.public_slug}</a><p>Zona horaria: {data.workspace.timezone}</p><p>Moneda: {data.workspace.currency_code}</p><p>Estado: {data.workspace.status}</p><p>Fin de prueba: {date(data.workspace.trial_ends_at)}</p></section></div>}
         {profileTab === "cobros" && <div role="tabpanel" aria-labelledby="crm-tab-cobros">
           <PaymentSettings key={`${data.workspace.payment_provider}:${payAccess.connection.status}`} method={data.workspace.payment_provider === "mercado_pago_ar" ? "mercado_pago_ar" : "external_link"} paymentUrl={data.workspace.external_payment_url ?? ""} hasServiceLinks={data.services.some((item) => item.active && !!item.external_payment_url)}
-            connection={payAccess.connection} canManage={payAccess.canManage} notice={payNotice} connecting={connecting} busy={busy}
+            connection={payAccess.connection} canManage={payAccess.canManage} notice={payNotice} connecting={connecting} busy={busy} pendingMercadoPago={pendingMercadoPago}
             onConnect={connectMercadoPago} onDisconnect={disconnectPayments} onSaveMethod={savePaymentMethod} formatDate={(value) => new Intl.DateTimeFormat(data.workspace.locale, { timeZone: data.workspace.timezone, day: "numeric", month: "long", year: "numeric" }).format(new Date(value))} />
           <PendingPayments busy={busy} onApprove={approvePayment} items={pendingPayments.map((item) => ({ id: item.id, patient: `${patientById(item.patient_id)?.first_name ?? ""} ${patientById(item.patient_id)?.last_name ?? ""}`.trim(), detail: `${serviceById(item.service_id)?.name ?? "Consulta"} · ${money(item.price_minor)}` }))} />
         </div>}

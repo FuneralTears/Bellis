@@ -4,6 +4,8 @@
  * decided from what the server holds for that request.
  */
 
+import { patientMessage, paymentErrorCode, type PaymentErrorCode } from "./payment-errors.ts";
+
 export const resumeTokenPattern = /^[a-f0-9]{64}$/;
 
 export function newResumeToken(): string {
@@ -28,9 +30,9 @@ export type ResumeAnswer =
       step: "payment" | "schedule" | "done"; paymentStatus: string;
       service: { id: string; name: string; modality: string; duration_minutes: number; price_minor: number; currency_code: string };
       checkoutUrl: string | null; appointment: { starts_at: string; ends_at: string } | null } }
-  | { ok: false; status: 404 | 410; body: { error: string; code: "invalid" | "expired" } };
+  | { ok: false; status: 404 | 410; body: { error: string; code: "booking_resume_invalid" | "booking_resume_expired" } };
 
-const notFound: ResumeAnswer = { ok: false, status: 404, body: { error: "No pudimos recuperar esta reserva.", code: "invalid" } };
+const notFound: ResumeAnswer = { ok: false, status: 404, body: { error: patientMessage("booking_resume_invalid"), code: "booking_resume_invalid" } };
 
 /**
  * What a returning patient gets for a resume token. `record` is what the server found for that token (or nothing),
@@ -47,10 +49,30 @@ export function resumeAnswer(record: ResumeRecord | null, slug: string, now: num
   if (intent.status === "scheduled" && record.appointment)
     return { ok: true, body: { step: "done", paymentStatus, service, checkoutUrl: null, appointment: record.appointment } };
   if (!(Date.parse(intent.expires_at) > now))
-    return { ok: false, status: 410, body: { error: "Esta reserva venció. Empezá de nuevo para elegir un turno.", code: "expired" } };
+    return { ok: false, status: 410, body: { error: patientMessage("booking_resume_expired"), code: "booking_resume_expired" } };
   // Choosing a time needs both: the request unlocked and an approved payment on record.
   if ((intent.status === "awaiting_schedule" || intent.status === "payment_confirmed") && paymentStatus === "approved")
     return { ok: true, body: { step: "schedule", paymentStatus, service, checkoutUrl: null, appointment: null } };
   if (intent.status !== "pending_payment") return notFound;
   return { ok: true, body: { step: "payment", paymentStatus, service, checkoutUrl: payment?.checkout_url ?? null, appointment: null } };
+}
+
+export type BookingAnswer =
+  | { ok: true; appointment: { starts_at: string; ends_at: string } }
+  | { ok: false; status: 403 | 409; code: PaymentErrorCode; error: string };
+
+/**
+ * What a patient gets when they confirm a time. One request has one appointment, and the database enforces it:
+ * when two tabs confirm at once, the one that arrives second is given the appointment that already exists
+ * instead of an error. `failure` is what the database answered when it refused, `existing` what is on record afterwards.
+ */
+export function bookingAnswer(
+  created: { starts_at: string; ends_at: string } | null, failure: unknown, existing: { starts_at: string; ends_at: string } | null,
+): BookingAnswer {
+  if (created) return { ok: true, appointment: created };
+  if (existing) return { ok: true, appointment: existing };
+  const code = paymentErrorCode(failure, "booking_slot_unavailable");
+  return code === "booking_payment_pending"
+    ? { ok: false, status: 403, code, error: patientMessage(code) }
+    : { ok: false, status: 409, code: "booking_slot_unavailable", error: patientMessage("booking_slot_unavailable") };
 }

@@ -69,7 +69,7 @@ test('the outcome in the address is not an input: nothing the browser says moves
 });
 
 test('unknown token: nothing is recovered', () => {
-  assert.deepEqual(resumeAnswer(null, 'ana-lopez', now), { ok: false, status: 404, body: { error: 'No pudimos recuperar esta reserva.', code: 'invalid' } });
+  assert.deepEqual(resumeAnswer(null, 'ana-lopez', now), { ok: false, status: 404, body: { error: 'No pudimos recuperar esta reserva.', code: 'booking_resume_invalid' } });
 });
 
 test('a token used on another professional\'s page answers exactly like an unknown token', () => {
@@ -82,7 +82,7 @@ test('a token used on another professional\'s page answers exactly like an unkno
 test('an expired request cannot be resumed, and its checkout is not handed out again', () => {
   for (const expires_at of [new Date(now - 1).toISOString(), new Date(now).toISOString(), 'not-a-date']) {
     const answer = resumeAnswer(record({ intent: { expires_at } }), 'ana-lopez', now);
-    assert.deepEqual(answer, { ok: false, status: 410, body: { error: 'Esta reserva venció. Empezá de nuevo para elegir un turno.', code: 'expired' } });
+    assert.deepEqual(answer, { ok: false, status: 410, body: { error: 'Esta reserva venció. Empezá de nuevo para elegir un turno.', code: 'booking_resume_expired' } });
   }
 });
 

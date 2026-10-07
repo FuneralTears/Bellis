@@ -370,6 +370,11 @@
   font-size: 14px;
   line-height: 1.55;
 }
+.pay-dialog .pay-dialog-warning {
+  background: var(--warning-subtle);
+  border-color: #F3DDB4;
+  color: var(--warning);
+}
 .pay-dialog-actions {
   display: flex;
   justify-content: flex-end;

@@ -43,11 +43,13 @@ function StatusBadge({ status }: { status: MercadoPagoConnection["status"] }) {
   return <span className={`pay-badge pay-badge-${tone}`}><Icon size={14} aria-hidden />{statusLabel[status]}</span>;
 }
 
-export default function PaymentSettings({ method, paymentUrl, hasServiceLinks, connection, canManage, notice, connecting, busy, onConnect, onDisconnect, onSaveMethod, formatDate }: {
+export default function PaymentSettings({ method, paymentUrl, hasServiceLinks, connection, canManage, notice, connecting, busy, pendingMercadoPago = 0, onConnect, onDisconnect, onSaveMethod, formatDate }: {
   /** The method saved for the workspace, and its saved link. */
   method: PaymentMethod; paymentUrl: string; hasServiceLinks: boolean;
   connection: MercadoPagoConnection; canManage: boolean; notice: PaymentNotice | null;
   connecting: boolean; busy: boolean;
+  /** Mercado Pago payments still waiting for confirmation. Disconnecting leaves Bellis unable to check them. */
+  pendingMercadoPago?: number;
   onConnect: () => void; onDisconnect: () => void; onSaveMethod: (method: PaymentMethod, url: string) => void;
   formatDate: (value: string) => string;
 }) {
@@ -57,6 +59,8 @@ export default function PaymentSettings({ method, paymentUrl, hasServiceLinks, c
   const ids = useId();
   const connected = connection.status === "connected";
   const needsAttention = connection.status === "expired" || connection.status === "error";
+  // The status could not be read (or is not this person's to see): nothing can be said about Mercado Pago either way.
+  const unknown = connection.status === "unavailable" || connection.status === "restricted";
   const canConnect = canManage && connection.status !== "unavailable" && connection.status !== "restricted" && connection.status !== "loading";
   // Whether patients can pay today with what is saved.
   const configured = method === "mercado_pago_ar" ? connected : !!paymentUrl || hasServiceLinks;
@@ -69,6 +73,7 @@ export default function PaymentSettings({ method, paymentUrl, hasServiceLinks, c
     {notice && <Notice notice={notice} />}
     {connection.status !== "loading" && !configured && <div className="pay-warning" role="status"><AlertCircle size={20} aria-hidden /><div>
       {method === "mercado_pago_ar" && needsAttention ? <><b>Tus pacientes no pueden pagar en este momento.</b><span>Volvé a conectar Mercado Pago o elegí otro método de cobro.</span></>
+        : method === "mercado_pago_ar" && unknown ? <><b>No pudimos comprobar tu conexión con Mercado Pago.</b><span>Volvé a entrar en unos minutos. Si sigue igual, tus pacientes podrían no poder pagar.</span></>
         : <><b>Todavía no configuraste cómo recibir pagos.</b><span>Elegí un método de cobro para poder recibir reservas desde tu página.</span></>}
     </div></div>}
 
@@ -95,7 +100,7 @@ export default function PaymentSettings({ method, paymentUrl, hasServiceLinks, c
         <div className="pay-panel-head"><h3 id={`${ids}-mp`}>{connected ? "Mercado Pago conectado" : "Mercado Pago"}</h3><StatusBadge status={connection.status} /></div>
         {connection.status === "loading" ? <p className="pay-muted" role="status">Consultando el estado de Mercado Pago…</p>
           : connection.status === "restricted" ? <p className="pay-muted">Solo quien administra el espacio puede ver esta conexión.</p>
-          : connection.status === "unavailable" ? <p className="pay-muted">La conexión con Mercado Pago todavía no está disponible. Mientras tanto podés cobrar con un link de pago.</p>
+          : connection.status === "unavailable" ? <p className="pay-muted">No pudimos consultar el estado de Mercado Pago en este momento. Volvé a intentar en unos minutos; mientras tanto podés cobrar con un link de pago.</p>
           : connected ? <>
             <dl className="pay-facts">
               {connection.accountHint && <div><dt>Cuenta</dt><dd>terminada en {connection.accountHint.replace(/\D/g, "")}</dd></div>}
@@ -105,7 +110,7 @@ export default function PaymentSettings({ method, paymentUrl, hasServiceLinks, c
             {method !== "mercado_pago_ar" && <p className="pay-muted">Para cobrar con esta cuenta, elegí Mercado Pago como método de cobro.</p>}
             {canManage && <button type="button" className="pay-secondary pay-danger" disabled={busy} onClick={() => dialog.current?.showModal()}>Desconectar Mercado Pago</button>}
           </> : needsAttention ? <>
-            <p>Volvé a conectar Mercado Pago para seguir recibiendo pagos automáticamente.</p>
+            <p>{connection.status === "error" ? "Mercado Pago dejó de aceptar la conexión con Bellis. Suele pasar cuando se quita el permiso desde la cuenta de Mercado Pago o cambia su contraseña." : "La autorización de Mercado Pago venció."} Volvé a conectar tu cuenta para seguir recibiendo pagos automáticamente.</p>
             {canConnect && connectButton("pay-primary")}
           </> : <>
             <p>Conectá tu cuenta para que Bellis pueda generar y confirmar los pagos de tus pacientes automáticamente.</p>
@@ -119,6 +124,7 @@ export default function PaymentSettings({ method, paymentUrl, hasServiceLinks, c
     <dialog className="pay-dialog" ref={dialog} aria-labelledby={`${ids}-confirm`} onClick={(event) => { if (event.target === event.currentTarget) dialog.current?.close(); }}>
       <div><h3 id={`${ids}-confirm`}>¿Desconectar Mercado Pago?</h3>
         <p>Bellis dejará de generar nuevos cobros con esta cuenta. Los pagos ya registrados no se eliminan.</p>
+        {pendingMercadoPago > 0 && <p className="pay-notice pay-dialog-warning" role="alert"><AlertCircle size={18} aria-hidden /><span>{pendingMercadoPago === 1 ? "Hay 1 pago pendiente de confirmación." : `Hay ${pendingMercadoPago} pagos pendientes de confirmación.`} Si desconectás Mercado Pago ahora, Bellis no podrá verificar esos pagos hasta que vuelvas a conectarlo.</span></p>}
         <div className="pay-dialog-actions"><button type="button" className="pay-secondary" autoFocus onClick={() => dialog.current?.close()}>Cancelar</button><button type="button" className="pay-primary pay-confirm-danger" onClick={() => { dialog.current?.close(); onDisconnect(); }}>Desconectar</button></div>
       </div>
     </dialog>

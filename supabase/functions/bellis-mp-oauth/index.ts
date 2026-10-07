@@ -1,6 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2.117.2";
 import { completeOAuth, oauthConfigFromEnv, sha256Hex, startOAuth, supabaseConnectionStore } from "../_shared/mercado-pago-oauth.ts";
 import { configuredOrigins, isAllowedOrigin } from "../_shared/origin-policy.ts";
+import { logEvent, paymentErrorCode, type LogFields } from "../_shared/payment-errors.ts";
 
 // Both actions need a signed-in person. Deployed with verify_jwt=false only because the browser's CORS
 // preflight carries no session; the session is verified here, against Supabase Auth, on every call.
@@ -11,6 +12,9 @@ const siteOrigin = Deno.env.get("BELLIS_SITE_ORIGIN") ?? "";
 const allowedOrigins = configuredOrigins(siteOrigin, Deno.env.get("BELLIS_ADDITIONAL_ORIGINS") ?? "");
 const config = oauthConfigFromEnv((name) => Deno.env.get(name), siteOrigin);
 const configured = !!(siteOrigin && config.clientId && config.clientSecret);
+/** Ids and codes only: never the request, a token, the state or the authorization code. */
+const log = (level: "info" | "warn" | "error", event: string, fields: LogFields = {}) => logEvent("bellis-mp-oauth", level, event, fields);
+if (!configured) log("error", "config_missing", { error_code: "mp_config_missing" });
 
 function cors(request: Request) {
   const origin = request.headers.get("origin") ?? "";
@@ -40,10 +44,11 @@ Deno.serve(async (request) => {
       return json(request, { error: "Acción no disponible" }, 404);
     const origin = request.headers.get("origin");
     if (origin && !isAllowedOrigin(origin, allowedOrigins)) return json(request, { error: "Origen no permitido" }, 403);
-    if (!configured) return json(request, { error: "Mercado Pago todavía no está disponible." }, 503);
+    // The session comes first: without one, nothing is said about how this environment is set up.
     const session = (request.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
     const { data, error } = session ? await db.auth.getUser(session) : { data: { user: null }, error: null };
     if (error || !data.user) return json(request, { error: "Tu sesión venció. Volvé a iniciar sesión." }, 401);
+    if (!configured) return json(request, { error: "Mercado Pago todavía no está disponible." }, 503);
     const userId = data.user.id;
 
     if (action === "start") {
@@ -62,12 +67,15 @@ Deno.serve(async (request) => {
     let body: { code?: unknown; state?: unknown };
     try { body = await request.json(); } catch { return json(request, { error: "Solicitud inválida" }, 400); }
     // The person is the verified session. Nothing in the body says who they are or which workspace this is for.
-    const outcome = await completeOAuth(store, config, { userId, code: body?.code, state: body?.state });
-    if (outcome !== "connected") console.warn(`bellis-mp-oauth complete: ${outcome}`);
+    let reason = "";
+    const outcome = await completeOAuth(store, config, { userId, code: body?.code, state: body?.state },
+      { report: (value) => { reason = value; } });
+    if (outcome === "connected") log("info", "oauth_connected", { action, provider: "mercado_pago_ar", status: outcome });
+    else log("warn", "oauth_not_connected", { action, provider: "mercado_pago_ar", status: outcome,
+      error_code: outcome === "invalid_state" ? "mp_oauth_invalid_state" : paymentErrorCode({ message: reason }, "mp_oauth_exchange_failed") });
     return json(request, { outcome });
   } catch (caught) {
-    // Short code only: never the request, a token or the authorization code.
-    console.error(`bellis-mp-oauth failed: ${caught instanceof Error ? caught.message.slice(0, 60) : "unknown"}`);
+    log("error", "request_failed", { action: action || "none", error_code: paymentErrorCode(caught) });
     return json(request, { error: "No pudimos completar la solicitud. Intentá nuevamente." }, 500);
   }
 });
