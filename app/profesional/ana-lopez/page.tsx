@@ -40,6 +40,13 @@ export default function PublicProfile() {
       else setBack(outcome === "invalid" ? { view: "invalid", status: "pending" } : { view: "returned", status: outcome });
     }, 900);
   };
+  // The same wait the real button shows while it asks. Here nothing is asked: the example payment is approved.
+  const [checking, setChecking] = useState(false);
+  const checkPayment = () => {
+    if (checking) return;
+    setChecking(true);
+    window.setTimeout(() => { setChecking(false); setBack({ view: "none", status: "approved" }); go(4); }, 900);
+  };
   const chosen = services[service];
   const go = (next: number) => { setStep(next); window.scrollTo(0, 0); };
   const stage = [0, 1, 2, 2, 3, 4][step];
@@ -66,7 +73,7 @@ export default function PublicProfile() {
         <PaymentStep status={back.status} returned={back.view === "returned"} guidance="En la versión real, acá se abre el medio de pago del profesional y el horario se habilita cuando el cobro queda confirmado."
           summary={<SummaryList rows={[["Servicio", chosen.name], ["Estado del pago", <Badge key="status" tone={paymentStatusInfo(back.status).tone}>{paymentStatusInfo(back.status).label}</Badge>]]} total={["Total", formatMoney(chosen.price)]} />}>
           <button className="bk-button" type="button" onClick={() => setBack({ view: "none", status: "pending" })}>{paymentNeedsRetry(back.status) ? "Reintentar el pago" : "Abrir Mercado Pago"} <ArrowRight size={17}/></button>
-          <button className="bk-button bk-button-secondary" type="button" onClick={() => simulateReturn("approved")}>Consultar estado del pago</button>
+          <button className="bk-button bk-button-secondary" type="button" disabled={checking} aria-busy={checking} onClick={checkPayment}>{checking ? "Consultando…" : "Consultar estado del pago"}</button>
         </PaymentStep>
         <div className="bk-demo-return" role="group" aria-label="Demo: simular la vuelta del pago"><p><b>Pago de demostración.</b> No se realiza ningún cobro ni se abre un proveedor de pagos. Elegí cómo vuelve el paciente:</p>
           {([["approved", "Pago aprobado"], ["pending", "Pendiente"], ["rejected", "Rechazado"], ["cancelled", "Cancelado"], ["invalid", "Enlace inválido"]] as const).map(([outcome, label]) => <button key={outcome} type="button" onClick={() => simulateReturn(outcome)}>{label}</button>)}
