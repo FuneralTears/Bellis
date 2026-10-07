@@ -18,10 +18,14 @@ export type VerifiedMercadoPagoPayment = {
   status: ProviderStatus;
 };
 type PreferenceResponse = { id?: unknown; init_point?: unknown; sandbox_init_point?: unknown };
+// A payment names its seller in `collector_id` and its merchant order in `order`. It does not carry the preference.
 type PaymentResponse = {
-  id?: unknown; external_reference?: unknown; preference_id?: unknown;
-  collector?: { id?: unknown }; transaction_amount?: unknown; currency_id?: unknown; status?: unknown;
+  id?: unknown; external_reference?: unknown; collector_id?: unknown; order?: { id?: unknown; type?: unknown };
+  transaction_amount?: unknown; currency_id?: unknown; status?: unknown;
 };
+type MerchantOrderResponse = { id?: unknown; preference_id?: unknown; external_reference?: unknown; collector?: { id?: unknown } };
+const numericId = (value: unknown) =>
+  (typeof value === "number" || typeof value === "string") && /^\d{1,24}$/.test(String(value)) ? String(value) : "";
 
 function paymentStatus(value: string): ProviderStatus {
   if (value === "approved") return "approved";
@@ -96,15 +100,24 @@ export class MercadoPagoArgentinaProvider implements PaymentProvider {
   async getPayment(paymentId: string): Promise<VerifiedMercadoPagoPayment> {
     if (!/^\d{1,24}$/.test(paymentId)) throw new Error("invalid_payment_id");
     const payment = await this.api<PaymentResponse>(`/v1/payments/${paymentId}`);
-    if (String(payment.id) !== paymentId || typeof payment.external_reference !== "string" ||
-      typeof payment.preference_id !== "string" || !payment.collector?.id ||
-      typeof payment.currency_id !== "string" || typeof payment.status !== "string")
+    const sellerUserId = numericId(payment.collector_id);
+    const orderId = numericId(payment.order?.id);
+    if (String(payment.id) !== paymentId || typeof payment.external_reference !== "string" || !sellerUserId ||
+      typeof payment.currency_id !== "string" || typeof payment.status !== "string" ||
+      !orderId || (payment.order?.type !== undefined && payment.order.type !== "mercadopago"))
+      throw new Error("invalid_mercado_pago_payment");
+    // The preference is read from the payment's merchant order. An order that cannot be read, has no preference,
+    // or belongs to another seller or another request leaves the payment unverified: it is never recorded.
+    const order = await this.api<MerchantOrderResponse>(`/merchant_orders/${orderId}`);
+    if (numericId(order.id) !== orderId || typeof order.preference_id !== "string" || !order.preference_id ||
+      (order.collector?.id !== undefined && numericId(order.collector.id) !== sellerUserId) ||
+      (order.external_reference !== undefined && order.external_reference !== payment.external_reference))
       throw new Error("invalid_mercado_pago_payment");
     return {
       id: paymentId,
-      preferenceId: payment.preference_id,
+      preferenceId: order.preference_id,
       intentId: payment.external_reference,
-      sellerUserId: String(payment.collector.id),
+      sellerUserId,
       amountMinor: moneyMinor(payment.transaction_amount),
       currency: payment.currency_id,
       status: paymentStatus(payment.status),

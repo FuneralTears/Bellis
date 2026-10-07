@@ -19,8 +19,8 @@ function memoryStore(initial) {
   };
 }
 /** Stands in for Mercado Pago. Records every call so a test can tell which token created which preference. */
-function mercadoPago({ refresh, preference, payment } = {}) {
-  const calls = { refresh: [], preferences: [], payments: [] };
+function mercadoPago({ refresh, preference, payment, order } = {}) {
+  const calls = { refresh: [], preferences: [], payments: [], orders: [] };
   const fetch = async (url, init = {}) => {
     const token = init.headers?.Authorization?.replace('Bearer ', '');
     if (url === 'https://api.mercadopago.com/oauth/token') {
@@ -33,6 +33,7 @@ function mercadoPago({ refresh, preference, payment } = {}) {
       return preference ? preference(token) : Response.json({ id: `pref-${calls.preferences.length}`, init_point: 'https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=1', sandbox_init_point: 'https://sandbox.mercadopago.com.ar/checkout/v1/redirect?pref_id=1' });
     }
     if (url.startsWith('https://api.mercadopago.com/v1/payments/')) { calls.payments.push({ token, url }); return payment(token); }
+    if (url.startsWith('https://api.mercadopago.com/merchant_orders/')) { calls.orders.push({ token, url }); return order ? order(token) : orderAnswer(); }
     throw new Error(`unexpected call to ${url}`);
   };
   return { calls, fetch };
@@ -184,7 +185,9 @@ function paymentsDb() {
   return db;
 }
 const intent = { id: 'intent-1', workspace_id: 'ws-1', price_minor: 2500000, currency_code: 'ARS' };
-const paymentAnswer = (extra = {}) => Response.json({ id: 123456, external_reference: 'intent-1', preference_id: 'pref-1', collector: { id: 99912345 }, transaction_amount: 25000, currency_id: 'ARS', status: 'approved', ...extra });
+// As Mercado Pago answers: the payment names its seller and its merchant order; the preference is on the order.
+const paymentAnswer = (extra = {}) => Response.json({ id: 123456, external_reference: 'intent-1', collector_id: 99912345, order: { id: 777001, type: 'mercadopago' }, transaction_amount: 25000, currency_id: 'ARS', status: 'approved', ...extra });
+function orderAnswer(extra = {}) { return Response.json({ id: 777001, preference_id: 'pref-1', external_reference: 'intent-1', collector: { id: 99912345 }, ...extra }); }
 /** The webhook after its signature check, exactly as bellis-mp-webhook runs it. */
 async function notify(store, mp, db, eventId = 'webhook:1') {
   const realFetch = globalThis.fetch; globalThis.fetch = mp.fetch;
@@ -199,6 +202,7 @@ test('webhook: an approved payment is read back with the seller token and record
   const store = memoryStore(stored()); const db = paymentsDb(); const mp = mercadoPago({ payment: () => paymentAnswer() });
   await notify(store, mp, db);
   assert.equal(mp.calls.payments[0].token, 'APP_USR-access-old');
+  assert.deepEqual(mp.calls.orders, [{ token: 'APP_USR-access-old', url: 'https://api.mercadopago.com/merchant_orders/777001' }]);
   assert.deepEqual(db.recorded, [{ name: 'record_mercado_pago_payment', args: { p_intent: 'intent-1', p_preference: 'pref-1', p_payment_id: '123456', p_event_id: 'webhook:1', p_status: 'approved', p_amount_minor: 2500000, p_currency: 'ARS' } }]);
 });
 
@@ -218,9 +222,10 @@ test('webhook: with an expired token the payment is still verified, after renewi
 });
 
 test('webhook: a payment for another amount, another seller or another request is never recorded', async () => {
-  for (const extra of [{ transaction_amount: 1 }, { collector: { id: 111 } }, { external_reference: 'intent-9' }, { preference_id: 'pref-9' }, { currency_id: 'USD' }]) {
+  for (const [extra, orderExtra] of [[{ transaction_amount: 1 }], [{ collector_id: 111 }, { collector: { id: 111 } }],
+    [{ external_reference: 'intent-9' }, { external_reference: 'intent-9' }], [{}, { preference_id: 'pref-9' }], [{ currency_id: 'USD' }]]) {
     const store = memoryStore(stored()); const db = paymentsDb();
-    await assert.rejects(() => notify(store, mercadoPago({ payment: () => paymentAnswer(extra) }), db), /payment_verification_mismatch/);
+    await assert.rejects(() => notify(store, mercadoPago({ payment: () => paymentAnswer(extra), order: () => orderAnswer(orderExtra) }), db), /payment_verification_mismatch/);
     assert.equal(db.recorded.length, 0);
   }
 });
