@@ -1,5 +1,6 @@
 export type Appointment = { id: string; booking_intent_id: string; professional_id: string; starts_at: string; status: string; created_at: string; status_changed_at: string | null };
-export type Intent = { id: string; service_id: string; professional_id: string; created_at: string };
+/** `status` is the request's own state. A cancelled request with an approved payment is a late payment (see lib/late-payments.ts). */
+export type Intent = { id: string; service_id: string; professional_id: string; created_at: string; status?: string };
 export type Payment = { id: string; booking_intent_id: string; amount_minor: number; currency_code: string; status: string; created_at: string; approved_at: string | null };
 export type Note = { id: string; author_id: string; content: string; created_at: string; updated_at: string };
 export type Activity = { id: string; professional_id: string; type: "call" | "email" | "whatsapp" | "other" | "automation_created_follow_up"; title: string; description: string; metadata?: { follow_up_id?: string; automation_run_id?: string }; created_by: string; created_at: string };
@@ -51,9 +52,11 @@ export function buildPatientTimeline(input: {
   for (const payment of input.payments) {
     const intent = intents.get(payment.booking_intent_id);
     if (payment.status !== "approved" && payment.status !== "pending") continue;
+    // Approved after its request closed: the money came in and there is no appointment. Never worded as a booking.
+    const late = payment.status === "approved" && intent?.status === "cancelled";
     events.push({ id: `payment-${payment.id}`, at: payment.status === "approved" ? payment.approved_at ?? payment.created_at : payment.created_at,
-      kind: "payment", title: payment.status === "approved" ? "Pago recibido" : "Pago pendiente",
-      description: `${input.money(payment.amount_minor, payment.currency_code.trim())} · ${input.services.get(intent?.service_id ?? "") ?? "Servicio"}` });
+      kind: "payment", title: late ? "Pago recibido fuera de término" : payment.status === "approved" ? "Pago recibido" : "Pago pendiente",
+      description: `${input.money(payment.amount_minor, payment.currency_code.trim())} · ${input.services.get(intent?.service_id ?? "") ?? "Servicio"}${late ? " · la solicitud ya había vencido: sin turno" : ""}` });
   }
   for (const note of input.notes) events.push({ id: `note-${note.id}`, at: note.created_at, kind: "note", title: "Nota agregada", description: note.content, actor: input.professionals.get(note.author_id) });
   const activityNames = { call: "Llamada registrada", email: "Email registrado", whatsapp: "WhatsApp registrado", other: "Interacción registrada", automation_created_follow_up: "⚙ Seguimiento automático creado" };

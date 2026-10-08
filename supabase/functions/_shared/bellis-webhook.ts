@@ -6,6 +6,7 @@ import { isPermanentPaymentError, paymentErrorCode, type LogFields } from "./pay
  * What the webhook answers to a notification, decided apart from the database and from Mercado Pago so every
  * case can be tested. Mercado Pago sends a notification again until it gets a 200 or 201:
  *   401  not signed by Mercado Pago. Nothing is read or written.
+ *   200  the old IPN format (`?topic=…&id=…`), which carries no signature: acknowledged and ignored, never processed.
  *   400  signed, but the body is not what it claims to be.
  *   200  handled, already handled, or something no retry would ever change (logged as such).
  *   503  could not be handled right now: send it again.
@@ -29,6 +30,14 @@ const topicPattern = /^[a-z0-9_.-]{1,40}$/i;
 export async function answerNotification(request: Request, secret: string, deps: WebhookDeps): Promise<WebhookAnswer> {
   if (request.method !== "POST") return answer(405, "info", "webhook_wrong_method");
   if (Number(request.headers.get("content-length") ?? "0") > 10000) return answer(413, "warn", "webhook_too_large");
+  // The old IPN format names its payment in `id` and is not signed, so there is nothing to verify it with.
+  // It is never taken as a payment. It is acknowledged so Mercado Pago does not keep sending it: the same payment
+  // arrives as a signed Webhook, and the patient's page asks for its status anyway.
+  const query = new URL(request.url).searchParams;
+  if (!query.has("data.id") && query.has("topic")) {
+    const ipnTopic = query.get("topic") ?? "";
+    return answer(200, "warn", "webhook_ignored", { topic: `ipn:${topicPattern.test(ipnTopic) ? ipnTopic : "unknown"}` });
+  }
   // Without the secret nothing can be verified. That is Bellis's problem, not a forged request: ask for a retry.
   if (!secret) return answer(503, "error", "webhook_not_configured", { error_code: "mp_config_missing", retry: true });
   const dataId = await verifyMercadoPagoSignature(request, secret);

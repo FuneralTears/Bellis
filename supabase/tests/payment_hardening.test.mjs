@@ -145,6 +145,63 @@ test('webhook: a signed notification that is malformed or names no request never
   assert.equal((await answerNotification(new Request('https://supabase.example/hook'), secret, deps)).status, 405);
 });
 
+/** The old IPN format: the payment travels in `id`, the kind in `topic`, and nothing is signed. */
+function ipn({ topic = 'payment', id = '555', headers = {}, body = '', intentParam = intentId } = {}) {
+  const url = new URL('https://supabase.example/functions/v1/bellis-mp-webhook');
+  if (intentParam) url.searchParams.set('intent', intentParam);
+  url.searchParams.set('topic', topic); url.searchParams.set('id', id);
+  return new Request(url, { method: 'POST', headers, body });
+}
+
+test('IPN A: the supported format is the signed Webhook, ?data.id=<payment>&type=payment', async () => {
+  const { seen, deps } = world();
+  const answer = await answerNotification(notification(), secret, deps);
+  assert.deepEqual([answer.status, answer.event, answer.fields.payment_id], [200, 'payment_recorded', '555']);
+  assert.equal(seen.records.length, 1);
+});
+
+test('IPN B: ?topic=payment&id=<payment> is unsigned, so it is acknowledged and never taken as a payment', async () => {
+  const { seen, deps } = world();
+  const answer = await answerNotification(ipn(), secret, deps);
+  // 200 so Mercado Pago stops sending it; nothing was looked up or recorded.
+  assert.deepEqual([answer.status, answer.event, answer.fields.topic], [200, 'webhook_ignored', 'ipn:payment']);
+  assert.equal(answer.fields.payment_id, undefined);
+  assert.deepEqual(seen, { intents: 0, accounts: 0, lookups: 0, records: [] });
+  // With a body that claims an approved payment, or headers that look signed: the same.
+  const ts = nowSeconds();
+  const forged = await answerNotification(ipn({ body: JSON.stringify({ type: 'payment', data: { id: '555' }, status: 'approved' }),
+    headers: { 'content-type': 'application/json', 'x-request-id': 'req-1',
+      'x-signature': `ts=${ts},v1=${createHmac('sha256', secret).update(`id:555;request-id:req-1;ts:${ts};`).digest('hex')}` } }), secret, deps);
+  assert.deepEqual([forged.status, forged.event], [200, 'webhook_ignored']);
+  assert.deepEqual(seen, { intents: 0, accounts: 0, lookups: 0, records: [] });
+  // It does not depend on the secret either: an unconfigured server does not ask for IPN retries it will never use.
+  assert.equal((await answerNotification(ipn(), '', deps)).status, 200);
+});
+
+test('IPN C: other old topics are acknowledged the same way, and an odd topic is not written to the log', async () => {
+  const { seen, deps } = world();
+  for (const topic of ['merchant_order', 'chargebacks', 'point_integration_ipn', 'delivery', 'invoice']) {
+    const answer = await answerNotification(ipn({ topic, id: '12345' }), secret, deps);
+    assert.deepEqual([answer.status, answer.event, answer.fields.topic], [200, 'webhook_ignored', `ipn:${topic}`], topic);
+  }
+  const odd = await answerNotification(ipn({ topic: 'payment"}\n{"event":"payment_recorded' }), secret, deps);
+  assert.deepEqual([odd.status, odd.fields.topic], [200, 'ipn:unknown']);
+  assert.equal(logEntry('bellis-mp-webhook', odd.event, odd.fields).topic, 'ipn:unknown');
+  assert.deepEqual(seen, { intents: 0, accounts: 0, lookups: 0, records: [] });
+});
+
+test('IPN: an unsigned request that is neither format is still refused with 401, and GET is still 405', async () => {
+  const { seen, deps } = world();
+  const bare = new Request(`https://supabase.example/functions/v1/bellis-mp-webhook?intent=${intentId}&id=555`, { method: 'POST', body: '{}' });
+  assert.equal((await answerNotification(bare, secret, deps)).status, 401);
+  // `topic` next to `data.id` does not skip the signature.
+  const mixed = new Request(`https://supabase.example/functions/v1/bellis-mp-webhook?intent=${intentId}&topic=payment&id=555&data.id=555&type=payment`, { method: 'POST', body: '{}' });
+  assert.equal((await answerNotification(mixed, secret, deps)).status, 401);
+  const get = new Request(`https://supabase.example/functions/v1/bellis-mp-webhook?topic=payment&id=555`);
+  assert.equal((await answerNotification(get, secret, deps)).status, 405);
+  assert.deepEqual(seen, { intents: 0, accounts: 0, lookups: 0, records: [] });
+});
+
 test('refund: refunds, chargebacks and disputes read from Mercado Pago map to a known status', async () => {
   const realFetch = globalThis.fetch;
   const read = async (status) => {

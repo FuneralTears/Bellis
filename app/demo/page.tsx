@@ -9,10 +9,10 @@ import { DemoAutomations, DemoBell, DemoNotifications } from "./automation-views
 import { demoServices as initialServices, demoAppointments as initialAppointments, demoPatients as patients } from "./showroom-data";
 import { DemoAgenda } from "./agenda";
 import { DemoPatients } from "./patients";
-import { demoPatientId } from "./crm-data";
+import { demoLatePayments, demoPatientId, demoPatients as crmPatients, demoServiceNames } from "./crm-data";
 import BellisLogo from "@/components/brand/BellisLogo";
-import { formatMoney } from "@/lib/market";
-import PaymentSettings, { PendingPayments, mercadoPagoReturnNotice, type MercadoPagoConnection, type PaymentMethod, type PaymentNotice } from "@/components/payments/PaymentSettings";
+import { formatDateTime, formatMoney } from "@/lib/market";
+import PaymentSettings, { LatePayments, PendingPayments, mercadoPagoReturnNotice, type MercadoPagoConnection, type PaymentMethod, type PaymentNotice } from "@/components/payments/PaymentSettings";
 import "./demo.css";
 import "../dashboard/live.css";
 import "../pacientes/crm.css";
@@ -67,6 +67,7 @@ export default function Demo(){
             onConnect={() => { setPay((current) => ({ ...current, connecting: true, notice: null })); window.setTimeout(() => setPay((current) => ({ ...current, connecting: false, connection: demoConnections[1].connection, notice: mercadoPagoReturnNotice("connected") })), 1200); }}
             onDisconnect={() => setPay({ ...pay, connection: { status: "disconnected" }, method: "external_link", notice: { tone: "success", text: pay.method === "mercado_pago_ar" && pay.url ? "Mercado Pago quedó desconectado. Tus pacientes vuelven a pagar con tu link de pago." : "Mercado Pago quedó desconectado." } })}
             onSaveMethod={(method, url) => setPay({ ...pay, method, url: method === "external_link" ? url.trim() : pay.url, notice: { tone: "success", text: method === "mercado_pago_ar" ? "Listo: tus pacientes van a pagar con Mercado Pago." : "Link de pago guardado." } })} />
+          <LatePayments items={demoLatePayments.map(({ patientId, intent, payment }) => { const person = crmPatients([]).find((item) => item.id === patientId); return { id: payment.id, patient: person?.full_name ?? "Paciente", detail: `${demoServiceNames.get(intent.service_id) ?? "Consulta"} · ${formatMoney(payment.amount_minor / 100)}`, approved: formatDateTime(payment.approved_at ?? payment.created_at), onOpen: () => showPatient(person?.full_name ?? "") }; })} />
           <PendingPayments busy={false} items={pay.pending} onApprove={(id) => setPay({ ...pay, pending: pay.pending.filter((item) => item.id !== id) })} />
         </div>}
       </>}

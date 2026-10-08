@@ -147,3 +147,24 @@ export function PendingPayments({ items, busy, onApprove, note }: {
     </li>)}</ul> : <p className="pay-empty">No hay pagos pendientes.</p>}
   </section>;
 }
+
+/**
+ * Mercado Pago payments approved after their request ran out of time. Shown for a person to review:
+ * nothing here reopens a request, offers a time or books anything. A payment leaves the list once it is refunded in Mercado Pago.
+ */
+export function LatePayments({ items }: {
+  items: { id: string; patient: string; detail: string; approved: string; href?: string; onOpen?: () => void }[];
+}) {
+  if (!items.length) return null;
+  return <section className="demo-panel pay-panel pay-pending pay-late" aria-label="Pagos recibidos fuera de término">
+    <h3>Pagos recibidos fuera de término</h3>
+    <p className="pay-notice pay-info" role="status"><AlertCircle size={18} aria-hidden /><span>Mercado Pago aprobó {items.length === 1 ? "este pago" : "estos pagos"} después de que la solicitud venció. La reserva no se reactivó: el paciente no tiene turno y no puede elegir horario.</span></p>
+    <p className="pay-muted">Revisá cada caso. Podés devolver el pago desde tu cuenta de Mercado Pago o coordinar un turno nuevo con el paciente.</p>
+    <ul>{items.map((item) => <li key={item.id}>
+      <div><b>{item.patient}</b><small>{item.detail}</small></div>
+      <div><span className="pay-badge pay-badge-attention"><AlertCircle size={14} aria-hidden />Sin turno</span><small>Pago aprobado el {item.approved}</small></div>
+      {item.href ? <a className="pay-secondary" href={item.href}>Ver paciente</a>
+        : item.onOpen ? <button type="button" className="pay-secondary" onClick={item.onOpen}>Ver paciente</button> : <span />}
+    </li>)}</ul>
+  </section>;
+}

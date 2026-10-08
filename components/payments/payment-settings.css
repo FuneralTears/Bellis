@@ -334,6 +334,14 @@
   min-width: 0;
   font-size: 14px;
 }
+/* Late payments reuse the pending list; the badge keeps its own width and the link looks like the other actions. */
+.pay-late .pay-badge {
+  justify-self: start;
+}
+.pay-late a.pay-secondary {
+  text-align: center;
+  text-decoration: none;
+}
 .pay-pending li small {
   color: var(--muted-foreground);
   font-size: 13px;

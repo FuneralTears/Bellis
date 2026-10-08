@@ -159,17 +159,44 @@ Si la preferencia no se puede crear o registrar, `cancel_unpaid_intent` cierra l
 
 Una solicitud dura 48 horas; un pago aprobado la extiende 30 días para elegir horario. Vencida, ninguna acción la acepta: `resume` responde 410 y el paciente ve "Esta reserva venció"; la pestaña que estaba consultando deja de hacerlo.
 
-`expire_stale_booking_intents(p_limit)` cierra las solicitudes que vencieron sin pago: la solicitud pasa a `cancelled`, su pago a `expired` y queda la auditoría `booking_intent_expired`. No borra nada, no toca solicitudes pagas y se puede correr las veces que haga falta. **No está programada.** Sin ella nada se rompe (una solicitud vencida ya es inaccesible); lo que se acumula son filas en `pending_payment`. Para correrla a mano con la clave de servicio:
+`expire_stale_booking_intents(p_limit)` cierra las solicitudes que vencieron sin pago: la solicitud pasa a `cancelled`, su pago a `expired` y queda la auditoría `booking_intent_expired`. No borra nada, no toca solicitudes pagas y se puede correr las veces que haga falta. **Todavía no está programada en ningún entorno.** Sin ella nada se rompe (una solicitud vencida ya es inaccesible); lo que se acumula son filas en `pending_payment`. Para correrla a mano con la clave de servicio:
 
 ```sql
 select public.expire_stale_booking_intents();
 ```
 
-Si se decide programarla, alcanza con una línea de `pg_cron`, que el proyecto ya usa para las automatizaciones. Va en una migración propia:
+#### Programarla (preparado, sin activar)
+
+El proyecto ya usa `pg_cron` para las automatizaciones, así que no hace falta nada nuevo. El script está en `supabase/proposed/expire_booking_intents_cron.sql`: registra la tarea `bellis-expire-booking-intents`, cada 15 minutos.
+
+Está **fuera de `supabase/migrations/` a propósito**. Una migración se aplica en todos los entornos con el próximo `supabase db push`; mientras la tarea sea solo para Staging, tiene que ser algo que se corre a mano en un proyecto elegido.
+
+| | |
+| --- | --- |
+| Qué cambia | Una solicitud `pending_payment` con `expires_at` pasado y sin pago aprobado ni reembolsado: pasa a `cancelled`, su pago a `expired`, auditoría `booking_intent_expired`. Una vez. |
+| Qué no toca | `awaiting_schedule`, `payment_confirmed`, `scheduled`, `completed`, `refunded`, ni nada que tenga un pago `approved` o `refunded`. No borra. |
+| Con qué permisos corre | Dentro de la base, como su dueño. Sin llamadas de red, sin secretos y sin permisos nuevos: la función sigue siendo ejecutable solo por `service_role`. |
+| Carga | Hasta 500 solicitudes por corrida, con `SKIP LOCKED`: no espera a un pago que se está registrando en ese momento. |
+| Repetirla | `cron.schedule` reemplaza la tarea del mismo nombre. Correr el script dos veces no duplica nada. |
+| Un pago que llega justo después | Es el caso de "Pago tardío": se registra y la solicitud sigue cerrada. |
+
+Para activarla **en Staging**, cuando se decida:
+
+```
+node scripts/assert-staging-env.mjs --cli
+npx supabase db query --linked -f supabase/proposed/expire_booking_intents_cron.sql
+```
+
+Para comprobarla y para apagarla:
 
 ```sql
-select cron.schedule('bellis-expire-booking-intents','17 * * * *','select public.expire_stale_booking_intents()');
+select jobname,schedule,active from cron.job where jobname='bellis-expire-booking-intents';
+select d.status,d.return_message,d.start_time from cron.job_run_details d join cron.job j using(jobid)
+  where j.jobname='bellis-expire-booking-intents' order by d.start_time desc limit 5;
+select cron.unschedule('bellis-expire-booking-intents');
 ```
+
+Para llevarla a producción, mover el archivo a `supabase/migrations/` con una fecha nueva, para que quede en el historial de los dos proyectos. `cron.job_run_details` crece con cada corrida (96 filas por día): conviene limpiarla junto con la de las automatizaciones.
 
 El panel ya no cuenta las solicitudes vencidas como pagos pendientes, esté o no programada la tarea.
 
@@ -196,7 +223,22 @@ where a.action='mercado_pago_late_payment_approved' and p.status='approved'
 order by p.approved_at desc;
 ```
 
-El panel todavía no muestra estos casos: hoy se detectan con esa consulta. Qué hacer con cada uno (devolver el pago desde Mercado Pago o dar el turno a mano con una solicitud nueva) lo decide el profesional.
+#### En el panel
+
+El profesional ve estos casos en dos lugares, sin tablas ni funciones nuevas:
+
+- **Perfil → Cobros y pagos**, sección "Pagos recibidos fuera de término": paciente, servicio, monto, fecha de aprobación, la marca "Sin turno" y un acceso a la ficha del paciente. La pestaña muestra la cantidad. La sección no aparece si no hay ninguno.
+- **Ficha del paciente**: en Pagos, el pago lleva la etiqueta "Fuera de término" en lugar de "Aprobado"; en el historial, "Pago recibido fuera de término … sin turno".
+
+La regla es una sola y está en `lib/late-payments.ts`: pago de Mercado Pago `approved` sobre una solicitud `cancelled`. Ese par de estados solo lo produce `record_mercado_pago_payment` en el camino de pago tardío (el mismo que deja la auditoría). El panel no lee `audit_events`: ningún miembro del workspace tiene permiso de lectura sobre esa tabla, y no hizo falta dárselo.
+
+El panel solo muestra. No reactiva la solicitud, no ofrece horarios y no agenda. Qué hacer con cada pago lo decide el profesional: devolverlo desde Mercado Pago (el reembolso llega por webhook, la solicitud pasa a `refunded` y el caso sale de la lista) o coordinar un turno con una solicitud nueva.
+
+Límites conocidos:
+
+- No hay "marcar como revisado". Un pago que el profesional decide conservar (porque dio el turno por otra vía) sigue en la lista. Resolverlo necesita guardar ese dato, es decir una migración.
+- Ese pago suma en "Ingresos cobrados" del Resumen, porque el dinero efectivamente se cobró.
+- El panel carga hasta 300 pagos y 300 solicitudes del workspace; más allá de eso un caso viejo podría no verse en Cobros (sí en la ficha del paciente).
 
 ## Reembolsos y contracargos
 
@@ -265,13 +307,34 @@ Nunca se escribe: access token, refresh token, client secret, código de autoriz
 | `payment_recorded`, `payment_unchanged` | `bellis-mp-webhook` | Aviso procesado; el segundo es un aviso repetido |
 | `payment_deferred` | `bellis-mp-webhook` | Falla temporal: se pide reintento |
 | `payment_refused` | `bellis-mp-webhook` | Falla definitiva: no se reintenta. **Revisar siempre.** |
-| `webhook_rejected`, `webhook_ignored`, `webhook_unroutable` | `bellis-mp-webhook` | Firma o cuerpo inválidos; otro tipo de aviso; aviso sin solicitud |
+| `webhook_rejected`, `webhook_ignored`, `webhook_unroutable` | `bellis-mp-webhook` | Firma o cuerpo inválidos; otro tipo de aviso, o un aviso en formato IPN (`topic` empieza con `ipn:`); aviso sin solicitud |
 | `request_failed` | `bellis-public`, `bellis-mp-oauth` | Falla no prevista (500) |
 
 ## Webhook
 
+### Formatos de aviso
+
+| Formato | Cómo llega | Firma | Qué hace Bellis |
+| --- | --- | --- | --- |
+| **Webhook** de pago | `POST …?data.id=<pago>&type=payment`, cuerpo JSON con `type` y `data.id` | `x-signature` + `x-request-id` | **El único que se procesa.** Verifica la firma, lee el pago en Mercado Pago y lo registra. |
+| Webhook de otro tema (`mp-connect`, `order`, reclamos…) | `POST …?data.id=<id>&type=<tema>` | La misma | 200, `webhook_ignored`. No toca pagos. |
+| **IPN** de pago (formato anterior) | `POST …?topic=payment&id=<pago>` | **No tiene** | 200, `webhook_ignored` con `topic: ipn:payment`. **No se procesa.** |
+| IPN de otros temas (`merchant_order`, `chargebacks`, `point_integration_ipn`, `delivery`, `invoice`…) | `POST …?topic=<tema>&id=<id>` | No tiene | 200, `webhook_ignored` con `topic: ipn:<tema>`. No se procesa. |
+| Cualquier otra cosa sin firma | — | — | 401. |
+
+Por qué 200 y no 401 para IPN. Un aviso IPN no trae nada con qué comprobar quién lo envió, así que **nunca se toma como un pago**: no se lee la solicitud, no se pide el token del vendedor, no se consulta Mercado Pago y no se escribe nada. Responder 401 tampoco agregaría seguridad (ya no se procesa) y sí haría que Mercado Pago lo reintente durante días por un aviso que Bellis no va a usar nunca. El 200 dice "recibido", no "aceptado". El pago no depende de ese aviso: llega por el Webhook firmado y, si no, por la consulta de estado de la página del paciente.
+
+Se reconoce como IPN un pedido con `topic` y sin `data.id`. Si trae `data.id`, va por el camino firmado aunque también traiga `topic`. La decisión se toma antes de mirar el secreto: un servidor sin `MERCADO_PAGO_WEBHOOK_SECRET` tampoco pide reintentos de IPN.
+
+Si en los logs aparece `ipn:payment` y **no** aparecen `payment_recorded` del webhook, la aplicación de Mercado Pago está enviando solo IPN: hay que configurar Webhooks (Tus integraciones → Webhooks → tema Pagos). Los pagos se siguen confirmando por la consulta de estado, pero más tarde.
+
+Bellis no implementa IPN y no lo va a implementar: Mercado Pago lo da por discontinuado a favor de Webhooks. Lo afirmado acá sobre IPN (sin firma, reintentos) sale de la documentación de Mercado Pago tal como se conocía al escribir G7B; no se volvió a contrastar con la documentación en línea.
+
+### Respuestas
+
 | Caso | Respuesta | Reintenta Mercado Pago |
 | --- | --- | --- |
+| Formato IPN (`?topic=…&id=…`, sin firma) | 200, ignorado, **no se procesa** | No |
 | Sin firma, firma inválida, o `ts` a más de 10 minutos | 401 | Sí |
 | Falta `MERCADO_PAGO_WEBHOOK_SECRET` en el servidor | 503 | Sí |
 | Firmado, cuerpo ilegible o que no coincide con `data.id` | 400 | Sí |
@@ -289,7 +352,7 @@ Mercado Pago espera 200 o 201 dentro de 22 segundos; si no, reintenta cada 15 mi
 **Riesgos pendientes para G6.** Nada de esto se pudo probar contra Mercado Pago real:
 
 1. **Firma en `notification_url`.** Bellis recibe los avisos por la `notification_url` de cada preferencia, con `?intent=`. La documentación dice que esa URL tiene prioridad sobre la configurada en la aplicación, pero no afirma que esos avisos lleven `x-signature`. Si llegaran sin firma, todos darían 401 y los pagos se confirmarían solo por la consulta de estado del paciente.
-2. **Formato del aviso.** Si llegara el formato IPN (`?topic=payment&id=…`) en lugar de `?data.id=…&type=payment`, también daría 401.
+2. **Formato del aviso.** Resuelto en G7B: el formato IPN (`?topic=payment&id=…`) se responde 200 y se ignora (ver "Formatos de aviso"). En G6 el Webhook firmado llegó por la `notification_url` y el duplicado real respondió 200/200.
 3. **`ts` en los reintentos.** Si un reintento conserva el `ts` original, todo reintento posterior a 10 minutos daría 401, y el camino "503 y reintentar" no serviría.
 4. **`ts` en segundos o milisegundos.** Se aceptan ambos; hay que confirmar cuál llega.
 
@@ -410,6 +473,10 @@ Pruebas automáticas:
 - `node --test supabase/tests/mercado_pago_provider.test.mjs` y `supabase/tests/mercado_pago_smoke.sql` — checkout y webhook existentes.
 - `node --test supabase/tests/payment_hardening.test.mjs` y `supabase/tests/payment_hardening_smoke.sql` — G7A: respuestas del webhook, reintentos, estados de la conexión, pago tardío, solicitud vencida, reembolso, dos pestañas, desconexión con pago en curso, configuración faltante, logs y cruce de entornos.
 
+- `node --test tests/late-payments.mjs` — G7B: qué cuenta como pago fuera de término, la lista del panel y cómo lo nombra la ficha del paciente.
+- `node --test tests/assert-staging-env.mjs` — G7B: la guarda de entorno, por archivo, por variable exportada y por proyecto enlazado.
+- Los formatos de aviso (Webhook firmado, IPN de pago, otros temas IPN) están en `payment_hardening.test.mjs`, casos "IPN A" a "IPN C".
+
 Los `.sql` se corren **en Staging o en una base local, nunca en producción**. Para una base local alcanza con la imagen `supabase/postgres`, aplicar las migraciones en orden y correr cada archivo con `psql -v ON_ERROR_STOP=1`.
 
 ## Carga manual (anterior a OAuth)
@@ -448,10 +515,24 @@ Todo cambio de Mercado Pago se hace en `staging`. Checklist antes de cada deploy
 - [ ] En Staging, toda fila de `private.mercado_pago_accounts` tiene `environment = 'test'`. En producción, `'production'`.
 - [ ] Los `.sql` de `supabase/tests/` no se corren en producción.
 
-Hallazgos de la auditoría G7A, sin resolver porque están fuera del repositorio:
+### Guarda de entorno
 
-- El `.env.local` de este entorno de trabajo (generado por `vercel env pull`) apunta al proyecto de **producción**. `npm run dev` en local trabaja contra datos reales. Conviene que el entorno Development de Vercel use Staging.
-- La configuración de Vercel y los secretos de cada proyecto no se pudieron leer desde el repositorio: el checklist de arriba hay que recorrerlo a mano.
+`vercel env pull` escribe en `.env.local` las variables del entorno Development de Vercel, que hoy apuntan a **producción**. Para que una rama que no es `main` no llegue ahí por accidente hay tres capas:
+
+1. **Overrides locales.** `.env.development.local` (para `next dev`) y `.env.production.local` (para `next build` / `next start`) fijan `SUPABASE_URL` en Staging. Next.js los lee antes que `.env.local`, y `vercel env pull` no los pisa. Están ignorados por Git. Si falta la clave publicable de Staging, el sitio responde "Supabase no está configurado" en lugar de usar otra.
+2. **`scripts/assert-staging-env.mjs`.** Lee la dirección del proyecto de los mismos archivos y en el mismo orden que Next.js, y el proyecto al que está enlazado el CLI de Supabase. En cualquier rama que no sea `main` falla (código 1) si alguno de los tres caminos llega a producción o a un proyecto que no conoce. Imprime solo refs de proyecto, nunca una clave; no escribe nada ni hace pedidos.
+3. **`npm run dev` lo corre solo** (`predev`). Con `.env.local` de producción y sin override, en `staging` el servidor no arranca.
+
+```
+npm run env:check                              # los tres caminos
+node scripts/assert-staging-env.mjs --dev      # lo que usaría next dev
+node scripts/assert-staging-env.mjs --build    # lo que usaría next build / next start
+node scripts/assert-staging-env.mjs --cli      # a dónde iría supabase db push / functions deploy
+```
+
+Antes de una migración o de un deploy desde `staging`: `node scripts/assert-staging-env.mjs --cli && npx supabase db push`. En `main` el script deja pasar producción: ahí la guarda es el runbook de más abajo.
+
+Lo que el script no cubre: un `--project-ref` o un `--db-url` escritos a mano en el comando, las variables cargadas en Vercel y los secretos de cada proyecto. Para Vercel sigue valiendo el checklist de arriba y la línea "site talks to this same Supabase project" de `payments-health.mjs`. Lo que cerraría el problema de raíz, fuera del repositorio: que el entorno **Development** de Vercel use Staging, así `vercel env pull` deja de traer producción.
 
 ## Orden de deploy
 
@@ -485,6 +566,156 @@ Entre el paso 4 y el 6 conviven la función nueva y el frontend anterior. Lo ún
 | Migración | Las de Mercado Pago solo agregan tablas, columnas y funciones: no se revierten borrando. Para volver al comportamiento anterior de `record_mercado_pago_payment`, crear una migración nueva con la definición de `20260929000000_mercado_pago_ar.sql`. Nunca aplicar una migración que borre o reescriba datos sin respaldo y plan escrito. |
 
 No borrar filas de `payments`, `booking_intents`, `private.mercado_pago_accounts` ni secretos de Vault como parte de un rollback.
+
+### Si falla `mercado_pago_checkout_ready`
+
+`bellis-public` la llama al armar el perfil público, **solo** para un workspace con Mercado Pago como método y solo si existe `MERCADO_PAGO_WEBHOOK_SECRET`. Si la función falta o falla, el perfil público de esos workspaces responde 500; los de link externo no se enteran.
+
+1. Confirmar: `select public.mercado_pago_checkout_ready('<workspace>')` con la clave de servicio, y `supabase migration list` (falta `20261006090000`).
+2. Si falta la migración: aplicarla. Es la corrección, y solo crea o reemplaza funciones.
+3. Si no se puede aplicar en el momento: quitar `MERCADO_PAGO_WEBHOOK_SECRET` del proyecto. Sin ella `bellis-public` no llama a la función y deja de ofrecer Mercado Pago; el perfil vuelve a cargar. Los profesionales afectados pueden pasar a link externo desde Cobros y pagos. Volver a cargar el secreto cuando esté corregido.
+4. Como último recurso, volver a la versión anterior de `bellis-public`, que no usa esa función.
+
+### Volver a la versión anterior de una función
+
+Antes de desplegar, anotar la salida de `npx supabase functions list` (versión y fecha de cada una) y el commit desplegado. Para volver, sin tocar el árbol de trabajo:
+
+```
+git worktree add ../bellis-rollback <commit-anterior>
+cd ../bellis-rollback && npx supabase functions deploy <nombre> --project-ref <ref>
+cd - && git worktree remove ../bellis-rollback
+```
+
+Supabase no tiene "promover la versión anterior": volver es desplegar de nuevo el código viejo, y queda como una versión más. `bellis-mp-oauth` y `bellis-mp-webhook` no existían antes en producción: no hay versión anterior. No hace falta borrarlas; sin sus secretos responden 503/401 y no hacen nada. Para dejar de recibir avisos, quitar la URL de Webhooks en la aplicación de Mercado Pago.
+
+### Qué se puede revertir de cada migración
+
+| Migración | Qué hace | Volver atrás |
+| --- | --- | --- |
+| `20261004090000_mercado_pago_oauth` | Columnas y restricciones en `private.mercado_pago_accounts`, tabla de states, funciones de conexión, un trigger sobre `workspaces`. Actualiza filas existentes (`status='disconnected'` donde `not active`). | **No se revierte.** Agrega estructura; quitarla borraría conexiones y tokens. Si algo falla, se corrige hacia adelante con otra migración. |
+| `20261005090000_booking_payment_return` | Columnas `booking_intents.resume_token_hash` y `payments.checkout_url`; funciones `attach_mercado_pago_checkout` y `cancel_unpaid_intent`. | **No se revierte.** Las columnas nuevas son opcionales y el código anterior las ignora: dejarlas no rompe nada. |
+| `20261006090000_payment_hardening` | Solo funciones: crea `mercado_pago_checkout_ready` y `expire_stale_booking_intents`, reemplaza `record_mercado_pago_payment`. Sin tablas, columnas ni datos. | **Reversible sin pérdida**, con una migración nueva que restaure la definición anterior de `record_mercado_pago_payment` (la de `20260929000000_mercado_pago_ar.sql`). Las dos funciones nuevas se pueden dejar. |
+| `supabase/proposed/expire_booking_intents_cron.sql` | Registra una tarea. | `select cron.unschedule('bellis-expire-booking-intents');` Las solicitudes que ya cerró no se reabren, y no hace falta. |
+
+Ninguna de las tres borra ni reescribe pagos, solicitudes o turnos. El respaldo previo al deploy es para el caso que este cuadro no prevé, no parte del plan.
+
+## Runbook de producción
+
+Para ejecutar una sola vez, con dos personas si se puede, en un horario de poco uso. **Nada de esto se ejecutó.** Cada paso tiene su comprobación; si una falla, parar y aplicar "Rollback".
+
+Proyecto: `pinfdbvfzoratsntjgah`. Sitio: `https://bellis-six.vercel.app`. Migraciones pendientes en producción: `20261004090000`, `20261005090000`, `20261006090000` (confirmarlo en el paso 3).
+
+**0. Antes de empezar**
+
+- [ ] La aplicación **productiva** de Mercado Pago existe, con Redirect URL `https://bellis-six.vercel.app/mercado-pago/callback`.
+- [ ] Checklist de variables de más abajo, completo.
+- [ ] `staging` mergeada a `main` por pull request, con los tests de "CI" en verde.
+
+**1. Respaldo**
+
+- [ ] Dashboard → Database → Backups: hay un respaldo de hoy (o tomar uno, según el plan).
+- [ ] Copia lógica local, fuera del repositorio:
+  ```
+  npx supabase link --project-ref pinfdbvfzoratsntjgah
+  npx supabase db dump -f ../bellis-prod-schema-$(date +%F).sql
+  npx supabase db dump --data-only -f ../bellis-prod-data-$(date +%F).sql
+  ```
+  El segundo archivo tiene datos de pacientes: guardarlo cifrado y borrarlo cuando el deploy esté estable.
+
+**2. `main` limpio**
+
+- [ ] `git checkout main && git pull && git status` → sin cambios ni archivos sin seguimiento que importen.
+- [ ] `git log -1` es el commit que se quiere desplegar. Anotarlo.
+- [ ] `node scripts/assert-staging-env.mjs --cli` → muestra `pinfdbvfzoratsntjgah (production)` **y la rama es `main`**.
+
+**3. Estado de las migraciones**
+
+- [ ] `npx supabase migration list` → Local y Remote coinciden hasta la última aplicada y solo faltan en Remote las tres de arriba. Si falta otra, o Remote tiene una que Local no, parar.
+- [ ] `npx supabase functions list` → anotar versión y fecha de `bellis-public`.
+
+**4. Aplicar**
+
+- [ ] `npx supabase db push --dry-run` → lista exactamente las tres.
+- [ ] `npx supabase db push`
+
+**5. Verificar**
+
+- [ ] `npx supabase migration list` → Local == Remote hasta `20261006090000`.
+- [ ] La consulta de 16 funciones de "Chequeos de salud" devuelve `ok = true`.
+- [ ] El sitio sigue funcionando con la versión **anterior** de `bellis-public`: abrir un perfil público y ver horarios de prueba.
+
+**6. Secretos y funciones**
+
+- [ ] Cargar los secretos del checklist. `npx supabase secrets list` → están los nombres esperados y **no** está `MERCADO_PAGO_OAUTH_TEST_TOKEN`.
+- [ ] `npx supabase functions deploy bellis-mp-oauth`
+- [ ] `npx supabase functions deploy bellis-public`
+- [ ] `npx supabase functions deploy bellis-mp-webhook`
+
+**7. Versiones**
+
+- [ ] `npx supabase functions list` → las tres, con fecha de hoy; `bellis-public` con una versión más que la anotada.
+- [ ] Vercel: el deploy de producción corresponde al commit anotado.
+
+**8. Chequeo de salud**
+
+- [ ] `BELLIS_SUPABASE_URL=https://pinfdbvfzoratsntjgah.supabase.co BELLIS_SITE_URL=https://bellis-six.vercel.app node scripts/payments-health.mjs` → 14/14.
+- [ ] En la aplicación de Mercado Pago: Webhooks → URL `https://pinfdbvfzoratsntjgah.supabase.co/functions/v1/bellis-mp-webhook`, tema Pagos. "Simular" responde 200 o 401 según el caso, nunca 503.
+
+**9. Camino feliz controlado**
+
+Con un workspace propio, no el de un profesional real:
+
+- [ ] Conectar una cuenta real de Mercado Pago desde Cobros y pagos → "Conectado", sin "Cuenta de prueba".
+- [ ] Elegir Mercado Pago, reservar desde el perfil público un servicio de monto mínimo y pagarlo.
+- [ ] El pago queda `approved`, la solicitud `awaiting_schedule`, se puede elegir horario y se crea **un** turno.
+- [ ] En los logs de `bellis-mp-webhook`: `payment_recorded` con `http_status: 200`.
+- [ ] Reembolsar ese pago desde Mercado Pago → pago y solicitud `refunded`, turno cancelado.
+- [ ] Un flujo completo con link externo en otro workspace sigue funcionando.
+
+**10. Después**
+
+- [ ] Mercado Pago no se ofrece a ningún profesional hasta completar el paso 9.
+- [ ] Mirar los logs durante el primer día: `payment_refused`, `config_missing`, `request_failed`, `ipn:payment`.
+- [ ] Volver a enlazar el CLI a Staging: `npx supabase link --project-ref hbvmcvemrkfovzhlpgys`.
+- [ ] Si algo falló: "Rollback", en este orden: frontend, función, y la migración solo hacia adelante.
+
+### Checklist de variables de producción
+
+Sin valores. Los nombres de Vercel son los que lee `app/api/supabase-config`.
+
+**Vercel → entorno Production**
+
+| Variable | Debe ser | Distinta de Staging |
+| --- | --- | --- |
+| `SUPABASE_URL` | `https://pinfdbvfzoratsntjgah.supabase.co` | Sí |
+| `SUPABASE_PUBLISHABLE_KEY` | La clave publicable de **ese** proyecto | Sí |
+| Dominio de producción | `bellis-six.vercel.app`. El sitio no tiene una variable de origen: el origen se configura del lado de Supabase (`BELLIS_SITE_ORIGIN`). | Sí |
+
+Ninguna variable de Mercado Pago va en Vercel, y ninguna lleva `NEXT_PUBLIC_`. El entorno **Preview** de la rama `staging` tiene las dos de Staging.
+
+**Supabase producción → Edge Functions → Secrets**
+
+| Variable | Debe ser | Distinta de Staging |
+| --- | --- | --- |
+| `BELLIS_SITE_ORIGIN` | `https://bellis-six.vercel.app`, sin barra final | Sí |
+| `BELLIS_ADDITIONAL_ORIGINS` | Vacía o sin definir | Sí |
+| `MERCADO_PAGO_CLIENT_ID` | De la aplicación **productiva** | Sí |
+| `MERCADO_PAGO_CLIENT_SECRET` | De la aplicación productiva | Sí |
+| `MERCADO_PAGO_REDIRECT_URI` | Sin definir (se arma con el origen), o exactamente `https://bellis-six.vercel.app/mercado-pago/callback` | Sí |
+| `MERCADO_PAGO_WEBHOOK_SECRET` | La firma de Webhooks de la aplicación productiva | Sí |
+| `MERCADO_PAGO_OAUTH_TEST_TOKEN` | **No debe existir.** El código solo mira si vale `true`, así que `false` tiene el mismo efecto, pero la regla es no definirla. | Sí (`true` en Staging) |
+
+Ningún valor se copia de un proyecto al otro: todos difieren.
+
+**Lo que tiene que apuntar a `bellis-six.vercel.app`**
+
+- `BELLIS_SITE_ORIGIN`, y `MERCADO_PAGO_REDIRECT_URI` si se define.
+- La Redirect URL de la aplicación productiva de Mercado Pago: `https://bellis-six.vercel.app/mercado-pago/callback`.
+
+**Lo que tiene que apuntar a `pinfdbvfzoratsntjgah.supabase.co`**
+
+- `SUPABASE_URL` de Vercel Production.
+- La URL de Webhooks de la aplicación productiva: `https://pinfdbvfzoratsntjgah.supabase.co/functions/v1/bellis-mp-webhook`.
 
 ## Chequeos de salud
 

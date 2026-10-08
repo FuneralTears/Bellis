@@ -2,6 +2,7 @@
 import type { OpportunityOverview } from "../pacientes/opportunities";
 import type { Activity, Appointment, FollowUp, Intent, Note, Payment } from "../pacientes/timeline";
 import { demoToday, type DemoTask } from "./showroom-data";
+import { latePayments } from "@/lib/late-payments";
 
 export const demoStatusLabels = { new: "Nuevo", active: "Activo", follow_up: "Seguimiento", inactive: "Inactivo" } as const;
 export const demoProfessional = "Dra. Ana López";
@@ -88,3 +89,8 @@ export const demoDetails: Record<string, DemoDetails> = {
     notes: [note("vr-n1", "2026-09-26", "Cierre de etapa\n\nEvaluamos espaciar las sesiones a una por mes.")],
   }),
 };
+
+// A payment Mercado Pago approved after its request had expired: money received, no appointment. Same rule as the product.
+demoDetails["carlos-ruiz"].intents.push({ id: "cr-late", service_id: "s1", professional_id: "pro", created_at: at("2026-09-24", "10:00"), status: "cancelled" });
+demoDetails["carlos-ruiz"].payments.push({ id: "cr-late", booking_intent_id: "cr-late", amount_minor: 2500000, currency_code: "ARS", status: "approved", created_at: at("2026-09-24", "10:00"), approved_at: at("2026-09-27", "16:10") });
+export const demoLatePayments = Object.entries(demoDetails).flatMap(([patientId, data]) => latePayments(data.intents, data.payments).map(({ intent, payment }) => ({ patientId, intent, payment })));
