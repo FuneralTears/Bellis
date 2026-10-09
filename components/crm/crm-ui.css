@@ -186,6 +186,19 @@
 .crm-main .crm-card .crm-note b { font-weight: 600; }
 .crm-main .crm-card .crm-note p { margin: 4px 0; overflow-wrap: anywhere; }
 .crm-main .crm-card .crm-note button { padding: 0; min-height: 28px; font-weight: 600; color: var(--primary); }
+/* Internal notes: composer, type filter, edit and delete */
+.crm-main .crm-note-form .live-error { margin: 10px 0 0; padding: 8px 10px; font-size: 13px; }
+.crm-note-filter { margin-bottom: 12px; }
+.crm-note-editing { padding: 10px 0; border-top: 1px solid var(--border); }
+.crm-note-editing:first-child { border-top: 0; padding-top: 0; }
+.crm-main .crm-note-editing .crm-note-form { margin: 0; }
+.crm-main .crm-card .crm-note .crm-note-head { align-items: center; }
+.crm-note-tools { display: inline-flex; align-items: center; gap: 4px 14px; flex-wrap: wrap; }
+.crm-main .crm-card .crm-note small { display: block; font-size: 12px; overflow-wrap: anywhere; }
+.crm-main .crm-card .crm-note .crm-note-confirm { display: grid; justify-content: start; gap: 4px; margin-top: 8px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--danger-subtle); font-size: 13px; color: var(--foreground); }
+.crm-main .crm-note-confirm .live-error { margin: 0; padding: 0; background: none; font-size: 13px; }
+.crm-main .crm-card .crm-note .crm-note-danger { color: var(--danger); }
+.crm-main .crm-card .crm-note button:disabled { opacity: .5; cursor: not-allowed; }
 .crm-main .crm-card .crm-preconsult { margin-top: 0; padding: 12px; }
 .crm-main .crm-card .crm-preconsult + .crm-preconsult { margin-top: 8px; }
 .crm-main .crm-card .crm-preconsult-head b { font-size: 13px; font-weight: 600; }

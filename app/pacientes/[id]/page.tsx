@@ -11,6 +11,7 @@ import { buildPatientTimeline, followUpBucket, followUpLabels, priorityLabels, t
 import { detectOpportunities, type OpportunityOverview } from "../opportunities";
 import { isLatePayment, latePaymentTag } from "@/lib/late-payments";
 import { FollowUpCard, OpportunityRow, ProfileHeader, StatusTag, Tabs, Tag, Timeline, dateOnly, type Tone } from "@/components/crm/CrmUi";
+import { PatientNotes, type NoteDraft } from "@/components/crm/PatientNotes";
 import { useProfileTab } from "@/components/crm/useProfileTab";
 
 type Answer = { id: string; booking_intent_id: string; questionnaire_id: string; question_title: string; section_label: string; answer: unknown; created_at: string };
@@ -20,7 +21,8 @@ const emptyDetails: Details = { appointments: [], intents: [], payments: [], ans
 const appointmentLabels: Record<string, string> = { scheduled: "Programado", completed: "Completado", cancelled: "Cancelado", refunded: "Reembolsado", awaiting_schedule: "Pendiente de horario" };
 const paymentLabels: Record<string, string> = { pending: "Pendiente", approved: "Aprobado", rejected: "Rechazado", refunded: "Reembolsado", cancelled: "Cancelado", expired: "Vencido" };
 const emptyFollowUp = { title: "", description: "", due_date: "", due_time: "", priority: "medium" as FollowUp["priority"] };
-type ActivityType = "note" | "call" | "email" | "whatsapp" | "other";
+type ActivityType = "call" | "email" | "whatsapp" | "other";
+const noteColumns = "id,author_id,content,note_type,created_at,updated_at";
 function answerText(value: unknown): string { if (Array.isArray(value)) return value.map(answerText).join(", "); if (value === null || value === undefined) return "—"; if (typeof value === "object") return JSON.stringify(value); if (typeof value === "boolean") return value ? "Sí" : "No"; return String(value); }
 const appointmentTones: Record<string, Tone> = { scheduled: "blue", completed: "sage", cancelled: "neutral", refunded: "neutral", awaiting_schedule: "orange" };
 const paymentTones: Record<string, Tone> = { pending: "orange", approved: "sage", rejected: "coral", refunded: "neutral", cancelled: "neutral", expired: "coral" };
@@ -32,15 +34,15 @@ export default function PatientDetailPage() {
   const [patient, setPatient] = useState<OpportunityOverview | null>(null);
   const [details, setDetails] = useState<Details>(emptyDetails);
   const [userId, setUserId] = useState("");
+  const [managesNotes, setManagesNotes] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [activityOpen, setActivityOpen] = useState(false);
-  const [activityType, setActivityType] = useState<ActivityType>("note");
+  const [activityType, setActivityType] = useState<ActivityType>("call");
   const [activityTitle, setActivityTitle] = useState("");
   const [activityDescription, setActivityDescription] = useState("");
-  const [editingNote, setEditingNote] = useState<string | null>(null);
   const [followUpOpen, setFollowUpOpen] = useState(false);
   const [editingFollowUp, setEditingFollowUp] = useState<string | null>(null);
   const [followUpDraft, setFollowUpDraft] = useState(emptyFollowUp);
@@ -66,7 +68,7 @@ export default function PatientDetailPage() {
           fetchPages<Appointment>(async (from, to) => await client.from("appointments").select("id,booking_intent_id,professional_id,starts_at,status,created_at,status_changed_at").eq("workspace_id", workspace).eq("patient_id", patientId).order("starts_at", { ascending: false }).range(from, to)),
           fetchPages<Intent>(async (from, to) => await client.from("booking_intents").select("id,service_id,professional_id,created_at,status").eq("workspace_id", workspace).eq("patient_id", patientId).order("created_at", { ascending: false }).range(from, to)),
           fetchPages<Answer>(async (from, to) => await client.from("questionnaire_answers").select("id,booking_intent_id,questionnaire_id,question_title,section_label,answer,created_at").eq("workspace_id", workspace).eq("patient_id", patientId).order("created_at", { ascending: false }).range(from, to)),
-          fetchPages<Note>(async (from, to) => await client.from("patient_notes").select("id,author_id,content,created_at,updated_at").eq("workspace_id", workspace).eq("patient_id", patientId).order("created_at", { ascending: false }).range(from, to)),
+          fetchPages<Note>(async (from, to) => await client.from("patient_notes").select(noteColumns).eq("workspace_id", workspace).eq("patient_id", patientId).order("created_at", { ascending: false }).range(from, to)),
           fetchPages<Activity>(async (from, to) => await client.from("patient_activities").select("id,professional_id,type,title,description,metadata,created_by,created_at").eq("workspace_id", workspace).eq("patient_id", patientId).order("created_at", { ascending: false }).range(from, to)),
           fetchPages<FollowUp>(async (from, to) => await client.from("patient_follow_ups").select("id,patient_id,professional_id,title,description,due_date,due_time,priority,status,source,automation_run_id,completed_at,cancelled_at,created_by,created_at,updated_at").eq("workspace_id", workspace).eq("patient_id", patientId).order("due_date").range(from, to))
         ]);
@@ -75,6 +77,8 @@ export default function PatientDetailPage() {
           const ids = intents.slice(i, i + 50).map((intent) => intent.id);
           payments.push(...await fetchPages<Payment>(async (from, to) => await client.from("payments").select("id,booking_intent_id,amount_minor,currency_code,status,created_at,approved_at").eq("workspace_id", workspace).in("booking_intent_id", ids).order("created_at", { ascending: false }).range(from, to)));
         }
+        // Only decides which note actions are offered; the database policies decide what is allowed.
+        const { data: membership } = await client.from("workspace_members").select("role").eq("workspace_id", workspace).eq("user_id", auth.user?.id ?? "").maybeSingle();
         const [services, professionals, questionnaires] = await Promise.all([
           fetchPages<{ id: string; name: string }>(async (from, to) => await client.from("services").select("id,name").eq("workspace_id", workspace).range(from, to)),
           fetchPages<Professional>(async (from, to) => await client.from("professionals").select("id,user_id,display_name").eq("workspace_id", workspace).range(from, to)),
@@ -84,6 +88,7 @@ export default function PatientDetailPage() {
           setContext(nextContext); setPatient(person as OpportunityOverview);
           setDetails({ appointments, intents, payments, answers, notes, activities, followUps, services, professionals, questionnaires });
           setUserId(auth.user?.id ?? "");
+          setManagesNotes(membership?.role === "owner" || membership?.role === "admin");
         }
       } catch (caught) {
         const message = errorMessage(caught);
@@ -139,30 +144,42 @@ export default function PatientDetailPage() {
   }
 
   async function saveActivity() {
-    if (!patient || !context || !userId || !activityDescription.trim() || (activityType === "note" && !activityTitle.trim())) return;
+    if (!patient || !context || !userId || !activityDescription.trim()) return;
     setSaving(true); setError(""); setNotice("");
     try {
       const client = await getSupabase();
-      if (activityType === "note") {
-        const content = `${activityTitle.trim()}\n\n${activityDescription.trim()}`;
-        const result = editingNote
-          ? await client.from("patient_notes").update({ content }).eq("id", editingNote).eq("workspace_id", context.workspaceId).eq("patient_id", patient.id).select("id,author_id,content,created_at,updated_at").single()
-          : await client.from("patient_notes").insert({ workspace_id: context.workspaceId, patient_id: patient.id, author_id: userId, content }).select("id,author_id,content,created_at,updated_at").single();
-        if (result.error || !result.data) throw result.error ?? new Error("No pudimos guardar la nota.");
-        const saved = result.data as Note;
-        setDetails((value) => ({ ...value, notes: editingNote ? value.notes.map((note) => note.id === saved.id ? saved : note) : [saved, ...value.notes] }));
-      } else {
-        const { data, error: saveError } = await client.from("patient_activities").insert({
-          workspace_id: context.workspaceId, patient_id: patient.id, professional_id: context.professionalId,
-          type: activityType, title: activityTitle.trim() || { call: "Llamada", email: "Email", whatsapp: "WhatsApp", other: "Interacción" }[activityType],
-          description: activityDescription.trim(), created_by: userId
-        }).select("id,professional_id,type,title,description,created_by,created_at").single();
-        if (saveError || !data) throw saveError ?? new Error("No pudimos registrar la actividad.");
-        setDetails((value) => ({ ...value, activities: [data as Activity, ...value.activities] }));
-      }
-      setActivityOpen(false); setActivityTitle(""); setActivityDescription(""); setEditingNote(null);
-      setNotice(editingNote ? "Nota actualizada." : "Actividad registrada.");
+      const { data, error: saveError } = await client.from("patient_activities").insert({
+        workspace_id: context.workspaceId, patient_id: patient.id, professional_id: context.professionalId,
+        type: activityType, title: activityTitle.trim() || { call: "Llamada", email: "Email", whatsapp: "WhatsApp", other: "Interacción" }[activityType],
+        description: activityDescription.trim(), created_by: userId
+      }).select("id,professional_id,type,title,description,created_by,created_at").single();
+      if (saveError || !data) throw saveError ?? new Error("No pudimos registrar la actividad.");
+      setDetails((value) => ({ ...value, activities: [data as Activity, ...value.activities] }));
+      setActivityOpen(false); setActivityTitle(""); setActivityDescription("");
+      setNotice("Actividad registrada.");
     } catch (caught) { setError(errorMessage(caught)); } finally { setSaving(false); }
+  }
+
+  // Both reject on failure so the notes form can stay open and offer a retry.
+  async function saveNote(draft: NoteDraft) {
+    if (!patient || !context || !userId) throw new Error("missing_context");
+    const client = await getSupabase();
+    const values = { content: draft.content, note_type: draft.note_type };
+    const result = draft.id
+      ? await client.from("patient_notes").update(values).eq("id", draft.id).eq("workspace_id", context.workspaceId).eq("patient_id", patient.id).select(noteColumns).single()
+      : await client.from("patient_notes").insert({ ...values, workspace_id: context.workspaceId, patient_id: patient.id, author_id: userId }).select(noteColumns).single();
+    if (result.error || !result.data) throw result.error ?? new Error("note_not_saved");
+    const saved = result.data as Note;
+    setDetails((value) => ({ ...value, notes: draft.id ? value.notes.map((note) => note.id === saved.id ? saved : note) : [saved, ...value.notes] }));
+  }
+
+  async function deleteNote(id: string) {
+    if (!patient || !context) throw new Error("missing_context");
+    const client = await getSupabase();
+    const result = await client.from("patient_notes").delete().eq("id", id).eq("workspace_id", context.workspaceId).eq("patient_id", patient.id).select("id");
+    // Row level security hides a note the user may not delete: no error, no row.
+    if (result.error || !result.data?.length) throw result.error ?? new Error("note_not_deleted");
+    setDetails((value) => ({ ...value, notes: value.notes.filter((note) => note.id !== id) }));
   }
 
   function openFollowUp(item?: FollowUp) {
@@ -199,7 +216,7 @@ export default function PatientDetailPage() {
     } catch (caught) { setError(errorMessage(caught)); } finally { setSaving(false); }
   }
 
-  const openActivity = () => { setTab("resumen"); setActivityOpen(true); setEditingNote(null); setActivityType("note"); setActivityTitle(""); setActivityDescription(""); };
+  const openActivity = () => { setTab("resumen"); setActivityOpen(true); setActivityType("call"); setActivityTitle(""); setActivityDescription(""); };
   const showFollowUp = (id: string) => (event: { preventDefault: () => void }) => { event.preventDefault(); revealFollowUp(id); };
   const closeFollowUp = () => { setFollowUpOpen(false); if (editingFollowUp) focusFollowUp(editingFollowUp); };
   const followUpActions = (item: FollowUp) => <><button disabled={saving} onClick={() => void changeFollowUpStatus(item, "completed")}><Check size={14}/> Completar</button><button disabled={saving} onClick={() => openFollowUp(item)}><Pencil size={14}/> Editar</button><button disabled={saving} onClick={() => void changeFollowUpStatus(item, "cancelled")}><X size={14}/> Cancelar</button>{item.automation_run_id && <Link href={`/automatizaciones/ejecuciones?run=${item.automation_run_id}`} onClick={() => rememberFollowUp(item.id)}>Ver actividad</Link>}</>;
@@ -242,14 +259,15 @@ export default function PatientDetailPage() {
           <div>
             <section className="crm-card"><div className="crm-card-head"><div><h2>Historial</h2><p>Turnos, pagos, notas, actividades y seguimientos en orden cronológico.</p></div></div>
               {activityOpen && <div id="crm-activity-form" className="crm-activity-form"><div className="crm-form-grid">
-                <label>Tipo<select value={activityType} onChange={(e) => setActivityType(e.target.value as ActivityType)}><option value="note">Nota</option><option value="call">Llamada</option><option value="whatsapp">WhatsApp</option><option value="email">Email</option><option value="other">Otro</option></select></label>
-                <label>Título<input maxLength={120} value={activityTitle} onChange={(e) => setActivityTitle(e.target.value)}/></label>
-                <label className="crm-wide">Descripción<textarea maxLength={activityType === "note" ? 4800 : 3000} value={activityDescription} onChange={(e) => setActivityDescription(e.target.value)}/></label>
-              </div><div className="crm-note-actions"><button className="demo-primary" disabled={saving || !activityDescription.trim() || (activityType === "note" && !activityTitle.trim())} onClick={() => void saveActivity()}>{editingNote ? "Guardar nota" : "Guardar actividad"}</button><button className="live-secondary" onClick={() => { setActivityOpen(false); setEditingNote(null); }}>Cerrar</button></div><p className="crm-hint">Registrá solo contactos realizados. Evitá datos sensibles innecesarios.</p></div>}
+                <label>Tipo<select value={activityType} onChange={(e) => setActivityType(e.target.value as ActivityType)}><option value="call">Llamada</option><option value="whatsapp">WhatsApp</option><option value="email">Email</option><option value="other">Otro</option></select></label>
+                <label>Título opcional<input maxLength={120} value={activityTitle} onChange={(e) => setActivityTitle(e.target.value)}/></label>
+                <label className="crm-wide">Descripción<textarea maxLength={3000} value={activityDescription} onChange={(e) => setActivityDescription(e.target.value)}/></label>
+              </div><div className="crm-note-actions"><button className="demo-primary" disabled={saving || !activityDescription.trim()} onClick={() => void saveActivity()}>Guardar actividad</button><button className="live-secondary" onClick={() => setActivityOpen(false)}>Cerrar</button></div><p className="crm-hint">Registrá solo contactos realizados. Evitá datos sensibles innecesarios.</p></div>}
               <Timeline events={timeline} formatAt={(event) => `${crmDate(event.at, context.market)}${event.approximate ? " · fecha aproximada" : ""}`}
                 renderLinks={(event) => <>{event.followUpId && <Link href={`?tab=seguimientos#seguimiento-${event.followUpId}`} onClick={showFollowUp(event.followUpId)}>Ver seguimiento</Link>}{event.automationRunId && <Link href={`/automatizaciones/ejecuciones?run=${event.automationRunId}`}>Ver actividad</Link>}</>}/>
             </section>
-            <section className="crm-card"><div className="crm-card-head"><div><h2>Notas</h2><p>Solo el equipo autorizado puede verlas.</p></div></div>{details.notes.length ? <div className="crm-notes">{details.notes.map((note) => <article className="crm-note" key={note.id}><div><b>{professionalById.get(note.author_id) ?? "Nota del equipo"}</b><small>{crmDate(note.created_at, context.market)}{note.updated_at !== note.created_at ? " · Editada" : ""}</small></div><p>{note.content}</p>{note.author_id === userId && <button onClick={() => { const [title, ...body] = note.content.split("\n\n"); setActivityTitle(body.length ? title : "Nota"); setActivityDescription(body.join("\n\n") || note.content); setActivityType("note"); setEditingNote(note.id); setActivityOpen(true); setTimeout(() => document.getElementById("crm-activity-form")?.scrollIntoView({ behavior: "smooth", block: "center" }), 0); }}><Pencil size={14}/> Editar</button>}</article>)}</div> : <p className="live-empty">Todavía no hay notas.</p>}</section>
+            <PatientNotes notes={details.notes} authorName={(note) => professionalById.get(note.author_id) ?? "Equipo"} formatAt={(iso) => crmDate(iso, context.market)}
+              canManage={(note) => managesNotes || note.author_id === userId} onSave={saveNote} onDelete={deleteNote}/>
             <section className="crm-card"><div className="crm-card-head"><h2>Próximos seguimientos</h2><button className="crm-link" onClick={() => setTab("seguimientos")}>Ver todos <ArrowRight size={14}/></button></div>{pendingList}</section>
           </div>
           <div>
