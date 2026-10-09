@@ -1,6 +1,3 @@
--- PROPOSED, NOT APPLIED. Kept outside supabase/migrations on purpose: `supabase db push` never picks it up,
--- so it cannot reach production by accident. See "Vencimiento" in supabase/MERCADO_PAGO.md for how to activate it.
---
 -- Runs the cleanup of requests that ran out of time without a payment, every 15 minutes.
 -- Needs migration 20261006090000_payment_hardening.sql (the function) and pg_cron (already used by the automations).
 --
@@ -13,7 +10,14 @@
 -- security invoker with an empty search_path, executable only by service_role and the owner; the job adds no grant.
 -- At most 500 requests per run, locked with SKIP LOCKED, so a run never waits on a payment being recorded.
 --
+-- No loop: the only trigger the cleanup fires is payment_automation_enqueue, which acts on payments entering
+-- 'pending' and ignores 'expired'. A closed request no longer matches the filter, so the next run skips it.
+--
 -- cron.schedule replaces a job of the same name: running this file again changes nothing.
+do $$ begin
+  if to_regprocedure('public.expire_stale_booking_intents(integer)') is null
+    then raise exception 'expire_stale_booking_intents is missing: apply 20261006090000_payment_hardening first'; end if;
+end $$;
 create extension if not exists pg_cron with schema pg_catalog;
 select cron.schedule('bellis-expire-booking-intents','*/15 * * * *','select public.expire_stale_booking_intents()');
 

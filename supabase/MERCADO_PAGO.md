@@ -159,17 +159,30 @@ Si la preferencia no se puede crear o registrar, `cancel_unpaid_intent` cierra l
 
 Una solicitud dura 48 horas; un pago aprobado la extiende 30 días para elegir horario. Vencida, ninguna acción la acepta: `resume` responde 410 y el paciente ve "Esta reserva venció"; la pestaña que estaba consultando deja de hacerlo.
 
-`expire_stale_booking_intents(p_limit)` cierra las solicitudes que vencieron sin pago: la solicitud pasa a `cancelled`, su pago a `expired` y queda la auditoría `booking_intent_expired`. No borra nada, no toca solicitudes pagas y se puede correr las veces que haga falta. **Todavía no está programada en ningún entorno** (verificado en `cron.job` de los dos proyectos el 2026-10-09): la migración que la programa está escrita y sin aplicar. Sin ella nada se rompe (una solicitud vencida ya es inaccesible); lo que se acumula son filas en `pending_payment`. Para correrla a mano con la clave de servicio:
+`expire_stale_booking_intents(p_limit)` cierra las solicitudes que vencieron sin pago: la solicitud pasa a `cancelled`, su pago a `expired` y queda la auditoría `booking_intent_expired`. No borra nada, no toca solicitudes pagas y se puede correr las veces que haga falta. **Está programada en Staging desde el 2026-10-09; en producción todavía no** (la migración que la programa no está aplicada ahí). Sin ella nada se rompe (una solicitud vencida ya es inaccesible); lo que se acumula son filas en `pending_payment`. Para correrla a mano con la clave de servicio:
 
 ```sql
 select public.expire_stale_booking_intents();
 ```
 
-#### Programarla (migración preparada, sin aplicar)
+#### Programarla (aplicada en Staging, sin aplicar en producción)
 
 El proyecto ya usa `pg_cron` para las automatizaciones, así que no hace falta nada nuevo. La migración `supabase/migrations/20261009090000_expire_booking_intents_cron.sql` registra la tarea `bellis-expire-booking-intents`, cada 15 minutos. Antes de registrarla comprueba que exista la función y falla si falta.
 
-**No está aplicada en ningún proyecto.** Al estar en `supabase/migrations/`, el próximo `supabase db push` la aplica en el proyecto que esté enlazado: no correr `db push` contra un entorno donde todavía no se quiera la tarea.
+| Proyecto | Estado |
+| --- | --- |
+| Staging (`hbvmcvemrkfovzhlpgys`) | **Aplicada y validada** el 2026-10-09. Una sola tarea `bellis-expire-booking-intents`, `*/15 * * * *`, activa. |
+| Producción (`pinfdbvfzoratsntjgah`) | **NO APLICADA.** |
+
+Validación en Staging (2026-10-09), con corridas reales del cron, sin invocar la función a mano:
+
+- `db push --dry-run` mostró solo `20261009090000`; después de aplicar, `migration list` con local = remoto (31).
+- **Primera corrida, 04:15 UTC, `succeeded`:** cerró la única solicitud `pending_payment` vencida: solicitud `cancelled`, pago `expired`, un `booking_intent_expired`, sin turno.
+- **Segunda corrida, 04:30 UTC, `succeeded`:** 0 cambios. Mismos conteos de solicitudes y pagos, ningún `booking_intent_expired` duplicado, sigue una sola tarea. Idempotencia validada.
+- Las 5 solicitudes `scheduled`, sus 5 turnos y los 6 pagos `approved` quedaron idénticos (mismo hash antes y después). La `pending_payment` no vencida no cambió.
+- Staging no tenía filas `awaiting_schedule` ni `refunded`: esos dos casos los cubre `payment_hardening_smoke.sql`, que pasó en una base local con las 31 migraciones.
+
+Al estar en `supabase/migrations/`, el próximo `supabase db push` la aplica en el proyecto que esté enlazado: no correr `db push` contra un entorno donde todavía no se quiera la tarea.
 
 Revisión del 2026-10-09 — **lista para producción**:
 
@@ -193,7 +206,7 @@ Al 2026-10-09 había 0 solicitudes vencidas sin cerrar en producción y 1 en Sta
 | Repetirla | `cron.schedule` reemplaza la tarea del mismo nombre. Correr el script dos veces no duplica nada. |
 | Un pago que llega justo después | Es el caso de "Pago tardío": se registra y la solicitud sigue cerrada. |
 
-Para aplicarla, cuando se decida, primero en Staging y después en producción (`supabase migration list` tiene que mostrar solo `20261009090000` como pendiente):
+Para aplicarla en producción (`supabase migration list` tiene que mostrar solo `20261009090000` como pendiente; al terminar, volver a enlazar el CLI a Staging):
 
 ```
 npx supabase link --project-ref <ref>
@@ -609,7 +622,7 @@ Supabase no tiene "promover la versión anterior": volver es desplegar de nuevo 
 | `20261004090000_mercado_pago_oauth` | Columnas y restricciones en `private.mercado_pago_accounts`, tabla de states, funciones de conexión, un trigger sobre `workspaces`. Actualiza filas existentes (`status='disconnected'` donde `not active`). | **No se revierte.** Agrega estructura; quitarla borraría conexiones y tokens. Si algo falla, se corrige hacia adelante con otra migración. |
 | `20261005090000_booking_payment_return` | Columnas `booking_intents.resume_token_hash` y `payments.checkout_url`; funciones `attach_mercado_pago_checkout` y `cancel_unpaid_intent`. | **No se revierte.** Las columnas nuevas son opcionales y el código anterior las ignora: dejarlas no rompe nada. |
 | `20261006090000_payment_hardening` | Solo funciones: crea `mercado_pago_checkout_ready` y `expire_stale_booking_intents`, reemplaza `record_mercado_pago_payment`. Sin tablas, columnas ni datos. | **Reversible sin pérdida**, con una migración nueva que restaure la definición anterior de `record_mercado_pago_payment` (la de `20260929000000_mercado_pago_ar.sql`). Las dos funciones nuevas se pueden dejar. |
-| `20261009090000_expire_booking_intents_cron` (sin aplicar) | Registra una tarea. | `select cron.unschedule('bellis-expire-booking-intents');` Las solicitudes que ya cerró no se reabren, y no hace falta. |
+| `20261009090000_expire_booking_intents_cron` (aplicada en Staging, no en producción) | Registra una tarea. | `select cron.unschedule('bellis-expire-booking-intents');` Las solicitudes que ya cerró no se reabren, y no hace falta. |
 
 Ninguna borra ni reescribe pagos, solicitudes o turnos. El respaldo previo al deploy es para el caso que este cuadro no prevé, no parte del plan.
 
@@ -742,7 +755,7 @@ Ningún valor se copia de un proyecto al otro: todos difieren.
 | Funciones en Staging | `bellis-public` v10, `bellis-mp-webhook` v11, `bellis-mp-oauth` v9. Mismo código que producción (igual `ezbr_sha256` en las tres). |
 | Chequeos de salud | `scripts/payments-health.mjs` contra producción: **14/14**, antes y después de la limpieza de secretos del 2026-10-09. |
 | Smoke de producción | **PASS**: recorrido real completo con un pago de Mercado Pago. |
-| Tarea de vencimiento | **Sin programar** en los dos proyectos. Migración `20261009090000_expire_booking_intents_cron` lista y sin aplicar (ver "Vencimiento"). La única tarea activa es `bellis-crm-automations-hourly`. |
+| Tarea de vencimiento | **Aplicada y validada en Staging** (`bellis-expire-booking-intents`, `*/15 * * * *`, una sola tarea activa, segunda corrida real sin cambios). **Producción: NO APLICADA** (ver "Vencimiento"); ahí la única tarea activa es `bellis-crm-automations-hourly`. |
 
 ### Limpieza posterior al release
 
@@ -750,7 +763,7 @@ Ningún valor se copia de un proyecto al otro: todos difieren.
 | --- | --- |
 | `BELLIS_ADDITIONAL_ORIGINS` en producción | **Eliminada** el 2026-10-09. Contenía solo `https://bellis-six.vercel.app`, el mismo valor que `BELLIS_SITE_ORIGIN`. Después: salud 14/14, preflight CORS de `bellis-public` y `bellis-mp-oauth` desde el sitio con 204, origen ajeno 403. |
 | Secreto mal formado en Staging | **Eliminado** el 2026-10-09: se llamaba `BELLIS_SITE_ORIGIN` seguido de un salto de línea y un guion. El `BELLIS_SITE_ORIGIN` correcto y los secretos de Mercado Pago no cambiaron. |
-| Tarea de vencimiento | Pendiente: aplicar la migración en Staging y después en producción. |
+| Tarea de vencimiento | Hecho en Staging el 2026-10-09. Pendiente: aplicar la migración en producción. |
 | ESLint | Quedan 1 error y 1 advertencia, anteriores al release. `app/recuperar/page.tsx:21` (`react-hooks/set-state-in-effect`): corregirlo cambia cómo arranca la pantalla de recuperación de contraseña, no es un arreglo chico. `app/dashboard/page.tsx:106` (`react-hooks/exhaustive-deps`, falta `dayOf`): sin efecto, porque `dayOf` solo depende de `data`, que ya está en la lista. |
 | CI | Sigue sin existir (ver "CI"). |
 
