@@ -9,12 +9,12 @@ Esta integración cobra **turnos de pacientes a la cuenta del profesional** medi
 - **Implementado (G3):** Perfil → Cobros y pagos permite conectar, ver el estado, desconectar y elegir entre Mercado Pago y link de pago externo. La base de datos rechaza Mercado Pago como método si el workspace no tiene una cuenta conectada.
 - **Implementado (G4):** el checkout, la consulta de estado y el webhook usan el token renovable de la cuenta conectada. La preferencia vence junto con la solicitud. Al desconectar, el workspace vuelve al link externo.
 - **Implementado (G5):** el paciente que vuelve de Mercado Pago recupera su solicitud con un token opaco, aunque vuelva en otra pestaña. Bellis consulta el estado real del pago y decide el paso. Una solicitud cuyo checkout no pudo crearse queda cerrada.
-- **Implementado (G7A, sin desplegar):** códigos de error internos, logs estructurados, respuestas del webhook según el tipo de falla, cierre de solicitudes vencidas, regla para pagos tardíos, aviso al desconectar con pagos en curso y las secciones de operación de este documento. Requiere la migración `20261006090000_payment_hardening.sql` y volver a desplegar las tres funciones.
+- **Implementado (G7A):** códigos de error internos, logs estructurados, respuestas del webhook según el tipo de falla, cierre de solicitudes vencidas, regla para pagos tardíos, aviso al desconectar con pagos en curso y las secciones de operación de este documento. Requiere la migración `20261006090000_payment_hardening.sql` y volver a desplegar las tres funciones.
 - **Todavía no implementado:**
   - Emails para retomar una solicitud y reembolsos iniciados desde Bellis.
   - Detección inmediata de la desvinculación desde Mercado Pago (`mp-connect`, ver más abajo).
   - La prueba sandbox de punta a punta (G6, **bloqueada**: falta una cuenta y una aplicación de Mercado Pago Argentina con credenciales de prueba) y la salida a producción (G7B).
-- **Dónde está desplegado:** solo en **Staging** (G2 a G5: 29 migraciones y las tres funciones). Staging todavía no tiene `MERCADO_PAGO_CLIENT_ID` ni `MERCADO_PAGO_CLIENT_SECRET`, así que la pantalla muestra Mercado Pago sin poder conectar y el link externo sigue funcionando. **Producción no tiene nada de Mercado Pago.**
+- **Dónde está desplegado:** en **Staging** y en **Producción** desde el 2026-10-09 (30 migraciones y las tres funciones en ambos). El detalle está en "Release de producción (2026-10-09)".
 
 **Conectar una cuenta no significa que el checkout completo esté listo.** Deja al workspace con credenciales válidas; cobrar con ellas de punta a punta depende de las fases siguientes.
 
@@ -159,17 +159,30 @@ Si la preferencia no se puede crear o registrar, `cancel_unpaid_intent` cierra l
 
 Una solicitud dura 48 horas; un pago aprobado la extiende 30 días para elegir horario. Vencida, ninguna acción la acepta: `resume` responde 410 y el paciente ve "Esta reserva venció"; la pestaña que estaba consultando deja de hacerlo.
 
-`expire_stale_booking_intents(p_limit)` cierra las solicitudes que vencieron sin pago: la solicitud pasa a `cancelled`, su pago a `expired` y queda la auditoría `booking_intent_expired`. No borra nada, no toca solicitudes pagas y se puede correr las veces que haga falta. **Todavía no está programada en ningún entorno.** Sin ella nada se rompe (una solicitud vencida ya es inaccesible); lo que se acumula son filas en `pending_payment`. Para correrla a mano con la clave de servicio:
+`expire_stale_booking_intents(p_limit)` cierra las solicitudes que vencieron sin pago: la solicitud pasa a `cancelled`, su pago a `expired` y queda la auditoría `booking_intent_expired`. No borra nada, no toca solicitudes pagas y se puede correr las veces que haga falta. **Todavía no está programada en ningún entorno** (verificado en `cron.job` de los dos proyectos el 2026-10-09): la migración que la programa está escrita y sin aplicar. Sin ella nada se rompe (una solicitud vencida ya es inaccesible); lo que se acumula son filas en `pending_payment`. Para correrla a mano con la clave de servicio:
 
 ```sql
 select public.expire_stale_booking_intents();
 ```
 
-#### Programarla (preparado, sin activar)
+#### Programarla (migración preparada, sin aplicar)
 
-El proyecto ya usa `pg_cron` para las automatizaciones, así que no hace falta nada nuevo. El script está en `supabase/proposed/expire_booking_intents_cron.sql`: registra la tarea `bellis-expire-booking-intents`, cada 15 minutos.
+El proyecto ya usa `pg_cron` para las automatizaciones, así que no hace falta nada nuevo. La migración `supabase/migrations/20261009090000_expire_booking_intents_cron.sql` registra la tarea `bellis-expire-booking-intents`, cada 15 minutos. Antes de registrarla comprueba que exista la función y falla si falta.
 
-Está **fuera de `supabase/migrations/` a propósito**. Una migración se aplica en todos los entornos con el próximo `supabase db push`; mientras la tarea sea solo para Staging, tiene que ser algo que se corre a mano en un proyecto elegido.
+**No está aplicada en ningún proyecto.** Al estar en `supabase/migrations/`, el próximo `supabase db push` la aplica en el proyecto que esté enlazado: no correr `db push` contra un entorno donde todavía no se quiera la tarea.
+
+Revisión del 2026-10-09 — **lista para producción**:
+
+| Criterio | Resultado |
+| --- | --- |
+| Frecuencia | Cada 15 minutos (`*/15 * * * *`). |
+| Idempotente | Sí. `cron.schedule` con nombre reemplaza la tarea (pg_cron 1.6.4 en ambos proyectos); la función devuelve 0 en la segunda corrida. La migración se aplicó dos veces en una base local (`supabase/postgres` 15.8.1.060): queda una sola tarea. |
+| Solo `pending_payment` vencidas | Sí: `status='pending_payment' and expires_at<now()` y sin pago `approved` ni `refunded`. |
+| No toca `scheduled`, `awaiting_schedule`, pagos `approved` ni `refunded` | Sí, por el filtro anterior; el pago solo cambia si no está `approved` ni `refunded`. Cubierto por `payment_hardening_smoke.sql`. |
+| Sin secretos | Sí. Corre dentro de la base como `postgres`, dueño de la función; sin red ni Vault. |
+| Sin loops | Sí. El único trigger que dispara es `payment_automation_enqueue`, que solo actúa cuando un pago pasa a `pending`. Una solicitud cerrada deja de cumplir el filtro. |
+
+Al 2026-10-09 había 0 solicitudes vencidas sin cerrar en producción y 1 en Staging: la primera corrida no cierra nada en producción.
 
 | | |
 | --- | --- |
@@ -180,11 +193,12 @@ Está **fuera de `supabase/migrations/` a propósito**. Una migración se aplica
 | Repetirla | `cron.schedule` reemplaza la tarea del mismo nombre. Correr el script dos veces no duplica nada. |
 | Un pago que llega justo después | Es el caso de "Pago tardío": se registra y la solicitud sigue cerrada. |
 
-Para activarla **en Staging**, cuando se decida:
+Para aplicarla, cuando se decida, primero en Staging y después en producción (`supabase migration list` tiene que mostrar solo `20261009090000` como pendiente):
 
 ```
-node scripts/assert-staging-env.mjs --cli
-npx supabase db query --linked -f supabase/proposed/expire_booking_intents_cron.sql
+npx supabase link --project-ref <ref>
+npx supabase migration list --linked
+npx supabase db push --linked
 ```
 
 Para comprobarla y para apagarla:
@@ -196,7 +210,7 @@ select d.status,d.return_message,d.start_time from cron.job_run_details d join c
 select cron.unschedule('bellis-expire-booking-intents');
 ```
 
-Para llevarla a producción, mover el archivo a `supabase/migrations/` con una fecha nueva, para que quede en el historial de los dos proyectos. `cron.job_run_details` crece con cada corrida (96 filas por día): conviene limpiarla junto con la de las automatizaciones.
+`cron.job_run_details` crece con cada corrida (96 filas por día): conviene limpiarla junto con la de las automatizaciones.
 
 El panel ya no cuenta las solicitudes vencidas como pagos pendientes, esté o no programada la tarea.
 
@@ -595,13 +609,13 @@ Supabase no tiene "promover la versión anterior": volver es desplegar de nuevo 
 | `20261004090000_mercado_pago_oauth` | Columnas y restricciones en `private.mercado_pago_accounts`, tabla de states, funciones de conexión, un trigger sobre `workspaces`. Actualiza filas existentes (`status='disconnected'` donde `not active`). | **No se revierte.** Agrega estructura; quitarla borraría conexiones y tokens. Si algo falla, se corrige hacia adelante con otra migración. |
 | `20261005090000_booking_payment_return` | Columnas `booking_intents.resume_token_hash` y `payments.checkout_url`; funciones `attach_mercado_pago_checkout` y `cancel_unpaid_intent`. | **No se revierte.** Las columnas nuevas son opcionales y el código anterior las ignora: dejarlas no rompe nada. |
 | `20261006090000_payment_hardening` | Solo funciones: crea `mercado_pago_checkout_ready` y `expire_stale_booking_intents`, reemplaza `record_mercado_pago_payment`. Sin tablas, columnas ni datos. | **Reversible sin pérdida**, con una migración nueva que restaure la definición anterior de `record_mercado_pago_payment` (la de `20260929000000_mercado_pago_ar.sql`). Las dos funciones nuevas se pueden dejar. |
-| `supabase/proposed/expire_booking_intents_cron.sql` | Registra una tarea. | `select cron.unschedule('bellis-expire-booking-intents');` Las solicitudes que ya cerró no se reabren, y no hace falta. |
+| `20261009090000_expire_booking_intents_cron` (sin aplicar) | Registra una tarea. | `select cron.unschedule('bellis-expire-booking-intents');` Las solicitudes que ya cerró no se reabren, y no hace falta. |
 
-Ninguna de las tres borra ni reescribe pagos, solicitudes o turnos. El respaldo previo al deploy es para el caso que este cuadro no prevé, no parte del plan.
+Ninguna borra ni reescribe pagos, solicitudes o turnos. El respaldo previo al deploy es para el caso que este cuadro no prevé, no parte del plan.
 
 ## Runbook de producción
 
-Para ejecutar una sola vez, con dos personas si se puede, en un horario de poco uso. **Nada de esto se ejecutó.** Cada paso tiene su comprobación; si una falla, parar y aplicar "Rollback".
+Para ejecutar una sola vez, con dos personas si se puede, en un horario de poco uso. **Se ejecutó el 2026-10-09** (ver "Release de producción (2026-10-09)"); queda como referencia para un próximo release. Cada paso tiene su comprobación; si una falla, parar y aplicar "Rollback".
 
 Proyecto: `pinfdbvfzoratsntjgah`. Sitio: `https://bellis-six.vercel.app`. Migraciones pendientes en producción: `20261004090000`, `20261005090000`, `20261006090000` (confirmarlo en el paso 3).
 
@@ -717,6 +731,39 @@ Ningún valor se copia de un proyecto al otro: todos difieren.
 - `SUPABASE_URL` de Vercel Production.
 - La URL de Webhooks de la aplicación productiva: `https://pinfdbvfzoratsntjgah.supabase.co/functions/v1/bellis-mp-webhook`.
 
+## Release de producción (2026-10-09)
+
+| | |
+| --- | --- |
+| Commit de producción | `e6f0ccc` (`main`, "chore: rebuild production with prod env"), sobre `439fc3a` de `staging`. |
+| Proyecto y sitio | `pinfdbvfzoratsntjgah` · `https://bellis-six.vercel.app` |
+| Migraciones aplicadas | Las 30 de `supabase/migrations/` hasta `20261006090000_payment_hardening` (`supabase migration list`, local = remoto). Las de este release: `20261004090000`, `20261005090000`, `20261006090000`. |
+| Funciones en producción | `bellis-public` v12, `bellis-mp-webhook` v9, `bellis-mp-oauth` v2; las tres `ACTIVE`, `verify_jwt=false`, desplegadas 2026-10-09 03:08 UTC. |
+| Funciones en Staging | `bellis-public` v10, `bellis-mp-webhook` v11, `bellis-mp-oauth` v9. Mismo código que producción (igual `ezbr_sha256` en las tres). |
+| Chequeos de salud | `scripts/payments-health.mjs` contra producción: **14/14**, antes y después de la limpieza de secretos del 2026-10-09. |
+| Smoke de producción | **PASS**: recorrido real completo con un pago de Mercado Pago. |
+| Tarea de vencimiento | **Sin programar** en los dos proyectos. Migración `20261009090000_expire_booking_intents_cron` lista y sin aplicar (ver "Vencimiento"). La única tarea activa es `bellis-crm-automations-hourly`. |
+
+### Limpieza posterior al release
+
+| Ítem | Estado |
+| --- | --- |
+| `BELLIS_ADDITIONAL_ORIGINS` en producción | **Eliminada** el 2026-10-09. Contenía solo `https://bellis-six.vercel.app`, el mismo valor que `BELLIS_SITE_ORIGIN`. Después: salud 14/14, preflight CORS de `bellis-public` y `bellis-mp-oauth` desde el sitio con 204, origen ajeno 403. |
+| Secreto mal formado en Staging | **Eliminado** el 2026-10-09: se llamaba `BELLIS_SITE_ORIGIN` seguido de un salto de línea y un guion. El `BELLIS_SITE_ORIGIN` correcto y los secretos de Mercado Pago no cambiaron. |
+| Tarea de vencimiento | Pendiente: aplicar la migración en Staging y después en producción. |
+| ESLint | Quedan 1 error y 1 advertencia, anteriores al release. `app/recuperar/page.tsx:21` (`react-hooks/set-state-in-effect`): corregirlo cambia cómo arranca la pantalla de recuperación de contraseña, no es un arreglo chico. `app/dashboard/page.tsx:106` (`react-hooks/exhaustive-deps`, falta `dayOf`): sin efecto, porque `dayOf` solo depende de `data`, que ya está en la lista. |
+| CI | Sigue sin existir (ver "CI"). |
+
+### Rollback de este release
+
+Vale la sección "Rollback". Lo particular de este release:
+
+- **Frontend:** promover en Vercel el deploy anterior a `e6f0ccc`.
+- **Funciones:** `bellis-public` y `bellis-mp-webhook` vuelven desplegando el código de `2131368` (el `main` anterior). `bellis-mp-oauth` no existía antes: sin sus secretos no hace nada.
+- **Migraciones:** `20261004090000` y `20261005090000` no se revierten; `20261006090000` se revierte hacia adelante (ver "Qué se puede revertir de cada migración").
+- **`BELLIS_ADDITIONAL_ORIGINS`:** `npx supabase secrets set BELLIS_ADDITIONAL_ORIGINS=https://bellis-six.vercel.app --project-ref pinfdbvfzoratsntjgah`. No hace falta para que el sitio funcione.
+- **Tarea de vencimiento, una vez aplicada:** `select cron.unschedule('bellis-expire-booking-intents');`
+
 ## Chequeos de salud
 
 Sin secretos ni sesión; cualquiera podría enviar estos pedidos:
@@ -750,7 +797,7 @@ El repositorio no tiene CI. Propuesta mínima, sin implementar, para `.github/wo
 3. `npm run build`
 4. `node --test supabase/tests/*.test.mjs tests/*.mjs`
 5. `deno check supabase/functions/*/index.ts` (con `denoland/setup-deno`)
-6. `npm run lint` — hoy falla por errores anteriores a esta fase; activarlo después de corregirlos, o limitarlo a los archivos cambiados.
+6. `npm run lint` — hoy falla por un error anterior (`app/recuperar/page.tsx`, ver "Release de producción (2026-10-09)"); activarlo después de corregirlo, o limitarlo a los archivos cambiados.
 7. Opcional: un job con la imagen `supabase/postgres` que aplique las migraciones y corra los `*_smoke.sql` de pagos.
 
 No necesita ningún secreto.
