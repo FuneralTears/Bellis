@@ -681,6 +681,10 @@
 .bk-slots .bk-skeleton {
   min-height: 48px;
 }
+.bk-slots-more {
+  width: 100%;
+  margin-top: 12px;
+}
 .bk-empty {
   display: flex;
   align-items: center;

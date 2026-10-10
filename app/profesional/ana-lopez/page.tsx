@@ -15,11 +15,13 @@ const services = [
   { name: "Consulta psicológica", description: "Un espacio para trabajar lo que hoy necesitás.", price: 25000, duration: 60 },
   { name: "Primera consulta", description: "Nos conocemos y definimos juntos el mejor camino.", price: 30000, duration: 75 },
 ];
-const exampleSlots = ["09:00", "10:30", "12:00", "15:00", "16:30"];
-/** Example availability: nothing on weekends, so the empty state can be seen too. */
+const shortDay = ["09:00", "10:30", "12:00", "15:00", "16:30"];
+// Every 30 minutes from 09:00 to 15:30: more than the picker shows at first, so "Ver más horarios" can be seen.
+const longDay = Array.from({ length: 14 }, (_, index) => `${String(9 + Math.floor(index / 2)).padStart(2, "0")}:${index % 2 ? "30" : "00"}`);
+/** Example availability: long days on Monday, Wednesday and Friday, short ones on Tuesday and Thursday, nothing on weekends. */
 function slotsFor(day: string) {
   const weekday = new Date(`${day}T12:00:00Z`).getUTCDay();
-  return weekday === 0 || weekday === 6 ? [] : exampleSlots.filter((_, index) => weekday % 2 === 0 || index !== 1);
+  return weekday === 0 || weekday === 6 ? [] : weekday % 2 ? longDay : shortDay;
 }
 const longDate = (day: string) => new Intl.DateTimeFormat("es-AR", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${day}T12:00:00Z`));
 
@@ -79,7 +81,7 @@ export default function PublicProfile() {
           {([["approved", "Pago aprobado"], ["pending", "Pendiente"], ["rejected", "Rechazado"], ["cancelled", "Cancelado"], ["invalid", "Enlace inválido"]] as const).map(([outcome, label]) => <button key={outcome} type="button" onClick={() => simulateReturn(outcome)}>{label}</button>)}
         </div>
       </>}
-      {step === 4 && <BookingCard eyebrow="Horario" badge={<Badge tone="success">Pago confirmado</Badge>} title="Elegí el horario de tu turno" description={`Horarios de ejemplo para ${chosen.name}.`}>
+      {step === 4 && <BookingCard eyebrow="Horario" badge={<Badge tone="success">Pago confirmado</Badge>} title="Elegí el horario de tu turno" description={`Horarios de ejemplo para ${chosen.name}. Lunes, miércoles y viernes tienen más horarios.`}>
         <SlotPicker day={day} onDay={(next) => { setDay(next); setSlot(""); }} busy={false} slots={day ? slotsFor(day).map((item) => ({ value: item, label: item })) : []} selected={slot} onSelect={setSlot} />
         <div className="bk-actions"><button className="bk-button" type="button" disabled={!slot} onClick={() => go(5)}>Confirmar turno de ejemplo <ArrowRight size={17}/></button></div>
       </BookingCard>}

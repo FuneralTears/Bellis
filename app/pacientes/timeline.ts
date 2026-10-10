@@ -2,7 +2,10 @@ export type Appointment = { id: string; booking_intent_id: string; professional_
 /** `status` is the request's own state. A cancelled request with an approved payment is a late payment (see lib/late-payments.ts). */
 export type Intent = { id: string; service_id: string; professional_id: string; created_at: string; status?: string };
 export type Payment = { id: string; booking_intent_id: string; amount_minor: number; currency_code: string; status: string; created_at: string; approved_at: string | null };
-export type Note = { id: string; author_id: string; content: string; created_at: string; updated_at: string };
+/** Internal note types. There is no clinical type: clinical records wait for the privacy and retention policy. */
+export type NoteType = "general" | "follow_up" | "administrative" | "payment";
+export const noteTypeLabels: Record<NoteType, string> = { general: "General", follow_up: "Seguimiento", administrative: "Administrativa", payment: "Pago" };
+export type Note = { id: string; author_id: string; content: string; note_type: NoteType; created_at: string; updated_at: string };
 export type Activity = { id: string; professional_id: string; type: "call" | "email" | "whatsapp" | "other" | "automation_created_follow_up"; title: string; description: string; metadata?: { follow_up_id?: string; automation_run_id?: string }; created_by: string; created_at: string };
 export type FollowUp = { id: string; patient_id: string; professional_id: string; title: string; description: string; due_date: string; due_time: string | null; priority: "low" | "medium" | "high"; status: "pending" | "completed" | "cancelled"; source: "manual" | "automation"; automation_run_id: string | null; completed_at: string | null; cancelled_at: string | null; created_by: string; created_at: string; updated_at: string };
 export type TimelineEvent = { id: string; at: string; kind: "patient" | "appointment" | "payment" | "note" | "activity" | "follow_up"; title: string; description: string; actor?: string; approximate?: boolean; followUpId?: string; automationRunId?: string };
@@ -58,7 +61,9 @@ export function buildPatientTimeline(input: {
       kind: "payment", title: late ? "Pago recibido fuera de término" : payment.status === "approved" ? "Pago recibido" : "Pago pendiente",
       description: `${input.money(payment.amount_minor, payment.currency_code.trim())} · ${input.services.get(intent?.service_id ?? "") ?? "Servicio"}${late ? " · la solicitud ya había vencido: sin turno" : ""}` });
   }
-  for (const note of input.notes) events.push({ id: `note-${note.id}`, at: note.created_at, kind: "note", title: "Nota agregada", description: note.content, actor: input.professionals.get(note.author_id) });
+  // The full text lives in the Notas section; the history only shows where each note falls in time.
+  for (const note of input.notes) events.push({ id: `note-${note.id}`, at: note.created_at, kind: "note", title: `Nota agregada · ${noteTypeLabels[note.note_type] ?? noteTypeLabels.general}`,
+    description: note.content.length > 140 ? `${note.content.slice(0, 140).trimEnd()}…` : note.content, actor: input.professionals.get(note.author_id) });
   const activityNames = { call: "Llamada registrada", email: "Email registrado", whatsapp: "WhatsApp registrado", other: "Interacción registrada", automation_created_follow_up: "⚙ Seguimiento automático creado" };
   for (const activity of input.activities) events.push({ id: `activity-${activity.id}`, at: activity.created_at, kind: "activity",
     title: activityNames[activity.type], description: activity.type === "automation_created_follow_up" ? activity.description : `${activity.title} · ${activity.description}`,

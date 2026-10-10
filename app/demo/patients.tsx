@@ -3,10 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, ArrowRight, Cake, CalendarDays, Check, Mail, MessageCircle, Phone, Plus, Search } from "lucide-react";
 import { FollowUpCard, OpportunityRow, PageHeader, PatientsTable, ProfileHeader, StatusTag, Tabs, Tag, Timeline, dateOnly } from "@/components/crm/CrmUi";
+import { PatientNotes, type NoteDraft } from "@/components/crm/PatientNotes";
 import { useProfileTab } from "@/components/crm/useProfileTab";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/market";
 import { detectOpportunities, hasAttention, opportunityFilters, type OpportunityOverview } from "../pacientes/opportunities";
-import { buildPatientTimeline, followUpBucket, followUpLabels } from "../pacientes/timeline";
+import { buildPatientTimeline, followUpBucket, followUpLabels, type Note } from "../pacientes/timeline";
 import { demoDetails, demoFollowUp, demoPatients, demoProfessional, demoServiceNames, demoStatusLabels } from "./crm-data";
 import { demoToday, type DemoTask } from "./showroom-data";
 import { isLatePayment, latePaymentTag } from "@/lib/late-payments";
@@ -74,11 +75,19 @@ function DemoProfile({ patient, state, back, backLabel, automation, setStatus }:
   useEffect(() => clear, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [notice, setNotice] = useState("");
   const data = demoDetails[patient.id];
+  // Notes are editable in the showroom, but only in memory: they reset when the profile is closed.
+  const [notes, setNotes] = useState<Note[]>(data.notes);
+  const saveNote = async (draft: NoteDraft) => {
+    const now = new Date().toISOString();
+    setNotes((list) => draft.id ? list.map((item) => item.id === draft.id ? { ...item, content: draft.content, note_type: draft.note_type, updated_at: now } : item)
+      : [{ id: `demo-note-${now}`, author_id: "pro", content: draft.content, note_type: draft.note_type, created_at: now, updated_at: now }, ...list]);
+  };
+  const deleteNote = async (id: string) => setNotes((list) => list.filter((item) => item.id !== id));
   const followUps = state.tasks.filter((task) => task.patient === patient.full_name).map(demoFollowUp).sort((a, b) => a.due_date.localeCompare(b.due_date));
   const pending = followUps.filter((item) => item.status === "pending");
   const closed = followUps.filter((item) => item.status !== "pending");
   const opportunities = detectOpportunities(patient);
-  const timeline = buildPatientTimeline({ patientCreatedAt: patient.created_at, appointments: data.appointments, intents: data.intents, payments: data.payments, notes: data.notes, activities: data.activities, followUps, services: demoServiceNames, professionals, money });
+  const timeline = buildPatientTimeline({ patientCreatedAt: patient.created_at, appointments: data.appointments, intents: data.intents, payments: data.payments, notes, activities: data.activities, followUps, services: demoServiceNames, professionals, money });
   const service = (intentId: string) => demoServiceNames.get(data.intents.find((item) => item.id === intentId)?.service_id ?? "") ?? "Servicio";
   const next = patient.next_turn ? data.appointments.find((item) => item.starts_at === patient.next_turn) : undefined;
   const sample = () => setNotice("Acción de ejemplo: en la demo no se crean registros nuevos.");
@@ -109,7 +118,7 @@ function DemoProfile({ patient, state, back, backLabel, automation, setStatus }:
         <section className="crm-card"><div className="crm-card-head"><div><h2>Historial</h2><p>Turnos, pagos, notas, actividades y seguimientos en orden cronológico.</p></div></div>
           <Timeline events={timeline} formatAt={(event) => `${date(event.at)}${event.approximate ? " · fecha aproximada" : ""}`} renderLinks={(event) => event.followUpId ? <button onClick={() => showFollowUp(event.followUpId!)}>Ver seguimiento</button> : null}/>
         </section>
-        <section className="crm-card"><div className="crm-card-head"><div><h2>Notas</h2><p>Solo el equipo autorizado puede verlas.</p></div></div>{data.notes.length ? <div className="crm-notes">{data.notes.map((note) => <article className="crm-note" key={note.id}><div><b>{demoProfessional}</b><small>{date(note.created_at)}</small></div><p>{note.content}</p></article>)}</div> : <p className="live-empty">Todavía no hay notas.</p>}</section>
+        <PatientNotes notes={notes} authorName={() => demoProfessional} formatAt={date} canManage={() => true} onSave={saveNote} onDelete={deleteNote}/>
         <section className="crm-card"><div className="crm-card-head"><h2>Próximos seguimientos</h2><button className="crm-link" onClick={() => setTab("seguimientos")}>Ver todos <ArrowRight size={14}/></button></div>{pendingList}</section>
       </div>
       <div>

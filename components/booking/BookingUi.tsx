@@ -1,7 +1,9 @@
-import type { ReactNode } from "react";
+import { useId, useRef, useState, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import Link from "next/link";
 import { AlertCircle, ArrowRight, CalendarDays, Check, Clock3, CreditCard, Globe2, MapPin } from "lucide-react";
 import BellisLogo from "@/components/brand/BellisLogo";
+import { SLOT_PREVIEW, slotDensity } from "@/lib/slot-density";
 import "./booking.css";
 
 /**
@@ -136,13 +138,23 @@ export function BookingAlert({ children }: { children: ReactNode }) {
 
 /** Date field plus the times for that day. The host loads the slots and owns the selection. */
 export function SlotPicker({ day, onDay, busy, slots, selected, onSelect }: { day: string; onDay: (day: string) => void; busy: boolean; slots: { value: string; label: string }[]; selected: string; onSelect: (value: string) => void }) {
+  // Only what is drawn: a long day starts with a few times and the patient asks for the rest.
+  const [expandedDay, setExpandedDay] = useState<string | null>(null);
+  const firstHidden = useRef<HTMLButtonElement>(null);
+  const listId = useId();
+  const { visible, hasMore } = slotDensity({ slots, selected, day, expandedDay });
+  // Rendered at once so the focus can land on the first time that was hidden.
+  const showAll = () => { flushSync(() => setExpandedDay(day)); firstHidden.current?.focus(); };
   return <div className="bk-slot-picker">
-    <label className="bk-field">Fecha <input type="date" value={day} onChange={(event) => onDay(event.target.value)} /></label>
+    <label className="bk-field">Fecha <input type="date" value={day} onChange={(event) => { setExpandedDay(null); onDay(event.target.value); }} /></label>
     <h2 className="bk-subtitle">Horarios disponibles</h2>
     {busy ? <div className="bk-slots" role="status" aria-label="Cargando horarios…">{[0, 1, 2, 3, 4, 5].map((item) => <span className="bk-skeleton" key={item} />)}</div>
       : !day ? <p className="bk-empty"><CalendarDays size={20}/> Elegí una fecha para ver horarios.</p>
       : !slots.length ? <p className="bk-empty"><Clock3 size={20}/> No hay horarios disponibles ese día.</p>
-      : <div className="bk-slots" role="group" aria-label="Horarios disponibles">{slots.map((item) => <button key={item.value} type="button" className={selected === item.value ? "on" : ""} aria-pressed={selected === item.value} onClick={() => onSelect(item.value)}>{item.label}</button>)}</div>}
+      : <>
+        <div className="bk-slots" id={listId} role="group" aria-label="Horarios disponibles">{visible.map((item, index) => <button key={item.value} ref={index === SLOT_PREVIEW ? firstHidden : undefined} type="button" className={selected === item.value ? "on" : ""} aria-pressed={selected === item.value} onClick={() => onSelect(item.value)}>{item.label}</button>)}</div>
+        {hasMore && <button className="bk-button bk-button-secondary bk-slots-more" type="button" aria-expanded={false} aria-controls={listId} onClick={showAll}>Ver más horarios</button>}
+      </>}
   </div>;
 }
 

@@ -58,18 +58,18 @@ function details(id: string, visits: Visit[], extra: Partial<DemoDetails> = {}):
   base.appointments.reverse();
   return { ...base, ...extra };
 }
-const note = (id: string, date: string, content: string): Note => ({ id, author_id: "pro", content, created_at: at(date, "18:00"), updated_at: at(date, "18:00") });
+const note = (id: string, date: string, note_type: Note["note_type"], content: string): Note => ({ id, author_id: "pro", content, note_type, created_at: at(date, "18:00"), updated_at: at(date, "18:00") });
 const activity = (id: string, date: string, type: Activity["type"], title: string, description: string): Activity => ({ id, professional_id: "pro", type, title, description, created_by: "pro", created_at: at(date, "13:30") });
 const answers = (id: string, date: string, service: string, rows: [string, string, string][]): DemoAnswer[] => rows.map(([section, question, answer], index) => ({ id: `${id}-${index}`, questionnaire: "Preconsulta inicial", service, date: at(date, "08:00"), section, question, answer }));
 
 export const demoDetails: Record<string, DemoDetails> = {
   "mariana-lopez": details("ml", [["2026-08-20", "09:00", "completed", "s1", "approved"], ["2026-09-03", "09:00", "completed", "s1", "approved"], ["2026-09-17", "09:00", "completed", "s1", "approved"], [demoToday, "09:00", "scheduled", "s1", "approved"]], {
-    notes: [note("ml-n1", "2026-09-17", "Evolución\n\nMejor descanso durante la última quincena. Seguimos con registro semanal."), note("ml-n2", "2026-09-03", "Objetivos\n\nAcordamos trabajar rutinas de sueño y manejo del estrés laboral.")],
+    notes: [note("ml-n1", "2026-09-24", "follow_up", "Pidió que la contactemos la próxima semana para coordinar los turnos de noviembre."), note("ml-n2", "2026-09-17", "administrative", "Prefiere recibir los recordatorios por WhatsApp. Necesita factura a nombre de su empresa."), note("ml-n3", "2026-09-03", "payment", "Paga cada sesión por adelantado con Mercado Pago. Sin saldos pendientes.")],
     activities: [activity("ml-a1", "2026-09-24", "whatsapp", "Recordatorio", "Confirmó asistencia al próximo turno.")],
     answers: answers("ml-q", "2026-05-04", "Primera consulta", [["Motivo", "¿Qué te trae a la consulta?", "Ansiedad y manejo del estrés."], ["Hábitos", "¿Qué áreas querés trabajar?", "Trabajo, Descanso"], ["Objetivos", "¿Qué te gustaría lograr?", "Dormir mejor y encontrar herramientas para mi día a día."]]),
   }),
   "carlos-ruiz": details("cr", [["2026-09-30", "11:30", "completed", "s2", "approved"]], {
-    notes: [note("cr-n1", "2026-09-30", "Primera consulta\n\nBuena disposición. Queda pendiente coordinar la continuidad.")],
+    notes: [note("cr-n1", "2026-09-30", "follow_up", "Queda pendiente coordinar la continuidad después de la primera consulta."), note("cr-n2", "2026-09-27", "payment", "Pagó después de que venció la solicitud. Hay que ofrecerle un nuevo horario.")],
     answers: answers("cr-q", "2026-09-22", "Primera consulta", [["Motivo", "¿Qué te trae a la consulta?", "Quiero ayuda con algo puntual."], ["Objetivos", "¿Qué te gustaría lograr?", "Ordenar prioridades y bajar la autoexigencia."]]),
   }),
   "lucia-perez": details("lp", [["2026-08-13", "12:00", "completed", "s1", "approved"], ["2026-09-10", "12:00", "completed", "s1", "approved"], [demoToday, "12:00", "scheduled", "s1", "pending"]], {
@@ -77,7 +77,7 @@ export const demoDetails: Record<string, DemoDetails> = {
     answers: answers("lp-q", "2026-07-20", "Primera consulta", [["Motivo", "¿Qué te trae a la consulta?", "Acompañamiento en un cambio laboral."]]),
   }),
   "tomas-mendez": details("tm", [["2026-09-04", "15:00", "completed", "s3", "approved"], ["2026-09-18", "15:00", "completed", "s3", "approved"], [demoToday, "15:00", "scheduled", "s3", "approved"]], {
-    notes: [note("tm-n1", "2026-09-18", "Seguimiento\n\nSostiene los avances. Revisar continuidad en la próxima sesión.")],
+    notes: [note("tm-n1", "2026-09-18", "general", "Prefiere los turnos de la tarde. Avisar con tiempo si hay cambios de horario.")],
   }),
   "sofia-gimenez": details("sg", [["2026-10-06", "10:00", "scheduled", "s2", "approved"]], {
     answers: answers("sg-q", "2026-09-29", "Primera consulta", [["Motivo", "¿Qué te trae a la consulta?", "Primera vez en terapia, quiero empezar un proceso."], ["Hábitos", "¿Qué áreas querés trabajar?", "Vínculos, Estudio"]]),
@@ -86,7 +86,7 @@ export const demoDetails: Record<string, DemoDetails> = {
     activities: [activity("jc-a1", "2026-08-12", "call", "Llamada", "Sin respuesta. Volver a intentar más adelante.")],
   }),
   "valentina-rios": details("vr", [["2026-08-29", "10:00", "completed", "s3", "approved"], ["2026-09-12", "10:00", "completed", "s3", "approved"], ["2026-09-26", "10:00", "completed", "s3", "approved"]], {
-    notes: [note("vr-n1", "2026-09-26", "Cierre de etapa\n\nEvaluamos espaciar las sesiones a una por mes.")],
+    notes: [note("vr-n1", "2026-09-26", "administrative", "Pasa a una sesión por mes. Actualizar la frecuencia de los recordatorios.")],
   }),
 };
 

@@ -76,3 +76,5 @@
   .bellis-dashboard .crm-section-head { gap: 8px; }
   .bellis-dashboard .crm-dashboard-link { max-width: 94px; }
 }
+.live-fields label small{font-size:12px;font-weight:400;line-height:1.45}
+.settings-panel+.settings-panel{margin-top:20px}
