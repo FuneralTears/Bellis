@@ -277,3 +277,24 @@
   .crm-quick-actions { grid-template-columns: minmax(0, 1fr); }
   .crm-main .crm-card .crm-record { grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; }
 }
+
+/* New patient form (Pacientes and its demo) */
+.crm-main .crm-new-patient { margin-bottom: 16px; }
+.crm-main .crm-new-patient .crm-form-grid input, .crm-main .crm-new-patient .crm-form-grid textarea { min-height: 40px; padding: 9px 10px; font-size: 16px; }
+.crm-optional { font-weight: 400; color: var(--muted-foreground); }
+.crm-main .crm-new-patient .crm-form-grid label { align-content: start; }
+.crm-main .crm-new-patient .live-error { margin: 12px 0 0; padding: 8px 10px; font-size: 13px; }
+.crm-main .crm-new-patient-actions { display: flex; flex-wrap: wrap; align-items: center; margin-top: 14px; }
+.crm-duplicates { margin-top: 12px; padding: 12px; border: 1px solid var(--warning); border-radius: var(--radius-md); background: var(--warning-subtle); }
+.crm-main .crm-duplicates p { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; font-size: 13px; line-height: 1.5; color: var(--foreground); }
+.crm-duplicates p svg { flex: none; color: var(--warning); }
+.crm-duplicates ul { display: grid; gap: 8px; margin: 10px 0 0; padding: 0; list-style: none; }
+.crm-duplicates li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
+.crm-duplicates li > span { display: grid; gap: 2px; min-width: 0; font-size: 13px; }
+.crm-duplicates li small { font-size: 12px; color: var(--muted-foreground); overflow-wrap: anywhere; }
+.crm-duplicates li .crm-link { flex: none; }
+.crm-main .crm-duplicates .crm-duplicates-count { margin-top: 4px; color: var(--muted-foreground); }
+@media (max-width: 540px) {
+  .crm-main .crm-new-patient-actions > * { flex: 1 1 100%; min-height: 44px; }
+  .crm-duplicates li { flex-direction: column; align-items: flex-start; }
+}

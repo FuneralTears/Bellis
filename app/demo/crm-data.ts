@@ -29,6 +29,12 @@ const basePatients: OpportunityOverview[] = [
   patient({ id: "valentina-rios", first_name: "Valentina", last_name: "Ríos", email: "valentina.rios@email.com", phone: "+54 9 11 5320 7719", status: "active", created_at: at("2026-02-16", "08:30"), last_turn: at("2026-09-26", "10:00"), next_turn: null, turn_count: 9, completed_turn_count: 9, approved_total_minor: 22500000, without_next_turn: true }),
 ];
 
+/** A patient added by hand in the showroom: no turns, payments or history yet. Lives in memory only. */
+export function demoNewPatient(input: { firstName: string; lastName: string; phone: string; email: string | null }): OpportunityOverview {
+  const now = new Date().toISOString();
+  return patient({ id: `demo-patient-${now}`, first_name: input.firstName, last_name: input.lastName, email: input.email, phone: input.phone, status: "new", created_at: now, last_turn: null, next_turn: null, turn_count: 0, completed_turn_count: 0, approved_total_minor: 0, is_new_patient: true });
+}
+
 export const demoPatientId = (name: string) => basePatients.find((item) => item.full_name === name)?.id ?? name;
 export function demoFollowUp(task: DemoTask): FollowUp {
   const stamp = at(task.date, task.time);
@@ -61,6 +67,9 @@ function details(id: string, visits: Visit[], extra: Partial<DemoDetails> = {}):
 const note = (id: string, date: string, note_type: Note["note_type"], content: string): Note => ({ id, author_id: "pro", content, note_type, created_at: at(date, "18:00"), updated_at: at(date, "18:00") });
 const activity = (id: string, date: string, type: Activity["type"], title: string, description: string): Activity => ({ id, professional_id: "pro", type, title, description, created_by: "pro", created_at: at(date, "13:30") });
 const answers = (id: string, date: string, service: string, rows: [string, string, string][]): DemoAnswer[] => rows.map(([section, question, answer], index) => ({ id: `${id}-${index}`, questionnaire: "Preconsulta inicial", service, date: at(date, "08:00"), section, question, answer }));
+
+/** What a patient with no history shows. */
+export const emptyDemoDetails: DemoDetails = { appointments: [], intents: [], payments: [], notes: [], activities: [], answers: [] };
 
 export const demoDetails: Record<string, DemoDetails> = {
   "mariana-lopez": details("ml", [["2026-08-20", "09:00", "completed", "s1", "approved"], ["2026-09-03", "09:00", "completed", "s1", "approved"], ["2026-09-17", "09:00", "completed", "s1", "approved"], [demoToday, "09:00", "scheduled", "s1", "approved"]], {

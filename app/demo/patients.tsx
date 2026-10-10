@@ -4,11 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, ArrowRight, Cake, CalendarDays, Check, Mail, MessageCircle, Phone, Plus, Search } from "lucide-react";
 import { FollowUpCard, OpportunityRow, PageHeader, PatientsTable, ProfileHeader, StatusTag, Tabs, Tag, Timeline, dateOnly } from "@/components/crm/CrmUi";
 import { PatientNotes, type NoteDraft } from "@/components/crm/PatientNotes";
+import { NewPatientForm, type NewPatientValues } from "@/components/crm/NewPatientForm";
 import { useProfileTab } from "@/components/crm/useProfileTab";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/market";
 import { detectOpportunities, hasAttention, opportunityFilters, type OpportunityOverview } from "../pacientes/opportunities";
 import { buildPatientTimeline, followUpBucket, followUpLabels, type Note } from "../pacientes/timeline";
-import { demoDetails, demoFollowUp, demoPatients, demoProfessional, demoServiceNames, demoStatusLabels } from "./crm-data";
+import { demoDetails, demoFollowUp, demoNewPatient, demoPatients, demoProfessional, demoServiceNames, demoStatusLabels, emptyDemoDetails } from "./crm-data";
 import { demoToday, type DemoTask } from "./showroom-data";
 import { isLatePayment, latePaymentTag } from "@/lib/late-payments";
 
@@ -27,10 +28,13 @@ export function DemoPatients({ state, profile, setProfile, fromFollowUps, follow
   const [opportunity, setOpportunity] = useState("all");
   const [sort, setSort] = useState("last_turn");
   const [statuses, setStatuses] = useState<Record<string, Status>>({});
-  const patients = useMemo(() => demoPatients(state.tasks).map((item) => ({ ...item, status: statuses[item.id] ?? item.status })), [state.tasks, statuses]);
+  // Patients added by hand in the showroom. In memory only: nothing is saved and they go away with the visit.
+  const [added, setAdded] = useState<{ patient: OpportunityOverview; notes: Note[] }[]>([]);
+  const [creating, setCreating] = useState(false);
+  const patients = useMemo(() => [...added.map((item) => item.patient), ...demoPatients(state.tasks)].map((item) => ({ ...item, status: statuses[item.id] ?? item.status })), [added, state.tasks, statuses]);
   const automatic = new Set(state.tasks.filter((task) => task.status === "pending" && task.source === "automation").map((task) => patients.find((item) => item.full_name === task.patient)?.id ?? ""));
   const selected = patients.find((item) => item.id === profile);
-  if (selected) return <DemoProfile key={selected.id} patient={selected} state={state} back={fromFollowUps ? followUps : () => setProfile(null)} backLabel={fromFollowUps ? "Volver a seguimientos" : "Volver a pacientes"} automation={automation} setStatus={(value) => setStatuses({ ...statuses, [selected.id]: value })}/>;
+  if (selected) return <DemoProfile key={selected.id} patient={selected} initialNotes={added.find((item) => item.patient.id === selected.id)?.notes} state={state} back={fromFollowUps ? followUps : () => setProfile(null)} backLabel={fromFollowUps ? "Volver a seguimientos" : "Volver a pacientes"} automation={automation} setStatus={(value) => setStatuses({ ...statuses, [selected.id]: value })}/>;
 
   const text = query.trim().toLocaleLowerCase("es-AR");
   const column = opportunityFilters.find((item) => item.kind === opportunity)?.column;
@@ -42,13 +46,22 @@ export function DemoPatients({ state, profile, setProfile, fromFollowUps, follow
     if (followUp === "today" && item.follow_up_due_date !== demoToday) return false;
     if (opportunity === "attention" && !hasAttention(item)) return false;
     if (column && item[column] !== true) return false;
-    return !text || [item.full_name, item.email, item.phone ?? ""].some((value) => value.toLocaleLowerCase("es-AR").includes(text));
+    return !text || [item.full_name, item.email ?? "", item.phone ?? ""].some((value) => value.toLocaleLowerCase("es-AR").includes(text));
   }).sort((a, b) => sort === "full_name" ? a.full_name.localeCompare(b.full_name, "es-AR")
     : sort === "next_turn" ? (a.next_turn ?? "9").localeCompare(b.next_turn ?? "9") : (b.last_turn ?? "").localeCompare(a.last_turn ?? ""));
   const filtered = Boolean(text) || status !== "all" || followUp !== "all" || opportunity !== "all";
+  // Same flow as the product, with the example patients standing in for the workspace.
+  const createPatient = async (values: NewPatientValues) => {
+    const now = new Date().toISOString();
+    const patient = demoNewPatient(values);
+    setAdded((list) => [{ patient, notes: values.note ? [{ id: `demo-note-${now}`, author_id: "pro", content: values.note, note_type: "general", created_at: now, updated_at: now }] : [] }, ...list]);
+    setCreating(false); setProfile(patient.id);
+  };
 
   return <>
-    <PageHeader title="Pacientes" description="Información, turnos y seguimiento en un solo lugar."><button className="demo-primary" onClick={followUps}>Ver seguimientos <ArrowRight size={16}/></button></PageHeader>
+    <PageHeader title="Pacientes" description="Información, turnos y seguimiento en un solo lugar."><button className="crm-btn" onClick={followUps}>Ver seguimientos <ArrowRight size={16}/></button><button className="demo-primary" type="button" disabled={creating} onClick={() => setCreating(true)}><Plus size={16}/> Nuevo paciente</button></PageHeader>
+    {creating && <NewPatientForm lookup={async () => patients.map((item) => ({ id: item.id, full_name: item.full_name, phone: item.phone, email: item.email, created_at: item.created_at }))} onSave={createPatient} onCancel={() => setCreating(false)}
+      renderOpen={(patient, content, variant) => <button type="button" className={variant === "primary" ? "demo-primary" : "crm-link"} onClick={() => { setCreating(false); setProfile(patient.id); }}>{content}</button>}/>}
     <section className="crm-card">
       <div className="crm-filterbar">
         <label className="crm-search"><Search size={16}/><input aria-label="Buscar pacientes" placeholder="Buscar por nombre, email o teléfono" value={query} onChange={(event) => setQuery(event.target.value)}/></label>
@@ -69,14 +82,14 @@ export function DemoPatients({ state, profile, setProfile, fromFollowUps, follow
   </>;
 }
 
-function DemoProfile({ patient, state, back, backLabel, automation, setStatus }: { patient: OpportunityOverview; state: Showroom; back: () => void; backLabel: string; automation: () => void; setStatus: (status: Status) => void }) {
+function DemoProfile({ patient, initialNotes, state, back, backLabel, automation, setStatus }: { patient: OpportunityOverview; initialNotes?: Note[]; state: Showroom; back: () => void; backLabel: string; automation: () => void; setStatus: (status: Status) => void }) {
   // Same navigation as the real record; the demo is one page, so its entries are cleared on leaving.
   const { tab, setTab, showFollowUp, clear } = useProfileTab(true);
   useEffect(() => clear, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [notice, setNotice] = useState("");
-  const data = demoDetails[patient.id];
+  const data = demoDetails[patient.id] ?? emptyDemoDetails;
   // Notes are editable in the showroom, but only in memory: they reset when the profile is closed.
-  const [notes, setNotes] = useState<Note[]>(data.notes);
+  const [notes, setNotes] = useState<Note[]>(initialNotes ?? data.notes);
   const saveNote = async (draft: NoteDraft) => {
     const now = new Date().toISOString();
     setNotes((list) => draft.id ? list.map((item) => item.id === draft.id ? { ...item, content: draft.content, note_type: draft.note_type, updated_at: now } : item)
@@ -96,7 +109,7 @@ function DemoProfile({ patient, state, back, backLabel, automation, setStatus }:
   return <>
     <button className="crm-back showroom-text-button" onClick={back}><ArrowLeft size={15}/> {backLabel}</button>
     <ProfileHeader name={patient.full_name} status={<StatusTag status={patient.status}>{demoStatusLabels[patient.status]}</StatusTag>}
-      contact={<><span><Mail size={14}/> {patient.email}</span>{patient.phone && <span><Phone size={14}/> {patient.phone}</span>}{patient.date_of_birth && <span><Cake size={14}/> {formatDate(patient.date_of_birth)}</span>}</>}
+      contact={<>{patient.email && <span><Mail size={14}/> {patient.email}</span>}{patient.phone && <span><Phone size={14}/> {patient.phone}</span>}{patient.date_of_birth && <span><Cake size={14}/> {formatDate(patient.date_of_birth)}</span>}</>}
       actions={<><button className="crm-btn" onClick={sample}><Plus size={15}/> Registrar actividad</button><button className="demo-primary" onClick={sample}><Plus size={15}/> Nuevo seguimiento</button></>}
       stats={[
         { label: "Último turno", value: date(patient.last_turn) },
@@ -124,10 +137,10 @@ function DemoProfile({ patient, state, back, backLabel, automation, setStatus }:
       <div>
         <section className="crm-card"><div className="crm-card-head"><h2>Próximo turno</h2></div>{patient.next_turn ? <div className="crm-next-turn"><span className="crm-signal-icon crm-tone-sage"><CalendarDays size={16}/></span><div><strong>{date(patient.next_turn)}</strong>{next && <small>{service(next.booking_intent_id)}</small>}</div></div> : <p className="live-empty">Sin próximo turno reservado.</p>}</section>
         <section className="crm-card"><div className="crm-card-head"><h2>Datos del paciente</h2></div><dl className="crm-info">
-          <div><dt>Nombre</dt><dd>{patient.first_name}</dd></div><div><dt>Apellido</dt><dd>{patient.last_name}</dd></div><div><dt>Email</dt><dd>{patient.email}</dd></div><div><dt>Teléfono</dt><dd>{patient.phone || "No informado"}</dd></div><div><dt>Nacimiento</dt><dd>{patient.date_of_birth ? formatDate(patient.date_of_birth) : "No informada"}</dd></div>
+          <div><dt>Nombre</dt><dd>{patient.first_name}</dd></div><div><dt>Apellido</dt><dd>{patient.last_name}</dd></div><div><dt>Email</dt><dd>{patient.email || "No informado"}</dd></div><div><dt>Teléfono</dt><dd>{patient.phone || "No informado"}</dd></div><div><dt>Nacimiento</dt><dd>{patient.date_of_birth ? formatDate(patient.date_of_birth) : "No informada"}</dd></div>
         </dl><label className="crm-status-field">Estado<select value={patient.status} onChange={(event) => { setStatus(event.target.value as Status); setNotice("Estado actualizado en la demo."); }}>{Object.entries(demoStatusLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label></section>
         <section className="crm-card"><div className="crm-card-head"><h2>Preconsulta</h2></div>{data.answers.length ? <div className="crm-mini"><b>{data.answers[0].questionnaire}</b><small>{date(data.answers[0].date)} · {data.answers.length} {data.answers.length === 1 ? "respuesta" : "respuestas"}</small><button className="crm-link" onClick={() => setTab("cuestionarios")}>Ver respuestas <ArrowRight size={14}/></button></div> : <p className="live-empty">Todavía no hay respuestas de preconsulta.</p>}</section>
-        <section className="crm-card"><div className="crm-card-head"><h2>Acciones rápidas</h2></div><div className="crm-quick-actions"><button className="crm-btn" onClick={sample}><Mail size={15}/> Enviar email</button>{patient.phone && <button className="crm-btn" onClick={sample}><MessageCircle size={15}/> WhatsApp</button>}</div>
+        <section className="crm-card"><div className="crm-card-head"><h2>Acciones rápidas</h2></div><div className="crm-quick-actions">{patient.email && <button className="crm-btn" onClick={sample}><Mail size={15}/> Enviar email</button>}{patient.phone && <button className="crm-btn" onClick={sample}><MessageCircle size={15}/> WhatsApp</button>}</div>
           <p className="crm-hint">Abrir un enlace no registra un envío. Podés anotarlo como actividad después.</p></section>
       </div>
     </div>}

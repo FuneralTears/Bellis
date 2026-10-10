@@ -2,13 +2,16 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, Search } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ArrowRight, Plus, Search } from "lucide-react";
 import { getSupabase } from "@/lib/supabase/browser";
 import CrmShell from "./CrmShell";
 import { crmDate, errorMessage, loadCrmContext, statusLabels, type CrmContext, type PatientStatus } from "./crm";
 import { todayInTimezone } from "./timeline";
 import { opportunityFilters, type OpportunityKind, type OpportunityOverview } from "./opportunities";
 import { PageHeader, PatientsTable } from "@/components/crm/CrmUi";
+import { NewPatientForm, type NewPatientValues } from "@/components/crm/NewPatientForm";
+import { phoneKey, type DuplicateCandidate } from "@/lib/patient-duplicates";
 
 const PAGE_SIZE = 25;
 type Sort = "last_turn" | "next_turn" | "full_name";
@@ -16,6 +19,7 @@ type FollowUpFilter = "all" | "with" | "without" | "overdue" | "today";
 type OpportunityFilter = OpportunityKind | "all" | "attention";
 
 export default function PatientsPage() {
+  const router = useRouter();
   const [context, setContext] = useState<CrmContext | null>(null);
   const [patients, setPatients] = useState<OpportunityOverview[]>([]);
   const [automaticPatients, setAutomaticPatients] = useState<Set<string>>(new Set());
@@ -30,6 +34,7 @@ export default function PatientsPage() {
   const [reload, setReload] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => { loadCrmContext().then(setContext).catch((caught) => {
     if (errorMessage(caught) === "onboarding_required") window.location.replace("/onboarding");
@@ -70,10 +75,35 @@ export default function PatientsPage() {
     void load(); return () => { cancelled = true; };
   }, [context, search, status, followUpFilter, opportunityFilter, sort, page, reload]);
 
+  // Patients of this workspace that share the phone or the email. Two plain filters: nothing typed reaches a filter string.
+  async function lookupDuplicates(phone: string, email: string | null): Promise<DuplicateCandidate[]> {
+    const client = await getSupabase();
+    const columns = "id,first_name,last_name,phone,email,created_at";
+    const base = () => client.from("patients").select(columns).eq("workspace_id", context!.workspaceId).is("deleted_at", null).order("created_at", { ascending: false }).limit(50);
+    const key = phoneKey(phone);
+    const [byPhone, byEmail] = await Promise.all([key ? base().like("phone", `%${key}`) : null, email ? base().eq("email", email) : null]);
+    if (byPhone?.error || byEmail?.error) throw new Error("No pudimos revisar si el paciente ya existe. Intentá de nuevo.");
+    return [...(byPhone?.data ?? []), ...(byEmail?.data ?? [])].map((row) => ({ id: row.id, full_name: `${row.first_name} ${row.last_name}`, phone: row.phone, email: row.email, created_at: row.created_at }));
+  }
+  async function createPatient(values: NewPatientValues) {
+    const client = await getSupabase();
+    const { data, error: saveError } = await client.rpc("create_manual_patient", { p_workspace: context!.workspaceId, p_first_name: values.firstName, p_last_name: values.lastName, p_phone: values.phone, p_email: values.email, p_note: values.note });
+    if (saveError || !data) {
+      const code = saveError?.message ?? "";
+      throw new Error(code.includes("patient_already_exists") ? "Ya existe una ficha con este mismo teléfono y email. Buscala en la lista de pacientes."
+        : code.includes("not_authorized") ? "No tenés permiso para cargar pacientes en este espacio."
+        : code.includes("invalid_patient") ? "Revisá el nombre, el apellido, el teléfono y el email."
+        : code.includes("invalid_note") ? "La nota es demasiado larga." : "No pudimos guardar el paciente. Intentá de nuevo.");
+    }
+    router.push(`/pacientes/${data}`);
+  }
+
   const today = context ? todayInTimezone(context.market.timezone) : "";
   const filtered = Boolean(search) || status !== "all" || followUpFilter !== "all" || opportunityFilter !== "all";
   return <CrmShell context={context}>
-    <PageHeader title="Pacientes" description="Información, turnos y seguimiento en un solo lugar."><Link className="demo-primary" href="/seguimientos">Ver seguimientos <ArrowRight size={16}/></Link></PageHeader>
+    <PageHeader title="Pacientes" description="Información, turnos y seguimiento en un solo lugar."><Link className="crm-btn" href="/seguimientos">Ver seguimientos <ArrowRight size={16}/></Link><button className="demo-primary" type="button" disabled={!context || creating} onClick={() => setCreating(true)}><Plus size={16}/> Nuevo paciente</button></PageHeader>
+    {creating && context && <NewPatientForm lookup={lookupDuplicates} onSave={createPatient} onCancel={() => setCreating(false)}
+      renderOpen={(patient, content, variant) => <Link className={variant === "primary" ? "demo-primary" : "crm-link"} href={`/pacientes/${patient.id}`}>{content}</Link>}/>}
     <section className="crm-card">
       <div className="crm-filterbar">
         <label className="crm-search"><Search size={16}/><input aria-label="Buscar pacientes" placeholder="Buscar por nombre, email o teléfono" value={query} onChange={(event) => setQuery(event.target.value)}/></label>

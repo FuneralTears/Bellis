@@ -231,7 +231,7 @@ export function PatientsTable({ patients, today, automaticIds, formatDate, statu
     const signals = detectOpportunities(patient);
     const primary = signals.find((signal) => signal.level === "attention") ?? signals[0];
     return <tr key={patient.id}>
-      <td className="crm-cell-main">{renderOpen(patient, <><PatientAvatar name={patient.full_name} /><span><b>{patient.full_name}</b><small>{patient.email}</small></span></>, { className: "crm-person" })}</td>
+      <td className="crm-cell-main">{renderOpen(patient, <><PatientAvatar name={patient.full_name} /><span><b>{patient.full_name}</b><small>{patient.email ?? "Sin email"}</small></span></>, { className: "crm-person" })}</td>
       <td data-label="Teléfono">{patient.phone || "—"}</td>
       <td data-label="Último turno">{formatDate(patient.last_turn)}</td>
       <td data-label="Próximo turno">{formatDate(patient.next_turn)}</td>
