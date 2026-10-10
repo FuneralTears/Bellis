@@ -177,6 +177,7 @@ export default function BellisLanding({ demo = false }: { demo?: boolean }) {
             aria-label="Bellis, inicio"
           >
             <BellisLogo />
+            <span className="landing-signature">By LevxIntelligence</span>
           </a>
           <nav
             id="landing-nav"
@@ -227,10 +228,6 @@ export default function BellisLanding({ demo = false }: { demo?: boolean }) {
           aria-labelledby="landing-title"
         >
           <div className="landing-hero-copy">
-            <span className="landing-eyebrow">
-              <span aria-hidden="true" />
-              Agenda · Pacientes · Automatizaciones
-            </span>
             <h1 id="landing-title">
               Menos gestión,
               <br />
