@@ -137,7 +137,7 @@ export function BookingAlert({ children }: { children: ReactNode }) {
 }
 
 /** Date field plus the times for that day. The host loads the slots and owns the selection. */
-export function SlotPicker({ day, onDay, busy, slots, selected, onSelect }: { day: string; onDay: (day: string) => void; busy: boolean; slots: { value: string; label: string }[]; selected: string; onSelect: (value: string) => void }) {
+export function SlotPicker({ day, onDay, busy, slots, selected, onSelect, min }: { day: string; onDay: (day: string) => void; busy: boolean; slots: { value: string; label: string }[]; selected: string; onSelect: (value: string) => void; /** Earliest day that can be picked, YYYY-MM-DD. */ min?: string }) {
   // Only what is drawn: a long day starts with a few times and the patient asks for the rest.
   const [expandedDay, setExpandedDay] = useState<string | null>(null);
   const firstHidden = useRef<HTMLButtonElement>(null);
@@ -146,7 +146,7 @@ export function SlotPicker({ day, onDay, busy, slots, selected, onSelect }: { da
   // Rendered at once so the focus can land on the first time that was hidden.
   const showAll = () => { flushSync(() => setExpandedDay(day)); firstHidden.current?.focus(); };
   return <div className="bk-slot-picker">
-    <label className="bk-field">Fecha <input type="date" value={day} onChange={(event) => { setExpandedDay(null); onDay(event.target.value); }} /></label>
+    <label className="bk-field">Fecha <input type="date" value={day} min={min} onChange={(event) => { setExpandedDay(null); onDay(event.target.value); }} /></label>
     <h2 className="bk-subtitle">Horarios disponibles</h2>
     {busy ? <div className="bk-slots" role="status" aria-label="Cargando horarios…">{[0, 1, 2, 3, 4, 5].map((item) => <span className="bk-skeleton" key={item} />)}</div>
       : !day ? <p className="bk-empty"><CalendarDays size={20}/> Elegí una fecha para ver horarios.</p>

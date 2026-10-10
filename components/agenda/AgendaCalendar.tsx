@@ -141,6 +141,8 @@ export default function AgendaCalendar({
   onSelect,
   todayLabel,
   timezone,
+  actions,
+  panel,
 }: {
   appointments: AgendaAppointment[];
   view: AgendaView;
@@ -149,6 +151,10 @@ export default function AgendaCalendar({
   onSelect: (id: string) => void;
   todayLabel: string;
   timezone: string;
+  /** Main actions of the agenda, shown in the header. */
+  actions?: ReactNode;
+  /** Shown between the header and the calendar, e.g. the form that creates an appointment. */
+  panel?: ReactNode;
 }) {
   const days = [...new Set(appointments.map((item) => item.dateKey))]
     .sort()
@@ -178,6 +184,7 @@ export default function AgendaCalendar({
           </p>
         </div>
         <div className="agenda-controls">
+          {actions}
           <div
             className="agenda-date-controls"
             aria-label="Navegación de fechas"
@@ -215,6 +222,7 @@ export default function AgendaCalendar({
           </div>
         </div>
       </header>
+      {panel}
       <div className="agenda-board demo-panel">
         <div className="agenda-board-heading">
           <span>
