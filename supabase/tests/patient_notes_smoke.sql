@@ -27,7 +27,7 @@ union all select p2,w2,'Prueba','Dos','h1-notes-'||p2||'@example.invalid' from h
 insert into public.patient_notes(id,workspace_id,patient_id,author_id,content)
 select foreign_note,w2,p2,other_id,'Nota de otro consultorio' from h1_notes_fixture;
 do $$ begin
-  if exists(select 1 from public.audit_events where object_type='patient_note') then raise exception 'server write audited'; end if;
+  if exists(select 1 from public.audit_events where object_type='patient_note' and workspace_id in (select w1 from h1_notes_fixture union all select w2 from h1_notes_fixture)) then raise exception 'server write audited'; end if;
   if (select note_type from public.patient_notes where id=(select foreign_note from h1_notes_fixture))<>'general' then raise exception 'default type'; end if;
 end $$;
 
@@ -150,9 +150,9 @@ do $$ declare f record; begin
     then raise exception 'public view references notes'; end if;
   -- Auditoría: 2 altas, 2 ediciones (autor y admin), 2 eliminaciones (admin y autor). Los intentos rechazados no dejan filas.
   if (select count(*) from public.audit_events where object_type='patient_note' and workspace_id=f.w1)<>6 then raise exception 'audit trail incomplete'; end if;
-  if (select count(*) from public.audit_events where object_type='patient_note' and action='patient_note_created')<>2
-    or (select count(*) from public.audit_events where object_type='patient_note' and action='patient_note_updated')<>2
-    or (select count(*) from public.audit_events where object_type='patient_note' and action='patient_note_deleted')<>2
+  if (select count(*) from public.audit_events where object_type='patient_note' and workspace_id in (f.w1,f.w2) and action='patient_note_created')<>2
+    or (select count(*) from public.audit_events where object_type='patient_note' and workspace_id in (f.w1,f.w2) and action='patient_note_updated')<>2
+    or (select count(*) from public.audit_events where object_type='patient_note' and workspace_id in (f.w1,f.w2) and action='patient_note_deleted')<>2
     then raise exception 'audit actions wrong'; end if;
   if not exists(select 1 from public.audit_events where action='patient_note_deleted' and actor_user_id=f.admin_id
       and object_id=(select id from h1_notes_ids where tag='owner')) then raise exception 'admin deletion not attributed'; end if;
