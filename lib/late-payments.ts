@@ -13,9 +13,13 @@ export const latePaymentTag = "Fuera de término";
 type RequestState = { id: string; status?: string | null };
 type PaymentState = { booking_intent_id: string; status: string; provider?: string | null; approved_at?: string | null };
 
+/**
+ * Only a payment known to be from Mercado Pago can be late. A charge the practice recorded (provider 'offline'),
+ * a payment through an external link, or one whose provider was not loaded is never treated as one: whoever
+ * shows late payments has to load the provider.
+ */
 export function isLatePayment(payment: PaymentState, intent: RequestState | undefined): boolean {
-  return payment.status === "approved" && intent?.status === "cancelled" &&
-    (payment.provider === undefined || payment.provider === null || payment.provider === "mercado_pago_ar");
+  return payment.status === "approved" && intent?.status === "cancelled" && payment.provider === "mercado_pago_ar";
 }
 
 /** The late payments among `payments`, each with its request, most recently approved first. */

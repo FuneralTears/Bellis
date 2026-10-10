@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { CalendarDays, ChevronLeft, ChevronRight, Clock3 } from "lucide-react";
 import "./agenda.css";
 
@@ -341,9 +341,18 @@ export default function AgendaCalendar({
   );
 }
 
-export function AgendaDetails({ children }: { children: ReactNode }) {
+/**
+ * The detail sits below the calendar, which is taller than the screen. `focusKey` is the selected appointment:
+ * when it changes, the detail is brought into view, so what can be done with that appointment is seen.
+ */
+export function AgendaDetails({ children, focusKey }: { children: ReactNode; focusKey?: string | null }) {
+  const box = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (focusKey) box.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [focusKey]);
   return (
     <section
+      ref={box}
       className="agenda-details demo-panel"
       aria-label="Detalle del turno"
     >

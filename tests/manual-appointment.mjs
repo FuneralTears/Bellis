@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { afterCreateError, amountText, describeManualError, draftProblem, emptyDraft, parseAmountMinor, paymentArgs, paymentLabel, paymentMethodLabels, paymentProblem, selectDay, selectProfessional, selectService, selectSlot, setPaid } from "../lib/manual-appointment.ts";
+import { afterCreateError, amountText, canRecordPayment, describeManualError, describePaymentError, draftProblem, emptyDraft, parseAmountMinor, paymentArgs, paymentLabel, paymentMethodLabels, paymentProblem, selectDay, selectProfessional, selectService, selectSlot, setPaid } from "../lib/manual-appointment.ts";
 
 const service = { id: "s1", price_minor: 2500000 };
 const complete = { patientId: "p1", professionalId: "pro", serviceId: "s1", day: "2026-10-20", slot: "2026-10-20T12:00:00Z", paid: false, method: "", amount: "25000" };
@@ -83,8 +83,18 @@ test("etiquetas de cobro: pendiente, medio offline y nunca Mercado Pago para un 
   assert.equal(paymentLabel({ provider: "offline", method: "transfer", status: "approved" }), "Transferencia");
   assert.equal(paymentLabel({ provider: "offline", method: "other", status: "approved" }), "Otro");
   for (const method of ["cash", "transfer", "other", null]) assert.doesNotMatch(paymentLabel({ provider: "offline", method, status: "approved" }), /Mercado Pago/);
-  assert.equal(paymentLabel({ provider: "mercado_pago_ar", status: "approved" }), "Mercado Pago · aprobado");
-  assert.equal(paymentLabel({ provider: "external_link", status: "pending" }), "Link de pago · pendiente");
+  assert.equal(paymentLabel({ provider: "mercado_pago_ar", status: "approved" }), "Mercado Pago");
+  assert.equal(paymentLabel({ provider: "external_link", status: "approved" }), "Link de pago");
+  // Un pago que todavía espera es "Pendiente", venga de donde venga.
+  assert.equal(paymentLabel({ provider: "mercado_pago_ar", status: "pending" }), "Pendiente");
+  assert.equal(paymentLabel({ provider: "external_link", status: "pending" }), "Pendiente");
+  // Sin proveedor cargado no se asume Mercado Pago.
+  assert.equal(paymentLabel({ status: "approved" }), "Pago");
+  assert.doesNotMatch(paymentLabel({ provider: null, status: "approved" }), /Mercado Pago/);
+  // Un pago que no se completó conserva su resultado.
+  assert.equal(paymentLabel({ provider: "mercado_pago_ar", status: "rejected" }), "Mercado Pago · rechazado");
+  assert.equal(paymentLabel({ provider: "mercado_pago_ar", status: "refunded" }), "Mercado Pago · reembolsado");
+  assert.equal(paymentLabel({ provider: "offline", method: "raro", status: "approved" }), "Fuera de Bellis");
 });
 
 test("un horario que dejó de estar libre pide refrescar; los demás errores no", () => {
@@ -128,4 +138,42 @@ test("otros errores al guardar no tocan el horario ni piden refrescar", () => {
     assert.equal(result.refreshSlots, false, message);
     assert.ok(result.text.length > 0, message);
   }
+});
+
+test("registrar pago: solo en turnos manuales activos y sin cobro", () => {
+  assert.equal(canRecordPayment({ source: "manual", appointmentStatus: "scheduled", hasPayment: false }), true);
+  assert.equal(canRecordPayment({ source: "manual", appointmentStatus: "completed", hasPayment: false }), true);
+  // Ya tiene un cobro: no se ofrece cobrar de nuevo.
+  assert.equal(canRecordPayment({ source: "manual", appointmentStatus: "scheduled", hasPayment: true }), false);
+  // Los turnos del booking público se cobran por su propio medio.
+  assert.equal(canRecordPayment({ source: "public", appointmentStatus: "scheduled", hasPayment: false }), false);
+  assert.equal(canRecordPayment({ appointmentStatus: "scheduled", hasPayment: false }), false);
+  assert.equal(canRecordPayment({ source: "manual", appointmentStatus: "cancelled", hasPayment: false }), false);
+});
+
+test("registrar pago después: método obligatorio, importe editable y mayor a 0, precio del servicio como sugerencia", () => {
+  const suggested = amountText(2500000);
+  assert.equal(suggested, "25000");
+  assert.match(paymentProblem({ paid: true, method: "", amount: suggested }), /cómo se cobró/);
+  assert.deepEqual(paymentArgs({ paid: true, method: "cash", amount: suggested }), { method: "cash", amountMinor: 2500000 });
+  // Importe distinto del precio del servicio.
+  assert.deepEqual(paymentArgs({ paid: true, method: "transfer", amount: "23.500" }), { method: "transfer", amountMinor: 2350000 });
+  assert.deepEqual(paymentArgs({ paid: true, method: "other", amount: "100,50" }), { method: "other", amountMinor: 10050 });
+  assert.match(paymentProblem({ paid: true, method: "cash", amount: "0" }), /importe/);
+  assert.match(paymentProblem({ paid: true, method: "cash", amount: "" }), /importe/);
+});
+
+test("doble cobro rechazado: se reconoce y pide recargar el turno en vez de cobrar otra vez", () => {
+  for (const message of ["payment_already_recorded", 'duplicate key value violates unique constraint "payments_one_per_intent"']) {
+    const failure = describePaymentError(message);
+    assert.equal(failure.alreadyPaid, true, message);
+    assert.equal(failure.text, "Este turno ya tiene un cobro registrado.");
+  }
+  for (const message of ["invalid_payment", "appointment_not_active", "not_manual_appointment", "not_authorized", "TypeError: Failed to fetch", "otra cosa"]) {
+    const failure = describePaymentError(message);
+    assert.equal(failure.alreadyPaid, false, message);
+    assert.ok(failure.text.length > 0, message);
+  }
+  assert.match(describePaymentError("appointment_not_active").text, /cancelado/);
+  assert.match(describePaymentError("TypeError: Failed to fetch").text, /conexión/);
 });

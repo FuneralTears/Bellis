@@ -24,3 +24,19 @@ test("distingue contexto de atención pendiente", () => {
   assert.deepEqual(detectOpportunities(patient).map((item) => item.kind), ["upcoming", "recurrent"]);
   assert.equal(hasAttention(patient), false);
 });
+
+test("un turno manual sin cobrar es una oportunidad de pago pendiente, y deja de serlo al cobrarse", () => {
+  // The view counts manual turns with no payment in pending_payment_count (see manual_pending_payment_smoke.sql).
+  const unpaid = { ...base, has_upcoming_turn: true, has_pending_payment: true, pending_payment_count: 1 };
+  const signals = detectOpportunities(unpaid);
+  assert.deepEqual(signals.map((item) => item.kind), ["pending_payment", "upcoming"]);
+  assert.equal(signals[0].level, "attention");
+  assert.equal(signals[0].reason, "1 pago pendiente de cobro o verificación.");
+  assert.equal(hasAttention(unpaid), true);
+  // Uno manual y uno del booking público: se cuentan los dos, una vez cada uno.
+  assert.equal(detectOpportunities({ ...unpaid, pending_payment_count: 2 })[0].reason, "2 pagos pendientes de cobro o verificación.");
+  // Cobrado: la señal desaparece y el paciente ya no pide atención por eso.
+  const paid = { ...unpaid, has_pending_payment: false, pending_payment_count: 0 };
+  assert.deepEqual(detectOpportunities(paid).map((item) => item.kind), ["upcoming"]);
+  assert.equal(hasAttention(paid), false);
+});

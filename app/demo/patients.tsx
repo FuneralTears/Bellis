@@ -8,10 +8,12 @@ import { NewPatientForm, type NewPatientValues } from "@/components/crm/NewPatie
 import { useProfileTab } from "@/components/crm/useProfileTab";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/market";
 import { detectOpportunities, hasAttention, opportunityFilters, type OpportunityOverview } from "../pacientes/opportunities";
-import { buildPatientTimeline, followUpBucket, followUpLabels, type Note } from "../pacientes/timeline";
+import { buildPatientTimeline, followUpBucket, followUpLabels, type Note, type Payment } from "../pacientes/timeline";
 import { demoDetails, demoFollowUp, demoNewPatient, demoPatients, demoProfessional, demoServiceNames, demoStatusLabels, emptyDemoDetails } from "./crm-data";
 import { demoToday, type DemoTask } from "./showroom-data";
 import { isLatePayment, latePaymentTag } from "@/lib/late-payments";
+import { canRecordPayment, paymentLabel, type PaymentMethod } from "@/lib/manual-appointment";
+import { RecordOfflinePayment } from "@/components/payments/RecordOfflinePayment";
 
 type Showroom = { tasks: DemoTask[]; complete: (id: string) => void };
 type Status = OpportunityOverview["status"];
@@ -96,11 +98,21 @@ function DemoProfile({ patient, initialNotes, state, back, backLabel, automation
       : [{ id: `demo-note-${now}`, author_id: "pro", content: draft.content, note_type: draft.note_type, created_at: now, updated_at: now }, ...list]);
   };
   const deleteNote = async (id: string) => setNotes((list) => list.filter((item) => item.id !== id));
+  // "Registrar pago" works in the showroom, in memory: the charge shows at once in turns, payments, history and totals.
+  const [payments, setPayments] = useState<Payment[]>(data.payments);
+  const unpaid = (list: Payment[]) => data.appointments.filter((item) => canRecordPayment({ source: data.intents.find((intent) => intent.id === item.booking_intent_id)?.source, appointmentStatus: item.status, hasPayment: list.some((payment) => payment.booking_intent_id === item.booking_intent_id) })).length;
+  const charged = unpaid(data.payments) - unpaid(payments);
+  const recorded = payments.filter((item) => item.provider === "offline").reduce((sum, item) => sum + item.amount_minor, 0);
+  const recordPayment = async (intentId: string, method: PaymentMethod, amountMinor: number) => {
+    const now = new Date().toISOString();
+    setPayments((list) => [...list, { id: `demo-payment-${now}`, booking_intent_id: intentId, provider: "offline", method, amount_minor: amountMinor, currency_code: "ARS", status: "approved", created_at: now, approved_at: now }]);
+    setNotice("Cobro registrado en la demo.");
+  };
   const followUps = state.tasks.filter((task) => task.patient === patient.full_name).map(demoFollowUp).sort((a, b) => a.due_date.localeCompare(b.due_date));
   const pending = followUps.filter((item) => item.status === "pending");
   const closed = followUps.filter((item) => item.status !== "pending");
-  const opportunities = detectOpportunities(patient);
-  const timeline = buildPatientTimeline({ patientCreatedAt: patient.created_at, appointments: data.appointments, intents: data.intents, payments: data.payments, notes, activities: data.activities, followUps, services: demoServiceNames, professionals, money });
+  const opportunities = detectOpportunities({ ...patient, pending_payment_count: Math.max(0, patient.pending_payment_count - charged), has_pending_payment: patient.pending_payment_count - charged > 0 });
+  const timeline = buildPatientTimeline({ patientCreatedAt: patient.created_at, appointments: data.appointments, intents: data.intents, payments, notes, activities: data.activities, followUps, services: demoServiceNames, professionals, money, paymentName: paymentLabel, isLatePayment });
   const service = (intentId: string) => demoServiceNames.get(data.intents.find((item) => item.id === intentId)?.service_id ?? "") ?? "Servicio";
   const next = patient.next_turn ? data.appointments.find((item) => item.starts_at === patient.next_turn) : undefined;
   const sample = () => setNotice("Acción de ejemplo: en la demo no se crean registros nuevos.");
@@ -115,7 +127,7 @@ function DemoProfile({ patient, initialNotes, state, back, backLabel, automation
         { label: "Último turno", value: date(patient.last_turn) },
         { label: "Próximo turno", value: date(patient.next_turn) },
         { label: "Turnos", value: patient.turn_count },
-        { label: "Total pagado", value: money(patient.approved_total_minor) },
+        { label: "Total pagado", value: money(patient.approved_total_minor + recorded) },
         { label: "Seguimiento", value: pending[0] ? `${followUpLabels[followUpBucket(pending[0].due_date, demoToday)]} · ${dateOnly(pending[0].due_date)}` : "Sin seguimiento" },
       ]}/>
     <Tabs label="Secciones de la ficha" active={tab} onChange={setTab} tabs={[
@@ -154,8 +166,8 @@ function DemoProfile({ patient, initialNotes, state, back, backLabel, automation
     </div>}
 
     {tab === "turnos" && <div className="crm-stack" role="tabpanel" aria-labelledby="crm-tab-turnos">
-      <section className="crm-card"><div className="crm-card-head"><h2>Historial de turnos</h2></div><div className="crm-records">{data.appointments.map((item) => { const paid = data.payments.find((payment) => payment.booking_intent_id === item.booking_intent_id && payment.status === "approved"); return <div className="crm-record" key={item.id}><strong>{date(item.starts_at)}</strong><div><b>{service(item.booking_intent_id)}</b><small>{demoProfessional}</small></div><Tag tone={item.status === "completed" ? "sage" : "blue"}>{appointmentLabels[item.status] ?? item.status}</Tag><span>Pago: {paid ? "Aprobado" : "Sin registro"}</span></div>; })}</div></section>
-      <section className="crm-card"><div className="crm-card-head"><h2>Pagos</h2></div>{data.payments.length ? <div className="crm-records">{[...data.payments].sort((a, b) => b.created_at.localeCompare(a.created_at)).map((item) => <div className="crm-record" key={item.id}><strong>{date(item.approved_at ?? item.created_at)}</strong><div><b>{service(item.booking_intent_id)}</b></div><span>{money(item.amount_minor)}</span>{isLatePayment(item, data.intents.find((intent) => intent.id === item.booking_intent_id)) ? <Tag tone="orange">{latePaymentTag}</Tag> : <Tag tone={item.status === "approved" ? "sage" : "orange"}>{item.status === "approved" ? "Aprobado" : "Pendiente"}</Tag>}</div>)}</div> : <p className="live-empty">Todavía no hay pagos registrados.</p>}</section>
+      <section className="crm-card"><div className="crm-card-head"><h2>Historial de turnos</h2></div><div className="crm-records">{data.appointments.map((item) => { const intent = data.intents.find((entry) => entry.id === item.booking_intent_id); const paid = payments.find((payment) => payment.booking_intent_id === item.booking_intent_id && payment.status === "approved") ?? payments.find((payment) => payment.booking_intent_id === item.booking_intent_id); return <div className="crm-record" key={item.id}><strong>{date(item.starts_at)}</strong><div><b>{service(item.booking_intent_id)}</b><small>{demoProfessional}</small></div><Tag tone={item.status === "completed" ? "sage" : "blue"}>{appointmentLabels[item.status] ?? item.status}</Tag><span>Pago: {paymentLabel(paid)}</span>{canRecordPayment({ source: intent?.source, appointmentStatus: item.status, hasPayment: !!paid }) && <div className="crm-record-wide"><RecordOfflinePayment priceMinor={intent?.price_minor ?? 0} formatMoney={money} onSave={(method, amountMinor) => recordPayment(item.booking_intent_id, method, amountMinor)}/></div>}</div>; })}</div></section>
+      <section className="crm-card"><div className="crm-card-head"><h2>Pagos</h2></div>{payments.length ? <div className="crm-records">{[...payments].sort((a, b) => b.created_at.localeCompare(a.created_at)).map((item) => <div className="crm-record" key={item.id}><strong>{date(item.approved_at ?? item.created_at)}</strong><div><b>{service(item.booking_intent_id)}</b><small>{paymentLabel(item)}</small></div><span>{money(item.amount_minor)}</span>{isLatePayment(item, data.intents.find((intent) => intent.id === item.booking_intent_id)) ? <Tag tone="orange">{latePaymentTag}</Tag> : <Tag tone={item.status === "approved" ? "sage" : "orange"}>{item.status === "approved" ? "Aprobado" : "Pendiente"}</Tag>}</div>)}</div> : <p className="live-empty">Todavía no hay pagos registrados.</p>}</section>
     </div>}
 
     {tab === "cuestionarios" && <section className="crm-card" role="tabpanel" aria-labelledby="crm-tab-cuestionarios"><div className="crm-card-head"><h2>Preconsultas</h2></div>{data.answers.length ? <div className="crm-preconsult"><div className="crm-preconsult-head"><div><b>{data.answers[0].questionnaire}</b><small>{data.answers[0].service}</small></div><span>{date(data.answers[0].date)}</span></div>{data.answers.map((answer) => <div className="live-answer" key={answer.id}><small>{answer.section}</small><b>{answer.question}</b><p>{answer.answer}</p></div>)}</div> : <p className="live-empty">Todavía no hay respuestas de preconsulta.</p>}</section>}

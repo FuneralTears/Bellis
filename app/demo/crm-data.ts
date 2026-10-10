@@ -24,7 +24,7 @@ const basePatients: OpportunityOverview[] = [
   patient({ id: "carlos-ruiz", first_name: "Carlos", last_name: "Ruiz", email: "carlos.ruiz@email.com", phone: "+54 9 11 7304 1822", status: "follow_up", created_at: at("2026-09-22", "18:40"), last_turn: at("2026-09-30", "11:30"), next_turn: null, turn_count: 1, completed_turn_count: 1, approved_total_minor: 3000000, without_next_turn: true, first_completed_without_next: true }),
   patient({ id: "lucia-perez", first_name: "Lucía", last_name: "Pérez", email: "lucia.perez@email.com", phone: "+54 9 11 2901 3411", date_of_birth: "1987-11-02", status: "active", created_at: at("2026-07-20", "09:05"), last_turn: at("2026-09-10", "12:00"), next_turn: at(demoToday, "12:00"), turn_count: 4, completed_turn_count: 3, approved_total_minor: 7500000, has_pending_payment: true, pending_payment_count: 1 }),
   patient({ id: "tomas-mendez", first_name: "Tomás", last_name: "Méndez", email: "tomas.mendez@email.com", phone: "+54 9 11 4512 8400", status: "active", created_at: at("2026-06-11", "16:20"), last_turn: at("2026-09-18", "15:00"), next_turn: at(demoToday, "15:00"), turn_count: 6, completed_turn_count: 5, approved_total_minor: 14000000 }),
-  patient({ id: "sofia-gimenez", first_name: "Sofía", last_name: "Giménez", email: "sofia.gimenez@email.com", phone: "+54 9 351 620 4417", status: "new", created_at: at("2026-09-29", "20:10"), last_turn: null, next_turn: at("2026-10-06", "10:00"), turn_count: 1, completed_turn_count: 0, approved_total_minor: 3000000, is_new_patient: true }),
+  patient({ id: "sofia-gimenez", first_name: "Sofía", last_name: "Giménez", email: "sofia.gimenez@email.com", phone: "+54 9 351 620 4417", status: "new", created_at: at("2026-09-29", "20:10"), last_turn: null, next_turn: at("2026-10-06", "10:00"), turn_count: 2, completed_turn_count: 0, approved_total_minor: 3000000, is_new_patient: true, has_pending_payment: true, pending_payment_count: 1 }),
   patient({ id: "jorge-castro", first_name: "Jorge", last_name: "Castro", email: "jorge.castro@email.com", phone: null, status: "inactive", created_at: at("2026-03-02", "11:00"), last_turn: at("2026-07-14", "17:00"), next_turn: null, turn_count: 4, completed_turn_count: 4, approved_total_minor: 10000000, without_next_turn: true, inactive_after_care: true }),
   patient({ id: "valentina-rios", first_name: "Valentina", last_name: "Ríos", email: "valentina.rios@email.com", phone: "+54 9 11 5320 7719", status: "active", created_at: at("2026-02-16", "08:30"), last_turn: at("2026-09-26", "10:00"), next_turn: null, turn_count: 9, completed_turn_count: 9, approved_total_minor: 22500000, without_next_turn: true }),
 ];
@@ -52,14 +52,15 @@ export function demoPatients(tasks: DemoTask[]): OpportunityOverview[] {
 
 export type DemoAnswer = { id: string; questionnaire: string; service: string; date: string; section: string; question: string; answer: string };
 type DemoDetails = { appointments: Appointment[]; intents: Intent[]; payments: Payment[]; notes: Note[]; activities: Activity[]; answers: DemoAnswer[] };
-type Visit = [date: string, time: string, status: string, service: string, payment: "approved" | "pending" | null];
+/** `source` 'manual' is a turn the practice loaded itself: with no payment it is still to be charged. Public payments are Mercado Pago. */
+type Visit = [date: string, time: string, status: string, service: string, payment: "approved" | "pending" | null, source?: "manual"];
 function details(id: string, visits: Visit[], extra: Partial<DemoDetails> = {}): DemoDetails {
   const base: DemoDetails = { appointments: [], intents: [], payments: [], notes: [], activities: [], answers: [] };
-  visits.forEach(([date, time, status, service, payment], index) => {
+  visits.forEach(([date, time, status, service, payment, source], index) => {
     const key = `${id}-${index}`; const booked = new Date(new Date(at(date, "08:00")).getTime() - 7 * 864e5).toISOString();
-    base.intents.push({ id: key, service_id: service, professional_id: "pro", created_at: booked });
+    base.intents.push({ id: key, service_id: service, professional_id: "pro", created_at: booked, source: source ?? "public", price_minor: service === "s2" ? 3000000 : 2500000 });
     base.appointments.push({ id: key, booking_intent_id: key, professional_id: "pro", starts_at: at(date, time), status, created_at: booked, status_changed_at: status === "scheduled" ? null : at(date, time) });
-    if (payment) base.payments.push({ id: key, booking_intent_id: key, amount_minor: service === "s2" ? 3000000 : 2500000, currency_code: "ARS", status: payment, created_at: booked, approved_at: payment === "approved" ? booked : null });
+    if (payment) base.payments.push({ id: key, booking_intent_id: key, provider: "mercado_pago_ar", amount_minor: service === "s2" ? 3000000 : 2500000, currency_code: "ARS", status: payment, created_at: booked, approved_at: payment === "approved" ? booked : null });
   });
   base.appointments.reverse();
   return { ...base, ...extra };
@@ -88,7 +89,8 @@ export const demoDetails: Record<string, DemoDetails> = {
   "tomas-mendez": details("tm", [["2026-09-04", "15:00", "completed", "s3", "approved"], ["2026-09-18", "15:00", "completed", "s3", "approved"], [demoToday, "15:00", "scheduled", "s3", "approved"]], {
     notes: [note("tm-n1", "2026-09-18", "general", "Prefiere los turnos de la tarde. Avisar con tiempo si hay cambios de horario.")],
   }),
-  "sofia-gimenez": details("sg", [["2026-10-06", "10:00", "scheduled", "s2", "approved"]], {
+  // Her second turn was loaded by the practice and is not charged yet: "Registrar pago" can be tried on it.
+  "sofia-gimenez": details("sg", [["2026-10-06", "10:00", "scheduled", "s2", "approved"], ["2026-10-13", "10:00", "scheduled", "s1", null, "manual"]], {
     answers: answers("sg-q", "2026-09-29", "Primera consulta", [["Motivo", "¿Qué te trae a la consulta?", "Primera vez en terapia, quiero empezar un proceso."], ["Hábitos", "¿Qué áreas querés trabajar?", "Vínculos, Estudio"]]),
   }),
   "jorge-castro": details("jc", [["2026-06-16", "17:00", "completed", "s1", "approved"], ["2026-06-30", "17:00", "completed", "s1", "approved"], ["2026-07-14", "17:00", "completed", "s1", "approved"]], {
@@ -101,5 +103,5 @@ export const demoDetails: Record<string, DemoDetails> = {
 
 // A payment Mercado Pago approved after its request had expired: money received, no appointment. Same rule as the product.
 demoDetails["carlos-ruiz"].intents.push({ id: "cr-late", service_id: "s1", professional_id: "pro", created_at: at("2026-09-24", "10:00"), status: "cancelled" });
-demoDetails["carlos-ruiz"].payments.push({ id: "cr-late", booking_intent_id: "cr-late", amount_minor: 2500000, currency_code: "ARS", status: "approved", created_at: at("2026-09-24", "10:00"), approved_at: at("2026-09-27", "16:10") });
+demoDetails["carlos-ruiz"].payments.push({ id: "cr-late", booking_intent_id: "cr-late", provider: "mercado_pago_ar", amount_minor: 2500000, currency_code: "ARS", status: "approved", created_at: at("2026-09-24", "10:00"), approved_at: at("2026-09-27", "16:10") });
 export const demoLatePayments = Object.entries(demoDetails).flatMap(([patientId, data]) => latePayments(data.intents, data.payments).map(({ intent, payment }) => ({ patientId, intent, payment })));

@@ -10,6 +10,8 @@ import { crmBirthDate, crmDate, crmMoney, errorMessage, fetchPages, loadCrmConte
 import { buildPatientTimeline, followUpBucket, followUpLabels, priorityLabels, todayInTimezone, type Activity, type Appointment, type FollowUp, type Intent, type Note, type Payment } from "../timeline";
 import { detectOpportunities, type OpportunityOverview } from "../opportunities";
 import { isLatePayment, latePaymentTag } from "@/lib/late-payments";
+import { canRecordPayment, describePaymentError, paymentLabel, type PaymentMethod } from "@/lib/manual-appointment";
+import { RecordOfflinePayment } from "@/components/payments/RecordOfflinePayment";
 import { FollowUpCard, OpportunityRow, ProfileHeader, StatusTag, Tabs, Tag, Timeline, dateOnly, type Tone } from "@/components/crm/CrmUi";
 import { PatientNotes, type NoteDraft } from "@/components/crm/PatientNotes";
 import { useProfileTab } from "@/components/crm/useProfileTab";
@@ -50,6 +52,8 @@ export default function PatientDetailPage() {
   const { tab, setTab, showFollowUp: revealFollowUp, rememberFollowUp, focusFollowUp } = useProfileTab(!loading && !!patient);
   // Opened from Seguimientos: "Volver" goes back there instead of the patient list.
   const fromFollowUps = useSearchParams().get("from") === "seguimientos";
+  // Bumped after a charge is recorded, to read the record again: turns, payments, history and signals.
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -66,7 +70,7 @@ export default function PatientDetailPage() {
         const workspace = nextContext.workspaceId;
         const [appointments, intents, answers, notes, activities, followUps] = await Promise.all([
           fetchPages<Appointment>(async (from, to) => await client.from("appointments").select("id,booking_intent_id,professional_id,starts_at,status,created_at,status_changed_at").eq("workspace_id", workspace).eq("patient_id", patientId).order("starts_at", { ascending: false }).range(from, to)),
-          fetchPages<Intent>(async (from, to) => await client.from("booking_intents").select("id,service_id,professional_id,created_at,status").eq("workspace_id", workspace).eq("patient_id", patientId).order("created_at", { ascending: false }).range(from, to)),
+          fetchPages<Intent>(async (from, to) => await client.from("booking_intents").select("id,service_id,professional_id,created_at,status,source,price_minor").eq("workspace_id", workspace).eq("patient_id", patientId).order("created_at", { ascending: false }).range(from, to)),
           fetchPages<Answer>(async (from, to) => await client.from("questionnaire_answers").select("id,booking_intent_id,questionnaire_id,question_title,section_label,answer,created_at").eq("workspace_id", workspace).eq("patient_id", patientId).order("created_at", { ascending: false }).range(from, to)),
           fetchPages<Note>(async (from, to) => await client.from("patient_notes").select(noteColumns).eq("workspace_id", workspace).eq("patient_id", patientId).order("created_at", { ascending: false }).range(from, to)),
           fetchPages<Activity>(async (from, to) => await client.from("patient_activities").select("id,professional_id,type,title,description,metadata,created_by,created_at").eq("workspace_id", workspace).eq("patient_id", patientId).order("created_at", { ascending: false }).range(from, to)),
@@ -75,7 +79,7 @@ export default function PatientDetailPage() {
         const payments: Payment[] = [];
         for (let i = 0; i < intents.length; i += 50) {
           const ids = intents.slice(i, i + 50).map((intent) => intent.id);
-          payments.push(...await fetchPages<Payment>(async (from, to) => await client.from("payments").select("id,booking_intent_id,amount_minor,currency_code,status,created_at,approved_at").eq("workspace_id", workspace).in("booking_intent_id", ids).order("created_at", { ascending: false }).range(from, to)));
+          payments.push(...await fetchPages<Payment>(async (from, to) => await client.from("payments").select("id,booking_intent_id,provider,method,amount_minor,currency_code,status,created_at,approved_at").eq("workspace_id", workspace).in("booking_intent_id", ids).order("created_at", { ascending: false }).range(from, to)));
         }
         // Only decides which note actions are offered; the database policies decide what is allowed.
         const { data: membership } = await client.from("workspace_members").select("role").eq("workspace_id", workspace).eq("user_id", auth.user?.id ?? "").maybeSingle();
@@ -99,7 +103,7 @@ export default function PatientDetailPage() {
     }
     void load();
     return () => { cancelled = true; };
-  }, [patientId]);
+  }, [patientId, reload]);
 
   useEffect(() => { if (followUpOpen) document.getElementById("crm-follow-up-form")?.scrollIntoView({ behavior: "smooth", block: "center" }); }, [followUpOpen, editingFollowUp]);
   const intentById = useMemo(() => new Map(details.intents.map((item) => [item.id, item])), [details.intents]);
@@ -122,7 +126,7 @@ export default function PatientDetailPage() {
     patientCreatedAt: patient.created_at, appointments: details.appointments, intents: details.intents,
     payments: details.payments, notes: details.notes, activities: details.activities, followUps: details.followUps,
     services: serviceById, professionals: professionalById,
-    money: (amount, currency) => crmMoney(amount, { ...context.market, currency })
+    money: (amount, currency) => crmMoney(amount, { ...context.market, currency }), paymentName: paymentLabel, isLatePayment
   }) : [], [patient, context, details, serviceById, professionalById]);
   const today = context ? todayInTimezone(context.market.timezone) : "";
   const pendingFollowUps = details.followUps.filter((item) => item.status === "pending");
@@ -204,6 +208,15 @@ export default function PatientDetailPage() {
     } catch (caught) { setError(errorMessage(caught)); } finally { setSaving(false); }
   }
 
+  // A charge made outside Bellis on a turn the practice loaded. One payment per turn: if it was already recorded,
+  // the record is read again so the button is no longer offered.
+  async function recordPayment(appointmentId: string, method: PaymentMethod, amountMinor: number) {
+    setError(""); setNotice("");
+    const client = await getSupabase();
+    const { error: payError } = await client.rpc("record_offline_payment", { p_appointment: appointmentId, p_method: method, p_amount_minor: amountMinor });
+    if (payError) { if (describePaymentError(payError.message).alreadyPaid) setReload((value) => value + 1); throw new Error(payError.message); }
+    setNotice("Cobro registrado."); setReload((value) => value + 1);
+  }
   async function changeFollowUpStatus(item: FollowUp, status: "completed" | "cancelled") {
     if (!context) return;
     setSaving(true); setError(""); setNotice("");
@@ -290,8 +303,8 @@ export default function PatientDetailPage() {
         </div>}
 
         {tab === "turnos" && <div className="crm-stack" role="tabpanel" aria-labelledby="crm-tab-turnos">
-          <section className="crm-card"><div className="crm-card-head"><h2>Historial de turnos</h2></div>{details.appointments.length ? <div className="crm-records">{details.appointments.map((item) => { const intent = intentById.get(item.booking_intent_id); const payment = details.payments.find((p) => p.booking_intent_id === item.booking_intent_id && p.status === "approved"); return <div className="crm-record" key={item.id}><strong>{crmDate(item.starts_at, context.market)}</strong><div><b>{serviceById.get(intent?.service_id ?? "") ?? "Servicio no disponible"}</b><small>{professionalById.get(item.professional_id) ?? "Profesional no disponible"}</small></div><Tag tone={appointmentTones[item.status] ?? "neutral"}>{appointmentLabels[item.status] ?? item.status}</Tag><span>Pago: {payment ? paymentLabels[payment.status] : "Sin registro"}</span></div>; })}</div> : <p className="live-empty">Todavía no hay turnos para este paciente.</p>}</section>
-          <section className="crm-card"><div className="crm-card-head"><h2>Pagos</h2></div>{details.payments.length ? <div className="crm-records">{[...details.payments].sort((a, b) => b.created_at.localeCompare(a.created_at)).map((item) => <div className="crm-record" key={item.id}><strong>{crmDate(item.approved_at ?? item.created_at, context.market)}</strong><div><b>{serviceById.get(intentById.get(item.booking_intent_id)?.service_id ?? "") ?? "Servicio no disponible"}</b></div><span>{crmMoney(item.amount_minor, { ...context.market, currency: item.currency_code.trim() })}</span>{isLatePayment(item, intentById.get(item.booking_intent_id)) ? <Tag tone="orange">{latePaymentTag}</Tag> : <Tag tone={paymentTones[item.status] ?? "neutral"}>{paymentLabels[item.status] ?? item.status}</Tag>}</div>)}</div> : <p className="live-empty">Todavía no hay pagos registrados.</p>}</section>
+          <section className="crm-card"><div className="crm-card-head"><h2>Historial de turnos</h2></div>{details.appointments.length ? <div className="crm-records">{details.appointments.map((item) => { const intent = intentById.get(item.booking_intent_id); const payment = details.payments.find((p) => p.booking_intent_id === item.booking_intent_id && p.status === "approved") ?? details.payments.find((p) => p.booking_intent_id === item.booking_intent_id); return <div className="crm-record" key={item.id}><strong>{crmDate(item.starts_at, context.market)}</strong><div><b>{serviceById.get(intent?.service_id ?? "") ?? "Servicio no disponible"}</b><small>{professionalById.get(item.professional_id) ?? "Profesional no disponible"}</small></div><Tag tone={appointmentTones[item.status] ?? "neutral"}>{appointmentLabels[item.status] ?? item.status}</Tag><span>Pago: {paymentLabel(payment)}</span>{context && canRecordPayment({ source: intent?.source, appointmentStatus: item.status, hasPayment: !!payment }) && <div className="crm-record-wide"><RecordOfflinePayment priceMinor={intent?.price_minor ?? 0} formatMoney={(minor) => crmMoney(minor, context.market)} onSave={(method, amountMinor) => recordPayment(item.id, method, amountMinor)}/></div>}</div>; })}</div> : <p className="live-empty">Todavía no hay turnos para este paciente.</p>}</section>
+          <section className="crm-card"><div className="crm-card-head"><h2>Pagos</h2></div>{details.payments.length ? <div className="crm-records">{[...details.payments].sort((a, b) => b.created_at.localeCompare(a.created_at)).map((item) => <div className="crm-record" key={item.id}><strong>{crmDate(item.approved_at ?? item.created_at, context.market)}</strong><div><b>{serviceById.get(intentById.get(item.booking_intent_id)?.service_id ?? "") ?? "Servicio no disponible"}</b><small>{paymentLabel(item)}</small></div><span>{crmMoney(item.amount_minor, { ...context.market, currency: item.currency_code.trim() })}</span>{isLatePayment(item, intentById.get(item.booking_intent_id)) ? <Tag tone="orange">{latePaymentTag}</Tag> : <Tag tone={paymentTones[item.status] ?? "neutral"}>{paymentLabels[item.status] ?? item.status}</Tag>}</div>)}</div> : <p className="live-empty">Todavía no hay pagos registrados.</p>}</section>
         </div>}
 
         {tab === "cuestionarios" && <section className="crm-card" role="tabpanel" aria-labelledby="crm-tab-cuestionarios"><div className="crm-card-head"><h2>Preconsultas</h2></div>{answerGroups.length ? answerGroups.map((answers) => { const first = answers[0]; const intent = intentById.get(first.booking_intent_id); return <div className="crm-preconsult" key={`${first.booking_intent_id}:${first.questionnaire_id}`}><div className="crm-preconsult-head"><div><b>{questionnaireById.get(first.questionnaire_id) ?? "Preconsulta"}</b><small>{serviceById.get(intent?.service_id ?? "") ?? "Servicio no disponible"}</small></div><span>{crmDate(intent?.created_at ?? first.created_at, context.market)}</span></div>{answers.map((answer) => <div className="live-answer" key={answer.id}><small>{answer.section_label}</small><b>{answer.question_title}</b><p>{answerText(answer.answer)}</p></div>)}</div>; }) : <p className="live-empty">Todavía no hay respuestas de preconsulta.</p>}</section>}

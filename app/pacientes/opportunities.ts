@@ -33,7 +33,7 @@ export const opportunityFilters: { kind: OpportunityKind | "all" | "attention"; 
 
 export function detectOpportunities(patient: OpportunityOverview): Opportunity[] {
   const result: Opportunity[] = [];
-  if (patient.has_pending_payment) result.push({ kind: "pending_payment", title: "Pago pendiente", reason: `${patient.pending_payment_count} ${patient.pending_payment_count === 1 ? "pago necesita" : "pagos necesitan"} verificación.`, level: "attention", priority: 0 });
+  if (patient.has_pending_payment) result.push({ kind: "pending_payment", title: "Pago pendiente", reason: `${patient.pending_payment_count} ${patient.pending_payment_count === 1 ? "pago pendiente" : "pagos pendientes"} de cobro o verificación.`, level: "attention", priority: 0 });
   if (patient.has_overdue_follow_up) result.push({ kind: "overdue_follow_up", title: "Seguimiento vencido", reason: `${patient.overdue_follow_up_count} ${patient.overdue_follow_up_count === 1 ? "acción pendiente venció" : "acciones pendientes vencieron"}.`, level: "attention", priority: 1 });
   if (patient.first_completed_without_next) result.push({ kind: "first_without_next", title: "Primera consulta sin próximo turno", reason: "La primera consulta terminó y todavía no hay otro turno reservado.", level: "attention", priority: 2 });
   if (patient.inactive_after_care) result.push({ kind: "inactive", title: "Paciente inactivo", reason: "Pasaron más de 60 días desde el último turno completado y no tiene uno próximo.", level: "attention", priority: 3 });

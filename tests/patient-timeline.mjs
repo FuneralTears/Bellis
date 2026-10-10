@@ -59,3 +59,28 @@ test("el historial resume las notas largas y deja intactas las cortas; un tipo d
   assert.ok(cut.description.length <= 141 && cut.description.endsWith("…") && long.startsWith(cut.description.slice(0, -1)));
   assert.equal(unknown.title, "Nota agregada · General");
 });
+
+test("el historial nombra cómo se cobró y refleja un cobro registrado después", () => {
+  const names = { cash: "Efectivo", transfer: "Transferencia" };
+  const paymentName = (payment) => payment.provider === "offline" ? names[payment.method] : payment.provider === "mercado_pago_ar" ? "Mercado Pago" : "Pago";
+  const base = { patientCreatedAt: "2026-09-01T10:00:00Z", notes: [], activities: [], followUps: [],
+    appointments: [{ id: "a1", booking_intent_id: "i1", professional_id: "pr1", starts_at: "2026-10-12T14:00:00Z", created_at: "2026-10-09T12:00:00Z", status_changed_at: null, status: "scheduled" }],
+    intents: [{ id: "i1", service_id: "s1", professional_id: "pr1", created_at: "2026-10-09T12:00:00Z", status: "scheduled", source: "manual", price_minor: 2500000 }],
+    services: new Map([["s1", "Consulta inicial"]]), professionals: new Map([["pr1", "Ana López"]]), money: (amount) => `$${amount / 100}`, paymentName };
+  // Turno manual todavía sin cobrar: no hay pago, así que el historial no inventa ninguno.
+  const pending = buildPatientTimeline({ ...base, payments: [] });
+  assert.deepEqual(pending.map((event) => event.title), ["Turno reservado", "Paciente creado"]);
+  // Se registra el cobro después, por un importe distinto del precio: aparece con su medio y su fecha.
+  const paid = buildPatientTimeline({ ...base, payments: [{ id: "p1", booking_intent_id: "i1", provider: "offline", method: "transfer", amount_minor: 2350000, currency_code: "ARS", status: "approved", created_at: "2026-10-10T06:15:35Z", approved_at: "2026-10-10T06:15:35Z" }] });
+  assert.deepEqual(paid.map((event) => event.title), ["Pago recibido", "Turno reservado", "Paciente creado"]);
+  const event = paid.find((item) => item.kind === "payment");
+  assert.equal(event.description, "$23500 · Consulta inicial · Transferencia");
+  assert.equal(event.at, "2026-10-10T06:15:35Z");
+  assert.doesNotMatch(event.description, /Mercado Pago/);
+  // Un pago de Mercado Pago se nombra como tal; uno pendiente no lleva medio.
+  const provider = buildPatientTimeline({ ...base, payments: [{ id: "p2", booking_intent_id: "i1", provider: "mercado_pago_ar", amount_minor: 2500000, currency_code: "ARS", status: "approved", created_at: "2026-10-09T12:01:00Z", approved_at: "2026-10-09T12:02:00Z" }] });
+  assert.match(provider.find((item) => item.kind === "payment").description, /Mercado Pago$/);
+  const waiting = buildPatientTimeline({ ...base, payments: [{ id: "p3", booking_intent_id: "i1", provider: "mercado_pago_ar", amount_minor: 2500000, currency_code: "ARS", status: "pending", created_at: "2026-10-09T12:01:00Z", approved_at: null }] });
+  assert.equal(waiting.find((item) => item.kind === "payment").title, "Pago pendiente");
+  assert.equal(waiting.find((item) => item.kind === "payment").description, "$25000 · Consulta inicial");
+});

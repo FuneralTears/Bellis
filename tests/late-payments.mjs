@@ -21,6 +21,22 @@ test("pago tardío: solo un pago aprobado sobre una solicitud cancelada", () => 
   assert.equal(isLatePayment(payment("i1", "approved", { provider: "external_link" }), intent("i1", "cancelled")), false);
 });
 
+test("pago tardío: un cobro registrado por el consultorio nunca lo es, ni un pago sin proveedor", () => {
+  const cancelled = intent("i1", "cancelled");
+  // Cobro offline de un turno manual que después se canceló: plata recibida en mano, no un pago fuera de término.
+  for (const method of ["cash", "transfer", "other"])
+    assert.equal(isLatePayment(payment("i1", "approved", { provider: "offline", method }), cancelled), false, method);
+  // Sin proveedor cargado no se asume Mercado Pago.
+  for (const provider of [undefined, null, "", "otro"])
+    assert.equal(isLatePayment(payment("i1", "approved", { provider }), cancelled), false, String(provider));
+  assert.equal(isLatePayment({ booking_intent_id: "i1", status: "approved" }, cancelled), false);
+  // Solo Mercado Pago.
+  assert.equal(isLatePayment(payment("i1", "approved", { provider: "mercado_pago_ar" }), cancelled), true);
+  const mixed = latePayments([intent("a", "cancelled"), intent("b", "cancelled"), intent("c", "cancelled")],
+    [payment("a", "approved", { provider: "offline", method: "cash" }), payment("b", "approved"), payment("c", "approved", { provider: undefined })]);
+  assert.deepEqual(mixed.map((item) => item.intent.id), ["b"]);
+});
+
 test("pago tardío: la lista del panel trae cada pago con su solicitud, el más reciente primero, y nada más", () => {
   const intents = [intent("a", "cancelled"), intent("b", "scheduled"), intent("c", "cancelled"), intent("d", "cancelled"), intent("e", "pending_payment")];
   const payments = [payment("a", "approved", { approved_at: "2026-10-03T12:00:00Z" }), payment("b", "approved"), payment("c", "expired"),
@@ -33,7 +49,7 @@ test("pago tardío: la lista del panel trae cada pago con su solicitud, el más 
 
 test("pago tardío: la ficha del paciente lo nombra fuera de término y no lo presenta como un turno", () => {
   const base = { patientCreatedAt: "2026-09-01T10:00:00Z", appointments: [], notes: [], activities: [], followUps: [],
-    services: new Map([["s1", "Consulta"]]), professionals: new Map(), money: (minor, currency) => `${currency} ${minor / 100}` };
+    services: new Map([["s1", "Consulta"]]), professionals: new Map(), money: (minor, currency) => `${currency} ${minor / 100}`, isLatePayment };
   const lateEvent = buildPatientTimeline({ ...base, intents: [intent("i1", "cancelled")], payments: [payment("i1", "approved")] }).find((event) => event.kind === "payment");
   assert.equal(lateEvent.title, "Pago recibido fuera de término");
   assert.match(lateEvent.description, /sin turno/);
@@ -46,4 +62,16 @@ test("pago tardío: la ficha del paciente lo nombra fuera de término y no lo pr
     assert.equal(paid.title, "Pago recibido");
     assert.doesNotMatch(paid.description, /sin turno/);
   }
+});
+
+test("pago tardío: en la ficha, un cobro offline de un turno cancelado se nombra como un pago recibido común", () => {
+  const base = { patientCreatedAt: "2026-09-01T10:00:00Z", appointments: [], notes: [], activities: [], followUps: [],
+    services: new Map([["s1", "Consulta"]]), professionals: new Map(), money: (minor, currency) => `${currency} ${minor / 100}`, isLatePayment };
+  const offline = buildPatientTimeline({ ...base, intents: [intent("i1", "cancelled")], payments: [payment("i1", "approved", { provider: "offline", method: "cash" })] }).find((event) => event.kind === "payment");
+  assert.equal(offline.title, "Pago recibido");
+  assert.doesNotMatch(offline.description, /sin turno/);
+  // Sin la regla de pago tardío, ningún pago se nombra fuera de término.
+  const withoutRule = { ...base, isLatePayment: undefined };
+  const plain = buildPatientTimeline({ ...withoutRule, intents: [intent("i1", "cancelled")], payments: [payment("i1", "approved")] }).find((event) => event.kind === "payment");
+  assert.equal(plain.title, "Pago recibido");
 });

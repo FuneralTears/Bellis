@@ -12,7 +12,8 @@ import {
   type ManualAppointmentInput,
   type ManualPatient,
 } from "@/components/agenda/ManualAppointmentForm";
-import { paymentLabel } from "@/lib/manual-appointment";
+import { RecordOfflinePayment } from "@/components/payments/RecordOfflinePayment";
+import { canRecordPayment, paymentLabel, type PaymentMethod } from "@/lib/manual-appointment";
 import { formatMoney } from "@/lib/market";
 import { demoAgendaHistory } from "./agenda-data";
 import { demoPatients, demoServices, demoToday, type DemoService } from "./showroom-data";
@@ -32,7 +33,7 @@ function exampleTimes(day: string) {
   return weekday === 0 ? [] : weekday % 2 ? longDay : shortDay;
 }
 /** What the showroom keeps for a turn created by hand. In memory only. */
-type ManualInfo = { patient: ManualPatient; method: ManualAppointmentInput["method"]; amountMinor: number | null };
+type ManualInfo = { patient: ManualPatient; method: ManualAppointmentInput["method"]; amountMinor: number | null; priceMinor: number };
 
 export function DemoAgenda({
   appointments,
@@ -115,9 +116,15 @@ export function DemoAgenda({
         startTime: clock(input.startsAt), endTime: clock(end), patient: input.patient.full_name, service: input.service.name,
         status: "scheduled", paid: input.method !== null,
       },
-      info: { patient: input.patient, method: input.method, amountMinor: input.amountMinor },
+      info: { patient: input.patient, method: input.method, amountMinor: input.amountMinor, priceMinor: input.service.price_minor },
     }]);
     setCreating(false); setView("Semana"); setSelected(id); setNotice("Turno creado en la demo. No se guardó ni se envió ningún aviso.");
+  };
+
+  // In memory, as everything here: the turn shows as charged at once.
+  const recordPayment = async (id: string, method: PaymentMethod, amountMinor: number) => {
+    setCreated((list) => list.map((item) => item.appointment.id === id ? { appointment: { ...item.appointment, paid: true }, info: { ...item.info, method, amountMinor } } : item));
+    setNotice("Cobro registrado en la demo.");
   };
 
   return (
@@ -154,7 +161,7 @@ export function DemoAgenda({
           </button>
         ))}
       />
-      <AgendaDetails>
+      <AgendaDetails focusKey={selected}>
         {appointment ? (
           <>
             <div className="live-detail">
@@ -176,11 +183,14 @@ export function DemoAgenda({
                     {manual.amountMinor !== null && ` · ${formatMoney(manual.amountMinor / 100)}`}
                   </p>
                   <span className="agenda-manual-tag">Cargado manualmente</span>
+                  {canRecordPayment({ source: "manual", appointmentStatus: appointment.status, hasPayment: manual.method !== null }) && (
+                    <RecordOfflinePayment key={appointment.id} priceMinor={manual.priceMinor} formatMoney={(minor) => formatMoney(minor / 100)} onSave={(method, amountMinor) => recordPayment(appointment.id, method, amountMinor)} />
+                  )}
                 </>
               ) : (
                 <p>
-                  Pago: {appointment.paid ? "Pagado" : "Pendiente"}
-                  {service && ` · ${formatMoney(service.price)}`}
+                  Pago: {paymentLabel({ provider: "mercado_pago_ar", status: appointment.paid ? "approved" : "pending" })}
+                  {service && appointment.paid && ` · ${formatMoney(service.price)}`}
                 </p>
               )}
             </div>

@@ -78,15 +78,41 @@ export function paymentArgs(draft: Pick<ManualDraft, "paid" | "method" | "amount
 }
 
 /**
- * How a payment is named on screen. No payment means nothing was charged yet. A charge recorded by the practice
- * shows its method and is never called Mercado Pago.
+ * How a payment is named on screen, the same everywhere: agenda, patient record, history and demo.
+ * Nothing charged yet, or a payment still waiting, is "Pendiente". A charge the practice recorded shows its
+ * method and is never called Mercado Pago. Only a payment that carries the Mercado Pago provider is called so:
+ * a missing provider is not assumed to be one. A payment that did not go through keeps its outcome next to the name.
  */
 export function paymentLabel(payment: { provider?: string | null; method?: string | null; status?: string | null } | null | undefined): string {
-  if (!payment) return "Pendiente";
-  if (payment.provider === "offline") return paymentMethodLabels[payment.method as PaymentMethod] ?? "Fuera de Bellis";
-  const name = payment.provider === "mercado_pago_ar" ? "Mercado Pago" : payment.provider === "external_link" ? "Link de pago" : "Pago";
-  const state: Record<string, string> = { approved: "aprobado", pending: "pendiente", rejected: "rechazado", refunded: "reembolsado", cancelled: "cancelado", expired: "vencido" };
-  return payment.status && state[payment.status] ? `${name} · ${state[payment.status]}` : name;
+  if (!payment || payment.status === "pending") return "Pendiente";
+  const name = payment.provider === "offline" ? paymentMethodLabels[payment.method as PaymentMethod] ?? "Fuera de Bellis"
+    : payment.provider === "mercado_pago_ar" ? "Mercado Pago" : payment.provider === "external_link" ? "Link de pago" : "Pago";
+  const outcome: Record<string, string> = { rejected: "rechazado", refunded: "reembolsado", cancelled: "cancelado", expired: "vencido" };
+  return payment.status && outcome[payment.status] ? `${name} · ${outcome[payment.status]}` : name;
+}
+
+/**
+ * Whether "Registrar pago" is offered for an appointment: only one the practice loaded itself, still active, and
+ * with no payment on record. An appointment has one payment, so a second charge is never offered.
+ */
+export function canRecordPayment(input: { source?: string | null; appointmentStatus?: string | null; hasPayment: boolean }): boolean {
+  return input.source === "manual" && !input.hasPayment && (input.appointmentStatus === "scheduled" || input.appointmentStatus === "completed");
+}
+
+/**
+ * What to tell the person when recording a charge fails. `alreadyPaid` means someone recorded it first: the
+ * screen reloads the appointment instead of offering to charge again.
+ */
+export function describePaymentError(message: string): { text: string; alreadyPaid: boolean } {
+  const has = (code: string) => message.includes(code);
+  if (has("payment_already_recorded") || has("payments_one_per_intent")) return { text: "Este turno ya tiene un cobro registrado.", alreadyPaid: true };
+  if (has("invalid_payment")) return { text: "Revisá el cobro: el medio y un importe mayor a 0.", alreadyPaid: false };
+  if (has("appointment_not_active")) return { text: "Este turno fue cancelado: no se puede registrar un cobro.", alreadyPaid: false };
+  if (has("not_manual_appointment")) return { text: "Este turno se cobra por el medio de pago de la reserva, no desde acá.", alreadyPaid: false };
+  if (has("not_authorized")) return { text: "No tenés permiso para registrar cobros en esta agenda.", alreadyPaid: false };
+  if (has("authentication_required") || has("JWT")) return { text: "Tu sesión venció. Volvé a ingresar.", alreadyPaid: false };
+  if (/failed to fetch|networkerror|load failed/i.test(message)) return { text: "No pudimos conectarnos. Revisá tu conexión e intentá de nuevo.", alreadyPaid: false };
+  return { text: "No pudimos registrar el cobro. Intentá de nuevo.", alreadyPaid: false };
 }
 
 /**

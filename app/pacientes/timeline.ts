@@ -1,7 +1,8 @@
 export type Appointment = { id: string; booking_intent_id: string; professional_id: string; starts_at: string; status: string; created_at: string; status_changed_at: string | null };
 /** `status` is the request's own state. A cancelled request with an approved payment is a late payment (see lib/late-payments.ts). */
-export type Intent = { id: string; service_id: string; professional_id: string; created_at: string; status?: string };
-export type Payment = { id: string; booking_intent_id: string; amount_minor: number; currency_code: string; status: string; created_at: string; approved_at: string | null };
+export type Intent = { id: string; service_id: string; professional_id: string; created_at: string; status?: string; /** 'manual' when the practice loaded the appointment itself. */ source?: string; price_minor?: number };
+/** `provider` and `method` say how it was paid. `method` only exists for charges the practice recorded (provider 'offline'). */
+export type Payment = { id: string; booking_intent_id: string; amount_minor: number; currency_code: string; status: string; created_at: string; approved_at: string | null; provider?: string | null; method?: string | null };
 /** Internal note types. There is no clinical type: clinical records wait for the privacy and retention policy. */
 export type NoteType = "general" | "follow_up" | "administrative" | "payment";
 export const noteTypeLabels: Record<NoteType, string> = { general: "General", follow_up: "Seguimiento", administrative: "Administrativa", payment: "Pago" };
@@ -37,6 +38,10 @@ export function buildPatientTimeline(input: {
   services: Map<string, string>;
   professionals: Map<string, string>;
   money: (amountMinor: number, currency: string) => string;
+  /** How a payment is named (lib/manual-appointment paymentLabel). Shown next to a payment that was received. */
+  paymentName?: (payment: Payment) => string;
+  /** What a late payment is (lib/late-payments isLatePayment). Without it no payment is worded as late. */
+  isLatePayment?: (payment: Payment, intent: Intent | undefined) => boolean;
 }): TimelineEvent[] {
   const events: TimelineEvent[] = [{ id: "patient-created", at: input.patientCreatedAt, kind: "patient", title: "Paciente creado", description: "Ficha creada en Bellis." }];
   const intents = new Map(input.intents.map((intent) => [intent.id, intent]));
@@ -56,10 +61,11 @@ export function buildPatientTimeline(input: {
     const intent = intents.get(payment.booking_intent_id);
     if (payment.status !== "approved" && payment.status !== "pending") continue;
     // Approved after its request closed: the money came in and there is no appointment. Never worded as a booking.
-    const late = payment.status === "approved" && intent?.status === "cancelled";
+    const late = input.isLatePayment?.(payment, intent) ?? false;
+    const name = payment.status === "approved" ? input.paymentName?.(payment) : undefined;
     events.push({ id: `payment-${payment.id}`, at: payment.status === "approved" ? payment.approved_at ?? payment.created_at : payment.created_at,
       kind: "payment", title: late ? "Pago recibido fuera de término" : payment.status === "approved" ? "Pago recibido" : "Pago pendiente",
-      description: `${input.money(payment.amount_minor, payment.currency_code.trim())} · ${input.services.get(intent?.service_id ?? "") ?? "Servicio"}${late ? " · la solicitud ya había vencido: sin turno" : ""}` });
+      description: `${input.money(payment.amount_minor, payment.currency_code.trim())} · ${input.services.get(intent?.service_id ?? "") ?? "Servicio"}${name ? ` · ${name}` : ""}${late ? " · la solicitud ya había vencido: sin turno" : ""}` });
   }
   // The full text lives in the Notas section; the history only shows where each note falls in time.
   for (const note of input.notes) events.push({ id: `note-${note.id}`, at: note.created_at, kind: "note", title: `Nota agregada · ${noteTypeLabels[note.note_type] ?? noteTypeLabels.general}`,

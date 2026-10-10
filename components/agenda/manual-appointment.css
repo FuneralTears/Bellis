@@ -321,3 +321,40 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+/* "Registrar pago" on an appointment that is still unpaid: agenda detail, patient record and demos. */
+.rop-open {
+  margin-top: 8px;
+}
+.rop {
+  margin: 10px 0 0;
+  padding: 12px;
+  border: 1px solid var(--sage-soft);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  min-width: 0;
+}
+.rop .ma-field {
+  max-width: 280px;
+  margin: 12px 0 0;
+}
+.rop-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.rop .rop-actions .live-secondary {
+  margin-left: 0;
+}
+.crm-record-wide {
+  grid-column: 1 / -1;
+}
+@media (max-width: 600px) {
+  .rop .ma-field {
+    max-width: none;
+  }
+  .rop-actions > button {
+    flex: 1 1 100%;
+    min-height: 44px;
+  }
+}
