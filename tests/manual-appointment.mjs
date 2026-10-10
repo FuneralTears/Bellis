@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { afterCreateError, amountText, canRecordPayment, describeManualError, describePaymentError, draftProblem, emptyDraft, parseAmountMinor, paymentArgs, paymentLabel, paymentMethodLabels, paymentProblem, selectDay, selectProfessional, selectService, selectSlot, setPaid } from "../lib/manual-appointment.ts";
+import { afterCreateError, amountText, canCancelAppointment, canRecordPayment, cancelArgs, cancelQuestion, chargeLabel, describeCancelError, describeManualError, describePaymentError, draftProblem, emptyDraft, parseAmountMinor, paymentArgs, paymentLabel, paymentMethodLabels, paymentProblem, selectDay, selectProfessional, selectService, selectSlot, setPaid } from "../lib/manual-appointment.ts";
 
 const service = { id: "s1", price_minor: 2500000 };
 const complete = { patientId: "p1", professionalId: "pro", serviceId: "s1", day: "2026-10-20", slot: "2026-10-20T12:00:00Z", paid: false, method: "", amount: "25000" };
@@ -176,4 +176,55 @@ test("doble cobro rechazado: se reconoce y pide recargar el turno en vez de cobr
   }
   assert.match(describePaymentError("appointment_not_active").text, /cancelado/);
   assert.match(describePaymentError("TypeError: Failed to fetch").text, /conexión/);
+});
+
+test("cancelar turno: solo se ofrece en turnos manuales agendados", () => {
+  assert.equal(canCancelAppointment({ source: "manual", appointmentStatus: "scheduled" }), true);
+  // Tras cancelar, el botón desaparece; un turno atendido o del booking público nunca lo muestra.
+  assert.equal(canCancelAppointment({ source: "manual", appointmentStatus: "cancelled" }), false);
+  assert.equal(canCancelAppointment({ source: "manual", appointmentStatus: "completed" }), false);
+  assert.equal(canCancelAppointment({ source: "public", appointmentStatus: "scheduled" }), false);
+  assert.equal(canCancelAppointment({ appointmentStatus: "scheduled" }), false);
+});
+
+test("cancelar turno: sin pago pregunta por el cobro; con pago registrado no pregunta el medio", () => {
+  assert.equal(cancelQuestion(false), "ask_charge");
+  assert.equal(cancelQuestion(true), "confirm_paid");
+});
+
+test("cancelar sin cobrar no manda medio ni importe; cancelar y registrar pago exige medio e importe mayor a 0", () => {
+  assert.deepEqual(cancelArgs({ charge: false, method: "", amount: "25000" }), { mode: "no_payment", method: null, amountMinor: null });
+  // Con un cobro ya registrado se cancela igual, sin mandar otro cobro aunque haya algo tipeado.
+  assert.deepEqual(cancelArgs({ charge: false, method: "cash", amount: "25000" }), { mode: "no_payment", method: null, amountMinor: null });
+  assert.deepEqual(cancelArgs({ charge: true, method: "transfer", amount: "24.500" }), { mode: "record_payment", method: "transfer", amountMinor: 2450000 });
+  assert.deepEqual(cancelArgs({ charge: true, method: "other", amount: amountText(2500000) }), { mode: "record_payment", method: "other", amountMinor: 2500000 });
+  assert.equal(cancelArgs({ charge: true, method: "", amount: "25000" }), null);
+  assert.equal(cancelArgs({ charge: true, method: "cash", amount: "0" }), null);
+  assert.equal(cancelArgs({ charge: true, method: "cash", amount: "" }), null);
+  assert.match(paymentProblem({ paid: true, method: "", amount: "25000" }), /cómo se cobró/);
+  assert.match(paymentProblem({ paid: true, method: "cash", amount: "0" }), /importe/);
+});
+
+test("turno cancelado: no ofrece Registrar pago y su cobro no se muestra como pendiente", () => {
+  assert.equal(canRecordPayment({ source: "manual", appointmentStatus: "cancelled", hasPayment: false }), false);
+  assert.equal(chargeLabel(null, "cancelled"), "Sin cobro");
+  assert.equal(chargeLabel({ provider: "offline", method: "transfer", status: "approved" }, "cancelled"), "Transferencia");
+  assert.equal(chargeLabel({ provider: "offline", method: "cash", status: "approved" }, "cancelled"), "Efectivo");
+  // Un cobro registrado nunca pasa a llamarse Mercado Pago por cancelar el turno.
+  assert.notEqual(chargeLabel({ provider: "offline", method: "other", status: "approved" }, "cancelled"), "Mercado Pago");
+  // Un turno activo sigue igual que antes.
+  assert.equal(chargeLabel(null, "scheduled"), "Pendiente");
+  assert.equal(chargeLabel({ provider: "mercado_pago_ar", status: "approved" }, "scheduled"), "Mercado Pago");
+});
+
+test("errores al cancelar: explican qué pasó y recargan cuando el turno cambió", () => {
+  for (const message of ["appointment_already_cancelled", "payment_already_recorded", "appointment_not_cancellable"]) assert.equal(describeCancelError(message).reload, true, message);
+  for (const message of ["not_manual_appointment", "invalid_payment", "not_authorized", "authentication_required", "TypeError: Failed to fetch", "otra cosa"]) {
+    assert.equal(describeCancelError(message).reload, false, message);
+    assert.ok(describeCancelError(message).text.length > 0, message);
+  }
+  assert.match(describeCancelError("appointment_already_cancelled").text, /ya estaba cancelado/);
+  assert.match(describeCancelError("payment_already_recorded").text, /el cobro se conserva/);
+  assert.match(describeCancelError("appointment_not_cancellable").text, /atendido/);
+  assert.match(describeCancelError("TypeError: Failed to fetch").text, /conexión/);
 });

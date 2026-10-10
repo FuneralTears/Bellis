@@ -10,7 +10,8 @@ import { crmBirthDate, crmDate, crmMoney, errorMessage, fetchPages, loadCrmConte
 import { buildPatientTimeline, followUpBucket, followUpLabels, priorityLabels, todayInTimezone, type Activity, type Appointment, type FollowUp, type Intent, type Note, type Payment } from "../timeline";
 import { detectOpportunities, type OpportunityOverview } from "../opportunities";
 import { isLatePayment, latePaymentTag } from "@/lib/late-payments";
-import { canRecordPayment, describePaymentError, paymentLabel, type PaymentMethod } from "@/lib/manual-appointment";
+import { canCancelAppointment, canRecordPayment, chargeLabel, describeCancelError, describePaymentError, paymentLabel, type CancelArgs, type PaymentMethod } from "@/lib/manual-appointment";
+import { CancelManualAppointment } from "@/components/agenda/CancelManualAppointment";
 import { RecordOfflinePayment } from "@/components/payments/RecordOfflinePayment";
 import { FollowUpCard, OpportunityRow, ProfileHeader, StatusTag, Tabs, Tag, Timeline, dateOnly, type Tone } from "@/components/crm/CrmUi";
 import { PatientNotes, type NoteDraft } from "@/components/crm/PatientNotes";
@@ -217,6 +218,15 @@ export default function PatientDetailPage() {
     if (payError) { if (describePaymentError(payError.message).alreadyPaid) setReload((value) => value + 1); throw new Error(payError.message); }
     setNotice("Cobro registrado."); setReload((value) => value + 1);
   }
+  // Cancels a turn the practice loaded, charging it or not, in one server operation. If it changed meanwhile, the
+  // record is read again to show what is true now.
+  async function cancelAppointment(appointmentId: string, args: CancelArgs) {
+    setError(""); setNotice("");
+    const client = await getSupabase();
+    const { error: cancelError } = await client.rpc("cancel_manual_appointment", { p_appointment: appointmentId, p_mode: args.mode, p_payment_method: args.method, p_amount_minor: args.amountMinor });
+    if (cancelError) { if (describeCancelError(cancelError.message).reload) setReload((value) => value + 1); throw new Error(cancelError.message); }
+    setNotice(args.mode === "record_payment" ? "Turno cancelado. El cobro quedó registrado." : "Turno cancelado. El horario volvió a quedar libre."); setReload((value) => value + 1);
+  }
   async function changeFollowUpStatus(item: FollowUp, status: "completed" | "cancelled") {
     if (!context) return;
     setSaving(true); setError(""); setNotice("");
@@ -303,7 +313,7 @@ export default function PatientDetailPage() {
         </div>}
 
         {tab === "turnos" && <div className="crm-stack" role="tabpanel" aria-labelledby="crm-tab-turnos">
-          <section className="crm-card"><div className="crm-card-head"><h2>Historial de turnos</h2></div>{details.appointments.length ? <div className="crm-records">{details.appointments.map((item) => { const intent = intentById.get(item.booking_intent_id); const payment = details.payments.find((p) => p.booking_intent_id === item.booking_intent_id && p.status === "approved") ?? details.payments.find((p) => p.booking_intent_id === item.booking_intent_id); return <div className="crm-record" key={item.id}><strong>{crmDate(item.starts_at, context.market)}</strong><div><b>{serviceById.get(intent?.service_id ?? "") ?? "Servicio no disponible"}</b><small>{professionalById.get(item.professional_id) ?? "Profesional no disponible"}</small></div><Tag tone={appointmentTones[item.status] ?? "neutral"}>{appointmentLabels[item.status] ?? item.status}</Tag><span>Pago: {paymentLabel(payment)}</span>{context && canRecordPayment({ source: intent?.source, appointmentStatus: item.status, hasPayment: !!payment }) && <div className="crm-record-wide"><RecordOfflinePayment priceMinor={intent?.price_minor ?? 0} formatMoney={(minor) => crmMoney(minor, context.market)} onSave={(method, amountMinor) => recordPayment(item.id, method, amountMinor)}/></div>}</div>; })}</div> : <p className="live-empty">Todavía no hay turnos para este paciente.</p>}</section>
+          <section className="crm-card"><div className="crm-card-head"><h2>Historial de turnos</h2></div>{details.appointments.length ? <div className="crm-records">{details.appointments.map((item) => { const intent = intentById.get(item.booking_intent_id); const payment = details.payments.find((p) => p.booking_intent_id === item.booking_intent_id && p.status === "approved") ?? details.payments.find((p) => p.booking_intent_id === item.booking_intent_id); return <div className="crm-record" key={item.id}><strong>{crmDate(item.starts_at, context.market)}</strong><div><b>{serviceById.get(intent?.service_id ?? "") ?? "Servicio no disponible"}</b><small>{professionalById.get(item.professional_id) ?? "Profesional no disponible"}</small></div><Tag tone={appointmentTones[item.status] ?? "neutral"}>{appointmentLabels[item.status] ?? item.status}</Tag><span>{item.status === "cancelled" ? "Cobro" : "Pago"}: {chargeLabel(payment, item.status)}{item.status === "cancelled" && payment && ` · ${crmMoney(payment.amount_minor, context.market)}`}</span>{context && canRecordPayment({ source: intent?.source, appointmentStatus: item.status, hasPayment: !!payment }) && <div className="crm-record-wide"><RecordOfflinePayment priceMinor={intent?.price_minor ?? 0} formatMoney={(minor) => crmMoney(minor, context.market)} onSave={(method, amountMinor) => recordPayment(item.id, method, amountMinor)}/></div>}{context && canCancelAppointment({ source: intent?.source, appointmentStatus: item.status }) && <div className="crm-record-wide"><CancelManualAppointment charge={payment ? `${chargeLabel(payment)} · ${crmMoney(payment.amount_minor, context.market)}` : null} priceMinor={intent?.price_minor ?? 0} formatMoney={(minor) => crmMoney(minor, context.market)} onCancel={(args) => cancelAppointment(item.id, args)}/></div>}</div>; })}</div> : <p className="live-empty">Todavía no hay turnos para este paciente.</p>}</section>
           <section className="crm-card"><div className="crm-card-head"><h2>Pagos</h2></div>{details.payments.length ? <div className="crm-records">{[...details.payments].sort((a, b) => b.created_at.localeCompare(a.created_at)).map((item) => <div className="crm-record" key={item.id}><strong>{crmDate(item.approved_at ?? item.created_at, context.market)}</strong><div><b>{serviceById.get(intentById.get(item.booking_intent_id)?.service_id ?? "") ?? "Servicio no disponible"}</b><small>{paymentLabel(item)}</small></div><span>{crmMoney(item.amount_minor, { ...context.market, currency: item.currency_code.trim() })}</span>{isLatePayment(item, intentById.get(item.booking_intent_id)) ? <Tag tone="orange">{latePaymentTag}</Tag> : <Tag tone={paymentTones[item.status] ?? "neutral"}>{paymentLabels[item.status] ?? item.status}</Tag>}</div>)}</div> : <p className="live-empty">Todavía no hay pagos registrados.</p>}</section>
         </div>}
 

@@ -142,3 +142,50 @@ export function afterCreateError(draft: ManualDraft, message: string): { draft: 
   const failure = describeManualError(message);
   return { draft: failure.slotConflict ? { ...draft, slot: "" } : draft, text: failure.text, refreshSlots: failure.slotConflict };
 }
+
+/**
+ * Whether "Cancelar turno" is offered: only for an appointment the practice loaded itself that is still scheduled.
+ * One already attended is not cancelled, and one from the public booking has its own payment circuit.
+ */
+export function canCancelAppointment(input: { source?: string | null; appointmentStatus?: string | null }): boolean {
+  return input.source === "manual" && input.appointmentStatus === "scheduled";
+}
+
+/**
+ * What cancelling asks first. With no charge on record the person says what happened with it: cancel without
+ * charging, or charge it anyway (a late cancellation). With a charge already recorded nothing is asked: it is kept.
+ */
+export function cancelQuestion(hasPayment: boolean): "ask_charge" | "confirm_paid" {
+  return hasPayment ? "confirm_paid" : "ask_charge";
+}
+
+export type CancelArgs = { mode: "no_payment"; method: null; amountMinor: null } | { mode: "record_payment"; method: PaymentMethod; amountMinor: number };
+
+/** What is sent when cancelling. Without a charge, or with one already recorded, no method and no amount are sent. */
+export function cancelArgs(choice: { charge: boolean; method: PaymentMethod | ""; amount: string }): CancelArgs | null {
+  if (!choice.charge) return { mode: "no_payment", method: null, amountMinor: null };
+  const amountMinor = parseAmountMinor(choice.amount);
+  return choice.method && amountMinor !== null ? { mode: "record_payment", method: choice.method, amountMinor } : null;
+}
+
+/** How the charge of an appointment reads next to its state. A cancelled one with nothing charged is not "pending". */
+export function chargeLabel(payment: Parameters<typeof paymentLabel>[0], appointmentStatus?: string | null): string {
+  return appointmentStatus === "cancelled" && (!payment || payment.status === "pending") ? "Sin cobro" : paymentLabel(payment);
+}
+
+/**
+ * What to tell the person when cancelling fails. `reload` means the appointment changed under them (someone
+ * cancelled it or recorded its charge first): the screen reads it again so it shows what is true now.
+ */
+export function describeCancelError(message: string): { text: string; reload: boolean } {
+  const has = (code: string) => message.includes(code);
+  if (has("appointment_already_cancelled")) return { text: "Este turno ya estaba cancelado.", reload: true };
+  if (has("payment_already_recorded") || has("payments_one_per_intent")) return { text: "Este turno ya tiene un cobro registrado. Podés cancelarlo igual: el cobro se conserva.", reload: true };
+  if (has("appointment_not_cancellable")) return { text: "Este turno ya fue atendido: no se puede cancelar.", reload: true };
+  if (has("not_manual_appointment")) return { text: "Este turno fue reservado por el paciente: no se cancela desde acá.", reload: false };
+  if (has("invalid_payment")) return { text: "Revisá el cobro: el medio y un importe mayor a 0.", reload: false };
+  if (has("not_authorized")) return { text: "No tenés permiso para cancelar turnos en esta agenda.", reload: false };
+  if (has("authentication_required") || has("JWT")) return { text: "Tu sesión venció. Volvé a ingresar.", reload: false };
+  if (/failed to fetch|networkerror|load failed/i.test(message)) return { text: "No pudimos conectarnos. Revisá tu conexión e intentá de nuevo.", reload: false };
+  return { text: "No pudimos cancelar el turno. Intentá de nuevo.", reload: false };
+}

@@ -358,3 +358,67 @@
     min-height: 44px;
   }
 }
+/* "Cancelar turno" on an appointment the practice loaded: agenda detail, patient record and demos. */
+.cma-open {
+  color: var(--danger);
+}
+.rop-open + .cma-open {
+  margin-left: 8px;
+}
+.ma.cma .cma-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+.cma .ma-hint {
+  margin-top: 6px;
+}
+.cma-charge {
+  margin: 8px 0 0;
+  font-size: 14px;
+}
+.cma-choices {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+.cma-choice {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  min-height: 56px;
+  padding: 10px 14px;
+  text-align: left;
+  border: 1px solid var(--sage-soft);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--foreground);
+  cursor: pointer;
+}
+.cma-choice:hover:not(:disabled),
+.cma-choice:focus-visible {
+  border-color: var(--danger);
+}
+.cma-choice b {
+  font-size: 14px;
+}
+.cma-choice small {
+  font-size: 13px;
+  color: var(--muted-foreground, #5d6b70);
+}
+.cma-choice:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.cma .demo-primary.cma-danger {
+  background: var(--danger);
+  border-color: var(--danger);
+}
+/* A cancelled appointment in the agenda detail: it must not read as an active one. */
+.agenda-details .live-detail p.agenda-cancelled-line {
+  color: var(--danger);
+}
+.cma .cma-title + .ma-methods {
+  margin-top: 10px;
+}

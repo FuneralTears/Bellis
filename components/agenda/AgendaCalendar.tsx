@@ -84,7 +84,8 @@ function AppointmentBlock({
         </span>
         {item.paid !== undefined && (
           <span className="agenda-payment">
-            {item.paid ? "Pagado" : "Pago pendiente"}
+            {/* Nothing is pending on a cancelled appointment. */}
+            {item.paid ? "Pagado" : kind === "cancelled" ? "Sin cobro" : "Pago pendiente"}
           </span>
         )}
       </span>

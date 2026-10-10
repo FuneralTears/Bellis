@@ -13,7 +13,8 @@ import {
   type ManualPatient,
 } from "@/components/agenda/ManualAppointmentForm";
 import { RecordOfflinePayment } from "@/components/payments/RecordOfflinePayment";
-import { canRecordPayment, paymentLabel, type PaymentMethod } from "@/lib/manual-appointment";
+import { CancelManualAppointment } from "@/components/agenda/CancelManualAppointment";
+import { canCancelAppointment, canRecordPayment, chargeLabel, paymentLabel, type CancelArgs, type PaymentMethod } from "@/lib/manual-appointment";
 import { formatMoney } from "@/lib/market";
 import { demoAgendaHistory } from "./agenda-data";
 import { demoPatients, demoServices, demoToday, type DemoService } from "./showroom-data";
@@ -126,6 +127,14 @@ export function DemoAgenda({
     setCreated((list) => list.map((item) => item.appointment.id === id ? { appointment: { ...item.appointment, paid: true }, info: { ...item.info, method, amountMinor } } : item));
     setNotice("Cobro registrado en la demo.");
   };
+  // The turn stays in the agenda as cancelled and its time is offered again.
+  const cancelTurn = async (id: string, args: CancelArgs) => {
+    setCreated((list) => list.map((item) => item.appointment.id === id ? {
+      appointment: { ...item.appointment, status: "cancelled", paid: item.appointment.paid || args.mode === "record_payment" },
+      info: args.mode === "record_payment" ? { ...item.info, method: args.method, amountMinor: args.amountMinor } : item.info,
+    } : item));
+    setNotice("Turno cancelado en la demo.");
+  };
 
   return (
     <>
@@ -178,13 +187,18 @@ export function DemoAgenda({
               <p>{appointment.service}</p>
               {manual ? (
                 <>
+                  {appointment.status === "cancelled" && <p className="agenda-cancelled-line">Estado: <b>Cancelado</b></p>}
                   <p>
-                    Pago: {paymentLabel(manual.method ? { provider: "offline", method: manual.method, status: "approved" } : null)}
-                    {manual.amountMinor !== null && ` · ${formatMoney(manual.amountMinor / 100)}`}
+                    {appointment.status === "cancelled" ? "Cobro" : "Pago"}: {chargeLabel(manual.method ? { provider: "offline", method: manual.method, status: "approved" } : null, appointment.status)}
+                    {manual.method !== null && manual.amountMinor !== null && ` · ${formatMoney(manual.amountMinor / 100)}`}
                   </p>
                   <span className="agenda-manual-tag">Cargado manualmente</span>
                   {canRecordPayment({ source: "manual", appointmentStatus: appointment.status, hasPayment: manual.method !== null }) && (
                     <RecordOfflinePayment key={appointment.id} priceMinor={manual.priceMinor} formatMoney={(minor) => formatMoney(minor / 100)} onSave={(method, amountMinor) => recordPayment(appointment.id, method, amountMinor)} />
+                  )}
+                  {canCancelAppointment({ source: "manual", appointmentStatus: appointment.status }) && (
+                    <CancelManualAppointment key={`cancel-${appointment.id}`} charge={manual.method !== null && manual.amountMinor !== null ? `${paymentLabel({ provider: "offline", method: manual.method, status: "approved" })} · ${formatMoney(manual.amountMinor / 100)}` : null}
+                      priceMinor={manual.priceMinor} formatMoney={(minor) => formatMoney(minor / 100)} onCancel={(args) => cancelTurn(appointment.id, args)} />
                   )}
                 </>
               ) : (
