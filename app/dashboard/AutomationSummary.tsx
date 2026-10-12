@@ -17,7 +17,7 @@ export default function AutomationSummary({ workspaceId, timezone }: { workspace
       const base = () => client.from("automation_runs").select("id", { count: "exact", head: true }).eq("workspace_id", workspaceId).gte("executed_at", start).lt("executed_at", end);
       const [rules, processed, created, skipped, failed] = await Promise.all([
         client.from("automation_rules").select("id", { count: "exact", head: true }).eq("workspace_id", workspaceId).eq("enabled", true),
-        base(), base().eq("status", "completed"), base().eq("status", "skipped"), base().eq("status", "failed")
+        base(), base().eq("status", "completed"), base().eq("status", "skipped").or("result->>reason.is.null,result->>reason.neq.pro_access_required"), base().eq("status", "failed")
       ]);
       for (const item of [rules,processed,created,skipped,failed]) if (item.error) throw item.error;
       if (!cancelled) setMetrics({ active: rules.count ?? 0, processed: processed.count ?? 0, created: created.count ?? 0, skipped: skipped.count ?? 0, failed: failed.count ?? 0 });

@@ -57,14 +57,22 @@ const runLook: Record<RunStatus, Look> = {
   cancelled: { tone: "neutral", icon: X },
 };
 /** The one user-facing wording for the states of automatic activity, in the product and in /demo. Backend values stay as they are. */
+/** The reason the server leaves on a run that reached its time while the workspace did not have Bellis Pro. */
+export const proAccessReason = "pro_access_required";
+const notExecuted = (status: RunStatus, reason?: string) => status === "skipped" && reason === proAccessReason;
 export const runStatusLabels: Record<RunStatus, string> = { scheduled: "Pendiente", processing: "En proceso", completed: "Hecho", failed: "Necesita revisión", skipped: "No fue necesario", cancelled: "Cancelada" };
-export function RunStatusTag({ status }: { status: RunStatus }) {
-  return <Tag tone={runLook[status].tone} icon={runLook[status].icon}>{runStatusLabels[status]}</Tag>;
+export function RunStatusTag({ status, reason }: { status: RunStatus; reason?: string }) {
+  return <Tag tone={runLook[status].tone} icon={runLook[status].icon}>{runStatusLabel(status, reason)}</Tag>;
+}
+/** "No fue necesario" means the situation changed. A run that did not run for lack of Bellis Pro is another thing. */
+export function runStatusLabel(status: RunStatus, reason?: string): string {
+  return notExecuted(status, reason) ? "No se ejecutó" : runStatusLabels[status];
 }
 
 /** What happened, as a sentence. An empty name reads as "un paciente". */
-export function runHeadline(status: RunStatus, patient: string): string {
+export function runHeadline(status: RunStatus, patient: string, reason?: string): string {
   const who = patient || "un paciente";
+  if (notExecuted(status, reason)) return `La automatización para ${who} no se ejecutó.`;
   switch (status) {
     case "completed": return `Bellis creó un seguimiento para ${who}.`;
     case "failed": return `No pudimos crear el seguimiento para ${who}.`;
@@ -77,6 +85,7 @@ export function runHeadline(status: RunStatus, patient: string): string {
 // Reasons arrive already written by the backend; only the ones that use internal wording are rephrased here.
 const reasonCopy: Record<string, string> = {
   "Regla desactivada o reactivada después del evento": "La automatización estaba pausada cuando ocurrió.",
+  [proAccessReason]: "Esta automatización no se ejecutó porque Bellis Pro no estaba activo.",
 };
 /** Why it matters or what to expect next. `reason` is the backend's own explanation, when there is one. */
 export function runExplanation(status: RunStatus, reason?: string): string {
@@ -98,11 +107,11 @@ export function ActivityList({ rows, onDetail }: { rows: RunRow[]; onDetail: (id
     return <article key={row.id} className="auto-activity-item">
       <span className={`crm-signal-icon crm-tone-${look.tone}`}><StatusIcon size={16} aria-hidden /></span>
       <div className="auto-activity-body">
-        <strong>{runHeadline(row.status, row.patient)}</strong>
+        <strong>{runHeadline(row.status, row.patient, row.reason)}</strong>
         <p>{runExplanation(row.status, row.reason)}</p>
         <small>{row.rule} · {row.when}</small>
       </div>
-      <RunStatusTag status={row.status}/>
+      <RunStatusTag status={row.status} reason={row.reason}/>
       <button className="crm-link" onClick={() => onDetail(row.id)}>Ver detalle <ArrowRight size={14} /></button>
     </article>;
   })}</div>;
@@ -113,7 +122,7 @@ export function ActivityDetail({ id, status, patient, rule, ruleEnabled, reason,
   id?: string; status: RunStatus; patient: string; rule?: string; ruleEnabled?: boolean; reason?: string; facts: { label: string; value: ReactNode }[]; onClose: () => void; children?: ReactNode;
 }) {
   return <section id={id} className="crm-card auto-detail">
-    <div className="crm-card-head"><div><h2>{runHeadline(status, patient)}</h2><p>{runExplanation(status, reason)}</p></div><button className="crm-btn" onClick={onClose}>Cerrar</button></div>
+    <div className="crm-card-head"><div><h2>{runHeadline(status, patient, reason)}</h2><p>{runExplanation(status, reason)}</p></div><button className="crm-btn" onClick={onClose}>Cerrar</button></div>
     {rule && <WhyThis>Bellis te lo muestra porque configuraste la automatización «{rule}»{ruleEnabled === false ? ", que ahora está pausada" : ""}.</WhyThis>}
     {children && <div className="auto-detail-foot">{children}</div>}
     <details className="auto-facts"><summary>Más información</summary><DetailList items={facts}/></details>

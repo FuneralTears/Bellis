@@ -223,12 +223,14 @@ export function FollowUpCard({ item, today, children }: { item: FollowUpView; to
 
 type Wrap<T> = (row: T, content: ReactNode, options: { className: string; label?: string }) => ReactNode;
 
-export function PatientsTable({ patients, today, automaticIds, formatDate, statusLabel, renderOpen }: {
+export function PatientsTable({ patients, today, automaticIds, smart, formatDate, statusLabel, renderOpen }: {
   patients: OpportunityOverview[]; today: string; automaticIds: Set<string>;
+  /** Whether the suggestions of Bellis Pro are shown next to the facts. */
+  smart: boolean;
   formatDate: (value: string | null) => string; statusLabel: (status: PatientStatus) => string; renderOpen: Wrap<OpportunityOverview>;
 }) {
   return <div className="crm-table-wrap"><table className="crm-table crm-stack-table"><thead><tr><th>Paciente</th><th>Teléfono</th><th>Último turno</th><th>Próximo turno</th><th>Turnos</th><th>Estado</th><th>Para revisar</th><th>Seguimiento</th><th><span className="sr-only">Abrir</span></th></tr></thead><tbody>{patients.map((patient) => {
-    const signals = detectOpportunities(patient);
+    const signals = detectOpportunities(patient, smart);
     const primary = signals.find((signal) => signal.level === "attention") ?? signals[0];
     return <tr key={patient.id}>
       <td className="crm-cell-main">{renderOpen(patient, <><PatientAvatar name={patient.full_name} /><span><b>{patient.full_name}</b><small>{patient.email ?? "Sin email"}</small></span></>, { className: "crm-person" })}</td>

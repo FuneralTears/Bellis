@@ -10,7 +10,7 @@ import { AuthHeading, AuthLoading, AuthMessage, AuthShell } from "@/components/a
  * The outcome is shown in Cobros y pagos; this page only stays visible when there is no session.
  */
 
-type Outcome = "connected" | "cancelled" | "invalid_state" | "error" | "signed_out";
+type Outcome = "connected" | "cancelled" | "invalid_state" | "error" | "signed_out" | "plan_required";
 
 async function resolve(): Promise<Outcome> {
   const query = new URLSearchParams(window.location.search);

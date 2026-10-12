@@ -8,7 +8,8 @@ import { getSupabase } from "@/lib/supabase/browser";
 import CrmShell from "./CrmShell";
 import { crmDate, errorMessage, loadCrmContext, statusLabels, type CrmContext, type PatientStatus } from "./crm";
 import { todayInTimezone } from "./timeline";
-import { opportunityFilters, type OpportunityKind, type OpportunityOverview } from "./opportunities";
+import { isSmartOpportunity, opportunityFilters, type OpportunityKind, type OpportunityOverview } from "./opportunities";
+import { hasCapability } from "@/lib/entitlements";
 import { PageHeader, PatientsTable } from "@/components/crm/CrmUi";
 import { NewPatientForm, type NewPatientValues } from "@/components/crm/NewPatientForm";
 import { createManualPatient, lookupPatientDuplicates } from "./manual-patient";
@@ -80,6 +81,7 @@ export default function PatientsPage() {
   const createPatient = async (values: NewPatientValues) => { router.push(`/pacientes/${await createManualPatient(context!.workspaceId, values)}`); };
 
   const today = context ? todayInTimezone(context.market.timezone) : "";
+  const smart = hasCapability(context?.access, "smart_followups");
   const filtered = Boolean(search) || status !== "all" || followUpFilter !== "all" || opportunityFilter !== "all";
   return <CrmShell context={context}>
     <PageHeader title="Pacientes" description="Información, turnos y seguimiento en un solo lugar."><Link className="crm-btn" href="/seguimientos">Ver seguimientos <ArrowRight size={16}/></Link><button className="demo-primary" type="button" disabled={!context || creating} onClick={() => setCreating(true)}><Plus size={16}/> Nuevo paciente</button></PageHeader>
@@ -89,11 +91,11 @@ export default function PatientsPage() {
       <PatientFilters query={query} onQuery={setQuery} sort={sort} onSort={(value) => { setSort(value as Sort); setPage(0); }}
         filters={{ status, followUp: followUpFilter, opportunity: opportunityFilter }}
         onFilters={(next) => { setStatus(next.status as PatientStatus | "all"); setFollowUpFilter(next.followUp); setOpportunityFilter(next.opportunity as OpportunityFilter); setPage(0); }}
-        situations={opportunityFilters.filter((item) => item.column).map((item) => ({ value: item.kind, label: item.label }))}/>
+        situations={opportunityFilters.filter((item) => item.column).map((item) => ({ value: item.kind, label: item.label, locked: !smart && isSmartOpportunity(item.kind) }))}/>
       {error && <p className="live-error" role="alert">{error} <button onClick={() => setReload((value) => value + 1)} aria-label="Reintentar">Reintentá la búsqueda</button></p>}
       {loading ? <p className="live-empty" role="status">Cargando pacientes…</p> : error ? null : patients.length === 0 ? <p className="live-empty">{filtered ? "No encontramos pacientes con esos filtros." : "Todavía no tenés pacientes."}</p> : <>
         <p className="crm-result-count">{total} {total === 1 ? "paciente" : "pacientes"}{filtered ? " con estos filtros" : ""}</p>
-        <PatientsTable patients={patients} today={today} automaticIds={automaticPatients} formatDate={(value) => crmDate(value, context!.market)} statusLabel={(value) => statusLabels[value]}
+        <PatientsTable patients={patients} today={today} automaticIds={automaticPatients} smart={smart} formatDate={(value) => crmDate(value, context!.market)} statusLabel={(value) => statusLabels[value]}
           renderOpen={(patient, content, { className, label }) => <Link className={className} href={`/pacientes/${patient.id}`} aria-label={label}>{content}</Link>}/>
         <div className="crm-pagination"><span>Página {page + 1} de {Math.max(1, Math.ceil(total / PAGE_SIZE))}</span><div><button disabled={page === 0} onClick={() => setPage(page - 1)}>Anterior</button><button disabled={(page + 1) * PAGE_SIZE >= total} onClick={() => setPage(page + 1)}>Siguiente</button></div></div>
       </>}

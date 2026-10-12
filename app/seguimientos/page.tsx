@@ -8,7 +8,8 @@ import CrmShell from "../pacientes/CrmShell";
 import { errorMessage, fetchPages, loadCrmContext, type CrmContext } from "../pacientes/crm";
 import { followUpBucket, priorityLabels, todayInTimezone, type FollowUp } from "../pacientes/timeline";
 import { FollowUpsTable, GroupTitle, KpiStrip, OpportunityRow, PageHeader, groupFollowUps } from "@/components/crm/CrmUi";
-import { detectOpportunities, hasAttention, opportunityFilters, type OpportunityKind, type OpportunityOverview } from "../pacientes/opportunities";
+import { detectOpportunities, hasAttention, isSmartOpportunity, opportunityFilters, type OpportunityKind, type OpportunityOverview } from "../pacientes/opportunities";
+import { hasCapability } from "@/lib/entitlements";
 
 type PatientName = { id: string; full_name: string };
 type StatusFilter = "pending" | "completed" | "cancelled" | "all";
@@ -74,10 +75,11 @@ export default function FollowUpsPage() {
     return rank[followUpBucket(a.due_date, today)] - rank[followUpBucket(b.due_date, today)]
       || a.due_date.localeCompare(b.due_date) || (a.due_time ?? "").localeCompare(b.due_time ?? "");
   }), [followUps, patientById, search, priority, source, status, today]);
-  const signalRows = useMemo(() => opportunities.flatMap((patient) => detectOpportunities(patient)
+  const smart = hasCapability(context?.access, "smart_followups");
+  const signalRows = useMemo(() => opportunities.flatMap((patient) => detectOpportunities(patient, smart)
     .filter((item) => signalFilter === "all" || (signalFilter === "attention" ? item.level === "attention" : item.kind === signalFilter))
     .map((item) => ({ patient, item }))).filter(({ patient }) => patient.full_name.toLocaleLowerCase("es-AR").includes(search.trim().toLocaleLowerCase("es-AR")))
-    .sort((a, b) => a.item.priority - b.item.priority || a.patient.full_name.localeCompare(b.patient.full_name, "es-AR")), [opportunities, search, signalFilter]);
+    .sort((a, b) => a.item.priority - b.item.priority || a.patient.full_name.localeCompare(b.patient.full_name, "es-AR")), [opportunities, search, signalFilter, smart]);
   const attentionPatients = opportunities.filter(hasAttention).length;
 
   async function complete(item: FollowUp) {
@@ -102,7 +104,7 @@ export default function FollowUpsPage() {
       { label: "Vencidos", value: loading ? "—" : counts.overdue, icon: CircleAlert, tone: "coral" },
       { label: "Completados", value: loading ? "—" : counts.completed, icon: Check, tone: "sage" },
     ]}/>
-    <section className="crm-card"><div className="crm-card-head"><div><h2>Pacientes para revisar</h2><p>{loading ? "Revisando la actividad de tus pacientes…" : attentionPatients ? `Bellis te sugiere revisar a ${attentionPatients} ${attentionPatients === 1 ? "paciente" : "pacientes"}.` : "Por ahora no hay pacientes para revisar."} La lista se actualiza sola.</p></div><label className="crm-select">Mostrar <select value={signalFilter} onChange={(event) => setSignalFilter(event.target.value as SignalFilter)}>{opportunityFilters.map((item) => <option key={item.kind} value={item.kind}>{item.label}</option>)}</select></label></div>
+    <section className="crm-card"><div className="crm-card-head"><div><h2>Pacientes para revisar</h2><p>{loading ? "Revisando la actividad de tus pacientes…" : attentionPatients ? `Bellis te sugiere revisar a ${attentionPatients} ${attentionPatients === 1 ? "paciente" : "pacientes"}.` : "Por ahora no hay pacientes para revisar."} La lista se actualiza sola.</p></div><label className="crm-select">Mostrar <select value={signalFilter} onChange={(event) => setSignalFilter(event.target.value as SignalFilter)}>{opportunityFilters.map((item) => <option key={item.kind} value={item.kind} disabled={!smart && isSmartOpportunity(item.kind)}>{item.label}{!smart && isSmartOpportunity(item.kind) ? " · Bellis Pro" : ""}</option>)}</select></label></div>
       {loading ? <p className="live-empty" role="status">Buscando pacientes para revisar…</p> : signalRows.length ? <div className="crm-signals">{signalRows.map(({ patient, item }) => <OpportunityRow key={`${patient.id}:${item.kind}`} item={item} patientName={patient.full_name}><Link className="crm-link" href={`/pacientes/${patient.id}?from=seguimientos`}>Ver paciente <ArrowRight size={15}/></Link></OpportunityRow>)}</div> : <p className="live-empty">{signalFilter === "attention" || signalFilter === "all" ? "No hay pacientes que necesiten seguimiento por ahora." : "No hay pacientes en esa situación por ahora."}</p>}
     </section>
     <section className="crm-card"><div className="crm-card-head"><div><h2>Tus seguimientos</h2><p>Recordatorios para volver a contactar a un paciente. Los podés crear vos o Bellis, si activaste una automatización.</p></div></div><div className="crm-filterbar">

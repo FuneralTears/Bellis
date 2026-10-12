@@ -6,7 +6,7 @@ import type { MercadoPagoConnection } from "@/components/payments/PaymentSetting
  * on its way to the server, and the connection status. Tokens and the client secret never reach this code.
  */
 
-export type MercadoPagoCompletion = "connected" | "invalid_state" | "error" | "signed_out";
+export type MercadoPagoCompletion = "connected" | "invalid_state" | "error" | "signed_out" | "plan_required";
 
 /** Calls the connection function as the signed-in person. Null when there is no session. */
 async function connectionRequest(action: "start" | "complete", body?: unknown): Promise<Response | null> {
@@ -26,6 +26,7 @@ async function connectionRequest(action: "start" | "complete", body?: unknown): 
 /** Asks the server where to send the person to authorize. The address is built on the server; here it is only checked. */
 export async function startMercadoPagoConnection(): Promise<string> {
   const response = await connectionRequest("start");
+  if (response?.status === 403 && (await response.clone().json().catch(() => null) as { code?: string } | null)?.code === "plan_required") throw new Error("plan_required");
   if (!response?.ok) throw new Error("start_failed");
   const { authorizationUrl } = await response.json() as { authorizationUrl?: unknown };
   const target = new URL(String(authorizationUrl));
@@ -42,7 +43,7 @@ export async function completeMercadoPagoConnection(code: string, state: string)
   if (!response || response.status === 401) return "signed_out";
   if (!response.ok) return "error";
   const { outcome } = await response.json() as { outcome?: string };
-  return outcome === "connected" || outcome === "invalid_state" ? outcome : "error";
+  return outcome === "connected" || outcome === "invalid_state" || outcome === "plan_required" ? outcome : "error";
 }
 
 /** What this person may know and do about the workspace's Mercado Pago account. Only the owner connects, disconnects or changes the method. */

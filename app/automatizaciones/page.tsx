@@ -10,6 +10,8 @@ import { priorityLabels } from "../pacientes/timeline";
 import { KpiStrip, PageHeader } from "@/components/crm/CrmUi";
 import { DetailList, RuleRow, RunStatusTag, ruleSentence, ruleStateLabel, runExplanation } from "@/components/automation/AutomationUi";
 import { Switch } from "@/components/ui/switch";
+import { hasCapability, proLockCopy } from "@/lib/entitlements";
+import { ProLock } from "@/components/plan/PlanUi";
 import "./automations.css";
 
 type Rule = { id: string; workspace_id: string; rule_key: "first_consultation" | "inactive_patient" | "pending_payment"; name: string; description: string; trigger_type: string; condition_type: string; action_title: string; action_priority: "low" | "medium" | "high"; delay_minutes: number; enabled: boolean; enabled_at: string | null; updated_at: string };
@@ -80,7 +82,7 @@ export default function AutomationsPage() {
   const history = runs.filter((run) => run.automation_rule_id === selectedId).slice(0, 50);
 
   async function save(rule: Rule, patch: Partial<Rule>) {
-    if (!context || !canEdit) return;
+    if (!context || !canEdit || !hasCapability(context.access, "automations")) return;
     setSaving(true); setError(""); setNotice("");
     try {
       const client = await getSupabase();
@@ -92,6 +94,9 @@ export default function AutomationsPage() {
     } catch (caught) { setError(errorMessage(caught)); } finally { setSaving(false); }
   }
 
+  // Without Bellis Pro the page is for reading: rules and history stay, nothing can be switched or changed.
+  const pro = hasCapability(context?.access, "automations");
+  const editable = canEdit && pro;
   const active = rules.filter((rule) => rule.enabled).length;
   const wait = (rule: Rule) => `${rule.delay_minutes / descriptions[rule.rule_key].factor} ${descriptions[rule.rule_key].unit}`;
 
@@ -104,12 +109,13 @@ export default function AutomationsPage() {
       { label: "Pausadas", value: loading ? "—" : rules.length - active, icon: Pause, tone: "neutral" },
       { label: "Para revisar", value: loading ? "—" : failedCount, icon: CircleAlert, tone: failedCount > 0 ? "coral" : "neutral" },
     ]}/>
+    {context && !pro && <ProLock title={proLockCopy.automations.title} text={`${proLockCopy.automations.text} Tus automatizaciones y su historial siguen acá; mientras tanto no se ejecutan.`} action={<Link className="plan-link" href="/pro">Conocer Bellis Pro <ArrowRight size={15}/></Link>}/>}
     {failedCount > 0 && <div className="auto-alert"><CircleAlert size={16}/><strong>{failedCount === 1 ? "Hay 1 tarea automática que necesita tu revisión." : `Hay ${failedCount} tareas automáticas que necesitan tu revisión.`}</strong><Link className="crm-link" href="/automatizaciones/ejecuciones?status=failed">Ver actividad <ArrowRight size={15}/></Link></div>}
     <p className="auto-note"><ShieldCheck size={15}/> <span>Cuando una automatización está activa, Bellis revisa esto automáticamente y te deja el seguimiento listo. No envía mensajes a tus pacientes ni toma decisiones clínicas. Empiezan pausadas y, al activarlas, tienen en cuenta lo que pase desde ese momento.{!loading && !canEdit ? " Solo quienes administran este espacio pueden cambiarlas." : ""}</span></p>
     {loading ? <p className="live-empty" role="status">Cargando automatizaciones…</p> : <>
       <div className="auto-rules">{rules.map((rule) => <RuleRow key={rule.id} kind={rule.rule_key} name={rule.name} description={rule.description} enabled={rule.enabled} wait={wait(rule)} action={`Crea un seguimiento con prioridad ${priorityLabels[rule.action_priority].toLowerCase()}`}
-        toggle={canEdit ? <Switch checked={rule.enabled} disabled={saving} aria-label={`${rule.enabled ? "Pausar" : "Activar"} ${rule.name}`} onCheckedChange={() => void save(rule, { enabled: !rule.enabled })}/> : undefined}>
-        <button className="crm-link" onClick={() => { setSelectedId(rule.id); setDraft(null); }}>Ver detalle</button>{canEdit && <button className="crm-link" onClick={() => { setSelectedId(rule.id); setDraft({ ...rule }); }}>Configurar</button>}
+        toggle={canEdit ? <Switch checked={rule.enabled} disabled={saving || !pro} aria-label={`${rule.enabled ? "Pausar" : "Activar"} ${rule.name}`} onCheckedChange={() => void save(rule, { enabled: !rule.enabled })}/> : undefined}>
+        <button className="crm-link" onClick={() => { setSelectedId(rule.id); setDraft(null); }}>Ver detalle</button>{editable && <button className="crm-link" onClick={() => { setSelectedId(rule.id); setDraft({ ...rule }); }}>Configurar</button>}
       </RuleRow>)}</div>
       {selected && <section id="auto-detail" className="crm-card" style={{ marginTop: 12 }}><div className="crm-card-head"><div><h2>{ruleSentence(selected.rule_key, wait(selected))}</h2><p>{selected.name} · {ruleStateLabel(selected.enabled)} · Última actualización: {context ? crmDate(selected.updated_at, context.market) : "—"}</p></div><button className="crm-btn" onClick={() => { setSelectedId(null); setDraft(null); }}>Cerrar</button></div>
         <DetailList columns={4} items={[
@@ -118,7 +124,7 @@ export default function AutomationsPage() {
           { label: "Cuánto espera", value: wait(selected) },
           { label: "Qué hace", value: `Crea el seguimiento «${selected.action_title}» con prioridad ${priorityLabels[selected.action_priority].toLowerCase()}` },
         ]}/>
-        {draft && canEdit && <form className="auto-form" onSubmit={(event) => { event.preventDefault(); const unit = Number((event.currentTarget.elements.namedItem("delay") as HTMLInputElement).value); if (!Number.isInteger(unit) || unit < 1 || unit * descriptions[draft.rule_key].factor > 525600) { setError("Ingresá un plazo válido."); return; } void save(draft, { name: draft.name.trim(), description: draft.description.trim(), action_title: draft.action_title.trim(), action_priority: draft.action_priority, delay_minutes: unit * descriptions[draft.rule_key].factor }); }}>
+        {draft && editable && <form className="auto-form" onSubmit={(event) => { event.preventDefault(); const unit = Number((event.currentTarget.elements.namedItem("delay") as HTMLInputElement).value); if (!Number.isInteger(unit) || unit < 1 || unit * descriptions[draft.rule_key].factor > 525600) { setError("Ingresá un plazo válido."); return; } void save(draft, { name: draft.name.trim(), description: draft.description.trim(), action_title: draft.action_title.trim(), action_priority: draft.action_priority, delay_minutes: unit * descriptions[draft.rule_key].factor }); }}>
           <div className="crm-form-grid">
             <label>Nombre<input required maxLength={120} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })}/></label>
             <label>Esperar ({descriptions[draft.rule_key].unit})<input name="delay" type="number" required min={1} max={Math.floor(525600 / descriptions[draft.rule_key].factor)} defaultValue={draft.delay_minutes / descriptions[draft.rule_key].factor}/></label>
@@ -129,7 +135,7 @@ export default function AutomationsPage() {
           <div className="crm-note-actions"><button className="demo-primary" disabled={saving}>Guardar cambios</button><button type="button" className="live-secondary" onClick={() => setDraft(null)}>Cancelar</button></div>
           <p className="crm-hint">El nuevo plazo vale de ahora en adelante. Lo que ya estaba pendiente conserva su fecha.</p>
         </form>}
-        <h3 className="auto-subtitle">Actividad reciente</h3>{history.length ? <div className="auto-history">{history.map((run) => <div key={run.id}><time>{context ? crmDate(run.executed_at ?? run.scheduled_for, context.market) : "—"}</time><strong>{nameById.get(run.patient_id) ?? "Paciente no disponible"}{run.status === "skipped" && <small>{runExplanation(run.status, run.result?.reason)}</small>}</strong><RunStatusTag status={run.status}/><Link className="crm-link" href={`/automatizaciones/ejecuciones?run=${run.id}`}>Ver detalle <ArrowRight size={14}/></Link></div>)}</div> : <p className="live-empty">Todavía no hay actividad automática para mostrar.</p>}
+        <h3 className="auto-subtitle">Actividad reciente</h3>{history.length ? <div className="auto-history">{history.map((run) => <div key={run.id}><time>{context ? crmDate(run.executed_at ?? run.scheduled_for, context.market) : "—"}</time><strong>{nameById.get(run.patient_id) ?? "Paciente no disponible"}{run.status === "skipped" && <small>{runExplanation(run.status, run.result?.reason)}</small>}</strong><RunStatusTag status={run.status} reason={run.result?.reason}/><Link className="crm-link" href={`/automatizaciones/ejecuciones?run=${run.id}`}>Ver detalle <ArrowRight size={14}/></Link></div>)}</div> : <p className="live-empty">Todavía no hay actividad automática para mostrar.</p>}
       </section>}
     </>}
   </CrmShell>;

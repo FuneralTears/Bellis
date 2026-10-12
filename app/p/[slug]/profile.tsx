@@ -175,7 +175,7 @@ export function LivePublicProfile({ slug }: { slug: string }) {
         {profile.professional.biography && <BookingPanel title="Sobre la consulta"><p>{profile.professional.biography}</p></BookingPanel>}
         <BookingPanel title="Servicios disponibles"><div className="bk-services">
           {profile.services.length ? profile.services.map((item) => <ServiceCard key={item.id} name={item.name} description={item.description} duration={item.duration_minutes} modality={modalityLabel(item)} price={money(item.price_minor)} disabled={!item.can_checkout || !profile.questionnaires[item.id]} onReserve={() => { setService(item); setAnswers({}); setStep(1); window.scrollTo(0, 0); }} />) : <p>Todavía no hay servicios disponibles.</p>}
-          {!profile.services.some((item) => item.can_checkout) && <p>Esta agenda está esperando que el profesional configure su cobro.</p>}
+          {!(profile.bookingAvailable ?? profile.services.some((item) => item.can_checkout)) && <p role="status">{profile.bookingUnavailableMessage ?? "Las reservas online no están disponibles por el momento. Para pedir un turno, comunicate directamente con el consultorio."}</p>}
         </div></BookingPanel>
       </div><HowItWorks points={["Información disponible solo para el equipo autorizado", "Horarios calculados según disponibilidad real"]} /></div>
     </> : <div className="bk-flow">{step < 3 && <button className="bk-back" type="button" onClick={() => setStep(step - 1)}><ArrowLeft size={17}/> Volver</button>}<BookingStepper current={stage} complete={step === 5} />

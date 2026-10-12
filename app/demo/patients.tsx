@@ -7,7 +7,7 @@ import { PatientNotes, type NoteDraft } from "@/components/crm/PatientNotes";
 import { NewPatientForm, type NewPatientValues } from "@/components/crm/NewPatientForm";
 import { useProfileTab } from "@/components/crm/useProfileTab";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/market";
-import { detectOpportunities, hasAttention, opportunityFilters, type OpportunityOverview } from "../pacientes/opportunities";
+import { detectOpportunities, hasAttention, isSmartOpportunity, opportunityFilters, type OpportunityOverview } from "../pacientes/opportunities";
 import { buildPatientTimeline, followUpBucket, followUpLabels, type Note, type Payment } from "../pacientes/timeline";
 import { demoDetails, demoFollowUp, demoNewPatient, demoPatients, demoProfessional, demoServiceNames, demoStatusLabels, emptyDemoDetails } from "./crm-data";
 import { demoToday, type DemoTask } from "./showroom-data";
@@ -26,7 +26,7 @@ const appointmentLabels: Record<string, string> = { scheduled: "Programado", com
 const professionals = new Map([["pro", demoProfessional]]);
 
 /** Showroom mirror of /pacientes and /pacientes/[id]. Mock data only; nothing is saved. */
-export function DemoPatients({ state, profile, setProfile, fromFollowUps, followUps, automation }: { state: Showroom; profile: string | null; setProfile: (id: string | null) => void; fromFollowUps: boolean; followUps: () => void; automation: () => void }) {
+export function DemoPatients({ state, profile, setProfile, fromFollowUps, followUps, automation, smart }: { /** Whether the example plan includes the suggestions of Bellis Pro. */ smart: boolean; state: Showroom; profile: string | null; setProfile: (id: string | null) => void; fromFollowUps: boolean; followUps: () => void; automation: () => void }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<Status | "all">("all");
   const [followUp, setFollowUp] = useState<FollowUpFilter>("all");
@@ -39,7 +39,7 @@ export function DemoPatients({ state, profile, setProfile, fromFollowUps, follow
   const patients = useMemo(() => [...added.map((item) => item.patient), ...demoPatients(state.tasks)].map((item) => ({ ...item, status: statuses[item.id] ?? item.status })), [added, state.tasks, statuses]);
   const automatic = new Set(state.tasks.filter((task) => task.status === "pending" && task.source === "automation").map((task) => patients.find((item) => item.full_name === task.patient)?.id ?? ""));
   const selected = patients.find((item) => item.id === profile);
-  if (selected) return <DemoProfile key={selected.id} patient={selected} initialNotes={added.find((item) => item.patient.id === selected.id)?.notes} state={state} back={fromFollowUps ? followUps : () => setProfile(null)} backLabel={fromFollowUps ? "Volver a seguimientos" : "Volver a pacientes"} automation={automation} setStatus={(value) => setStatuses({ ...statuses, [selected.id]: value })}/>;
+  if (selected) return <DemoProfile key={selected.id} smart={smart} patient={selected} initialNotes={added.find((item) => item.patient.id === selected.id)?.notes} state={state} back={fromFollowUps ? followUps : () => setProfile(null)} backLabel={fromFollowUps ? "Volver a seguimientos" : "Volver a pacientes"} automation={automation} setStatus={(value) => setStatuses({ ...statuses, [selected.id]: value })}/>;
 
   const text = query.trim().toLocaleLowerCase("es-AR");
   const column = opportunityFilters.find((item) => item.kind === opportunity)?.column;
@@ -71,10 +71,10 @@ export function DemoPatients({ state, profile, setProfile, fromFollowUps, follow
       <PatientFilters query={query} onQuery={setQuery} sort={sort} onSort={setSort}
         filters={{ status, followUp, opportunity }}
         onFilters={(next) => { setStatus(next.status as Status | "all"); setFollowUp(next.followUp); setOpportunity(next.opportunity); }}
-        situations={opportunityFilters.filter((item) => item.column).map((item) => ({ value: item.kind, label: item.label }))}/>
+        situations={opportunityFilters.filter((item) => item.column).map((item) => ({ value: item.kind, label: item.label, locked: !smart && isSmartOpportunity(item.kind) }))}/>
       {visible.length === 0 ? <p className="live-empty">{filtered ? "No encontramos pacientes con esos filtros." : "Todavía no tenés pacientes."}</p> : <>
         <p className="crm-result-count">{visible.length} {visible.length === 1 ? "paciente" : "pacientes"}{filtered ? " con estos filtros" : ""}</p>
-        <PatientsTable patients={visible} today={demoToday} automaticIds={automatic} formatDate={date} statusLabel={(value) => demoStatusLabels[value]}
+        <PatientsTable patients={visible} today={demoToday} automaticIds={automatic} smart={smart} formatDate={date} statusLabel={(value) => demoStatusLabels[value]}
           renderOpen={(patient, content, { className, label }) => <button type="button" className={className} aria-label={label} onClick={() => setProfile(patient.id)}>{content}</button>}/>
         <div className="crm-pagination"><span>Página 1 de 1</span><div><button disabled>Anterior</button><button disabled>Siguiente</button></div></div>
       </>}
@@ -82,7 +82,7 @@ export function DemoPatients({ state, profile, setProfile, fromFollowUps, follow
   </>;
 }
 
-function DemoProfile({ patient, initialNotes, state, back, backLabel, automation, setStatus }: { patient: OpportunityOverview; initialNotes?: Note[]; state: Showroom; back: () => void; backLabel: string; automation: () => void; setStatus: (status: Status) => void }) {
+function DemoProfile({ patient, initialNotes, state, back, backLabel, automation, setStatus, smart }: { smart: boolean; patient: OpportunityOverview; initialNotes?: Note[]; state: Showroom; back: () => void; backLabel: string; automation: () => void; setStatus: (status: Status) => void }) {
   // Same navigation as the real record; the demo is one page, so its entries are cleared on leaving.
   const { tab, setTab, showFollowUp, clear } = useProfileTab(true);
   useEffect(() => clear, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -118,7 +118,7 @@ function DemoProfile({ patient, initialNotes, state, back, backLabel, automation
   const followUps = state.tasks.filter((task) => task.patient === patient.full_name).map(demoFollowUp).sort((a, b) => a.due_date.localeCompare(b.due_date));
   const pending = followUps.filter((item) => item.status === "pending");
   const closed = followUps.filter((item) => item.status !== "pending");
-  const opportunities = detectOpportunities({ ...patient, pending_payment_count: Math.max(0, patient.pending_payment_count - charged), has_pending_payment: patient.pending_payment_count - charged > 0 });
+  const opportunities = detectOpportunities({ ...patient, pending_payment_count: Math.max(0, patient.pending_payment_count - charged), has_pending_payment: patient.pending_payment_count - charged > 0 }, smart);
   const timeline = buildPatientTimeline({ patientCreatedAt: patient.created_at, appointments, intents: data.intents, payments, notes, activities: data.activities, followUps, services: demoServiceNames, professionals, money, paymentName: paymentLabel, isLatePayment });
   const service = (intentId: string) => demoServiceNames.get(data.intents.find((item) => item.id === intentId)?.service_id ?? "") ?? "Servicio";
   const next = patient.next_turn ? data.appointments.find((item) => item.starts_at === patient.next_turn) : undefined;

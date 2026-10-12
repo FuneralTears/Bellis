@@ -8,7 +8,9 @@ import CrmShell from "../../pacientes/CrmShell";
 import { crmDate, errorMessage, loadCrmContext, type CrmContext } from "../../pacientes/crm";
 import { dateBounds } from "./dateRange";
 import { KpiStrip, PageHeader } from "@/components/crm/CrmUi";
-import { ActivityDetail, ActivityList, RunStatusTag, runStatusLabels as labels, type RunRow } from "@/components/automation/AutomationUi";
+import { ActivityDetail, ActivityList, RunStatusTag, proAccessReason, runStatusLabels as labels, type RunRow } from "@/components/automation/AutomationUi";
+import { hasCapability, proLockCopy } from "@/lib/entitlements";
+import { ProLock } from "@/components/plan/PlanUi";
 import "./runs.css";
 
 type Status = "scheduled" | "processing" | "completed" | "failed" | "cancelled" | "skipped";
@@ -88,7 +90,7 @@ export default function AutomationRunsPage() {
       const [today, completed, skipped, failed, pending] = await Promise.all([
         base().gte("executed_at", start).lt("executed_at", end),
         base().eq("status", "completed").gte("executed_at", start).lt("executed_at", end),
-        base().eq("status", "skipped").gte("executed_at", start).lt("executed_at", end),
+        base().eq("status", "skipped").or(`result->>reason.is.null,result->>reason.neq.${proAccessReason}`).gte("executed_at", start).lt("executed_at", end),
         base().eq("status", "failed").gte("executed_at", start).lt("executed_at", end),
         base().in("status", ["scheduled","processing"])
       ]);
@@ -139,6 +141,7 @@ export default function AutomationRunsPage() {
   return <CrmShell context={context} breadcrumb="Historial de actividad">
     <PageHeader title="Historial de actividad" description="Acá podés ver qué hizo Bellis automáticamente y si algo necesita tu atención."><Link className="crm-btn" href="/automatizaciones"><ArrowLeft size={15}/> Automatizaciones</Link></PageHeader>
     {error && <p className="live-error" role="alert">{error}</p>}{notice && <p className="live-success" role="status">{notice}</p>}
+    {context && !hasCapability(context.access, "automations") && <ProLock title={proLockCopy.automations.title} text="El historial sigue acá. Mientras tu espacio no tenga Bellis Pro, las automatizaciones no se ejecutan ni se pueden reintentar." action={<Link className="plan-link" href="/pro">Conocer Bellis Pro <ArrowRight size={15}/></Link>}/>}
     <KpiStrip items={[
       { label: "Actividad de hoy", value: summary.today, icon: ListChecks, tone: "petrol" },
       { label: "Hechas hoy", value: summary.completed, icon: Check, tone: "sage" },
@@ -152,14 +155,14 @@ export default function AutomationRunsPage() {
       {!loading && total > pageSize && <div className="auto-pagination"><button className="crm-btn" disabled={page === 0} onClick={() => setPage((value) => value - 1)}>Anterior</button><span>{page * pageSize + 1}–{Math.min((page + 1) * pageSize,total)} de {total}</span><button className="crm-btn" disabled={(page + 1) * pageSize >= total} onClick={() => setPage((value) => value + 1)}>Siguiente</button></div>}
     </section>
     {selected && <ActivityDetail id={`ejecucion-${selected.id}`} status={selected.status} patient={selectedPatientName || patientNames.get(selected.patient_id) || ""} rule={ruleNames.get(selected.automation_rule_id)} ruleEnabled={selectedRule?.enabled} reason={selected.result?.reason} onClose={() => setSelected(null)} facts={[
-        { label: "Estado", value: <RunStatusTag status={selected.status}/> },
+        { label: "Estado", value: <RunStatusTag status={selected.status} reason={selected.result?.reason}/> },
         { label: "Automatización", value: ruleNames.get(selected.automation_rule_id) ?? "—" },
         { label: "Prevista para", value: stamp(selected.scheduled_for) },
         { label: "Realizada", value: stamp(selected.executed_at) },
         { label: "Qué hace", value: "Crear seguimiento" },
         { label: "Intentos", value: selected.attempt_count },
       ]}>
-      {selected.status === "failed" && selectedRule?.enabled && <button className="demo-primary" disabled={saving} onClick={() => void retry(selected)}>Intentar de nuevo</button>}
+      {selected.status === "failed" && selectedRule?.enabled && hasCapability(context?.access, "automations") && <button className="demo-primary" disabled={saving} onClick={() => void retry(selected)}>Intentar de nuevo</button>}
       {selected.follow_up_id && <Link className="crm-btn" href={`/pacientes/${selected.patient_id}#seguimiento-${selected.follow_up_id}`}>Ver seguimiento <ArrowRight size={15}/></Link>}
       <Link className="crm-btn" href={`/pacientes/${selected.patient_id}`}>Ver paciente <ArrowRight size={15}/></Link>
     </ActivityDetail>}

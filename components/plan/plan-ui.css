@@ -1,0 +1,296 @@
+/* The plan in the panel: trial notice, locked states and the Bellis Pro page. Calm on purpose: neutral surfaces,
+   no alarm colours. Text of 14px and controls of 44px, as in the rest of the manual flows. */
+.plan-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--foreground);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.plan-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.plan-actions :is(a, button) {
+  min-height: 44px;
+  font-size: 14px;
+}
+.plan-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--primary);
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+.plan-link:hover {
+  background: var(--surface-muted);
+}
+.plan-quiet {
+  padding: 10px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.plan-notice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px 14px;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--sage-soft);
+  border-radius: var(--radius-lg);
+  background: var(--sage-subtle);
+}
+.plan-notice-trial_ended,
+.plan-notice-paused {
+  border-color: var(--border);
+  background: var(--surface);
+}
+.plan-notice-icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--sage);
+}
+.plan-notice-trial_ended .plan-notice-icon,
+.plan-notice-paused .plan-notice-icon {
+  background: var(--surface-muted);
+  color: var(--muted-foreground);
+}
+.plan-notice b {
+  display: block;
+  font-size: 15px;
+  color: var(--foreground);
+}
+.plan-notice p {
+  margin: 2px 0 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.plan-lock {
+  margin-bottom: 16px;
+  padding: 16px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+.plan-lock-compact {
+  margin: 12px 0 0;
+  padding: 12px 14px;
+}
+.plan-lock-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+}
+.plan-lock h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+.plan-lock p {
+  margin: 6px 0 12px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+.plan-lock-compact p {
+  margin-bottom: 10px;
+}
+
+.plan-page {
+  display: grid;
+  gap: 16px;
+  max-width: 720px;
+}
+.plan-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--sage-soft);
+  border-radius: var(--radius-lg);
+  background: var(--sage-subtle);
+  color: var(--sage);
+}
+.plan-status b {
+  display: block;
+  font-size: 15px;
+  color: var(--foreground);
+}
+.plan-status p {
+  margin: 2px 0 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+.plan-hero {
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+.plan-hero h2 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -.01em;
+  color: var(--foreground);
+}
+.plan-price {
+  margin: 4px 0 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+.plan-claim {
+  margin: 10px 0 0;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+.plan-benefits {
+  display: grid;
+  gap: 12px;
+  margin: 18px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.plan-benefits li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  color: var(--sage);
+}
+.plan-benefits b {
+  display: block;
+  font-size: 15px;
+  color: var(--foreground);
+}
+.plan-benefits span {
+  display: block;
+  margin-top: 2px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+.plan-free,
+.plan-muted {
+  margin: 16px 0 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+.plan-request {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+.plan-request .plan-muted {
+  margin-top: 10px;
+}
+.plan-request .live-error {
+  margin: 12px 0 0;
+}
+.plan-page .plan-request .demo-primary.plan-cta {
+  min-height: 48px;
+  padding: 12px 22px;
+  font-size: 15px;
+}
+.plan-sent {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--foreground);
+}
+.plan-sent svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--sage);
+}
+/* Mercado Pago in "Cobros y pagos" when the plan does not include it. */
+.pay-option-locked {
+  opacity: 1;
+}
+.pay-option-locked input {
+  cursor: not-allowed;
+}
+.pay-saved {
+  margin: 0 0 10px;
+  font-size: 14px;
+  color: var(--foreground);
+}
+@media (max-width: 700px) {
+  .plan-notice {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .plan-notice .plan-actions {
+    grid-column: 1 / -1;
+  }
+  .plan-actions > :is(a, button) {
+    flex: 1 1 160px;
+    justify-content: center;
+    text-align: center;
+  }
+  .plan-hero {
+    padding: 16px;
+  }
+  .plan-page .plan-request .demo-primary.plan-cta {
+    width: 100%;
+  }
+}
+.pay-option span.plan-badge {
+  display: inline-flex;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+/* The plan when there is nothing new to say (Bellis Free, Bellis Pro): one quiet line. */
+.plan-notice-quiet {
+  padding: 10px 14px;
+  border-color: var(--border);
+  background: var(--surface);
+}
+.plan-notice-quiet .plan-notice-icon {
+  width: 30px;
+  height: 30px;
+  background: var(--surface-muted);
+  color: var(--muted-foreground);
+}
+.plan-notice-pro .plan-notice-icon {
+  color: var(--sage);
+}
+.plan-notice-quiet b {
+  font-size: 14px;
+}
+.pay-disconnect-locked {
+  margin-top: 12px;
+}

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Bell, CalendarDays, Clock3, FileText, LayoutDashboard, ListChecks, Settings2, Users } from "lucide-react";
+import { Bell, CalendarDays, Clock3, FileText, LayoutDashboard, ListChecks, Settings2, Sparkles, Users } from "lucide-react";
 
 /**
  * Single source of truth for the professional navigation. Dashboard, CrmShell
@@ -17,6 +17,7 @@ export const appNav = [
   { key: "Automatizaciones", icon: Settings2, href: "/automatizaciones" },
   { key: "Notificaciones", icon: Bell, href: "/notificaciones" },
   { key: "Formularios", icon: FileText, href: "/dashboard/questionnaires" },
+  { key: "Bellis Pro", icon: Sparkles, href: "/pro" },
 ] as const;
 
 export type NavKey = (typeof appNav)[number]["key"];
@@ -44,6 +45,7 @@ export function navKeyForPath(pathname: string): NavKey {
   if (pathname.startsWith("/automatizaciones")) return "Automatizaciones";
   if (pathname.startsWith("/notificaciones")) return "Notificaciones";
   if (pathname.startsWith("/dashboard/questionnaires")) return "Formularios";
+  if (pathname.startsWith("/pro")) return "Bellis Pro";
   return "Resumen";
 }
 

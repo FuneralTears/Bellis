@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, ArrowRight, Bell, Check, CheckCheck, CircleAlert, CircleCheck, Clock3, History, ListChecks, Minus, Pause, Settings2, ShieldCheck } from "lucide-react";
 import { KpiStrip, PageHeader } from "@/components/crm/CrmUi";
 import { ActivityDetail, ActivityList, DetailList, NotificationGroups, NotificationItem, RuleRow, RunStatusTag, ruleSentence, ruleStateLabel, runExplanation, runStatusLabels } from "@/components/automation/AutomationUi";
@@ -42,7 +42,7 @@ export function DemoBell({ state, navigate }: { state: State; navigate: Navigate
 }
 
 /** Showroom mirror of /automatizaciones and /automatizaciones/ejecuciones. Nothing runs for real. */
-export function DemoAutomations({ state, patient }: { state: State; patient: (name: string) => void }) {
+export function DemoAutomations({ state, patient, lock }: { state: State; patient: (name: string) => void; /** The example plan does not include automations: shown on top, and everything is for reading. */ lock?: ReactNode }) {
   const { view, runId } = state.automation;
   const setView = (next: "rules" | "runs") => state.setAutomation({ view: next, runId: null });
   const setRunId = (id: string | null) => state.setAutomation({ view: "runs", runId: id });
@@ -86,7 +86,7 @@ export function DemoAutomations({ state, patient }: { state: State; patient: (na
           { label: "Qué hace", value: "Crear seguimiento" },
           { label: "Intentos", value: run.attempts },
         ]}>
-        {run.status === "failed" && state.rules.find((rule) => rule.id === run.ruleId)?.enabled && <button className="demo-primary" onClick={() => { setRuns(runs.map((item) => item.id === run.id ? { ...item, status: "scheduled", attempts: 0, executed: "—", result: "—", detail: "Pendiente." } : item)); setNotice("Listo. En la demo queda pendiente, como si Bellis fuera a intentarlo de nuevo."); }}>Intentar de nuevo</button>}
+        {!lock && run.status === "failed" && state.rules.find((rule) => rule.id === run.ruleId)?.enabled && <button className="demo-primary" onClick={() => { setRuns(runs.map((item) => item.id === run.id ? { ...item, status: "scheduled", attempts: 0, executed: "—", result: "—", detail: "Pendiente." } : item)); setNotice("Listo. En la demo queda pendiente, como si Bellis fuera a intentarlo de nuevo."); }}>Intentar de nuevo</button>}
         {run.status === "completed" && <button className="crm-btn" onClick={() => patient(run.patient)}>Ver seguimiento <ArrowRight size={15}/></button>}
         <button className="crm-btn" onClick={() => patient(run.patient)}>Ver paciente <ArrowRight size={15}/></button>
       </ActivityDetail>}
@@ -99,6 +99,7 @@ export function DemoAutomations({ state, patient }: { state: State; patient: (na
   return <>
     <PageHeader title="Automatizaciones" description="Bellis puede hacer algunas tareas por vos para que no tengas que revisar paciente por paciente."><button className="crm-btn" onClick={() => { setView("runs"); setStatus("all"); setNotice(""); }}><History size={15}/> Ver actividad</button></PageHeader>
     {notice && <p className="live-success" role="status">{notice}</p>}
+    {lock}
     <KpiStrip items={[
       { label: "Automatizaciones", value: state.rules.length, icon: Settings2, tone: "petrol" },
       { label: "Funcionando", value: active, icon: Check, tone: "sage" },
@@ -108,8 +109,8 @@ export function DemoAutomations({ state, patient }: { state: State; patient: (na
     {failed > 0 && <div className="auto-alert"><CircleAlert size={16}/><strong>{failed === 1 ? "Hay 1 tarea automática que necesita tu revisión." : `Hay ${failed} tareas automáticas que necesitan tu revisión.`}</strong><button className="crm-link" onClick={() => { setView("runs"); setStatus("failed"); }}>Ver actividad <ArrowRight size={15}/></button></div>}
     <p className="auto-note"><ShieldCheck size={15}/> <span>Cuando una automatización está activa, Bellis revisa esto automáticamente y te deja el seguimiento listo. No envía mensajes a tus pacientes ni toma decisiones clínicas. En la demo, los cambios duran durante la visita.</span></p>
     <div className="auto-rules">{state.rules.map((rule) => <RuleRow key={rule.id} kind={rule.kind} name={rule.name} description={rule.description} enabled={rule.enabled} wait={`${rule.delay} ${rule.unit}`} action={`Crea un seguimiento con prioridad ${priorityLabels[rule.priority].toLowerCase()}`}
-      toggle={<Switch checked={rule.enabled} aria-label={`${rule.enabled ? "Pausar" : "Activar"} ${rule.name}`} onCheckedChange={(enabled) => state.toggle(rule.id, enabled)}/>}>
-      <button className="crm-link" onClick={() => { setSelectedId(rule.id); setDraft(null); }}>Ver detalle</button><button className="crm-link" onClick={() => { setSelectedId(rule.id); setDraft({ ...rule }); }}>Configurar</button>
+      toggle={<Switch checked={rule.enabled} disabled={!!lock} aria-label={`${rule.enabled ? "Pausar" : "Activar"} ${rule.name}`} onCheckedChange={(enabled) => state.toggle(rule.id, enabled)}/>}>
+      <button className="crm-link" onClick={() => { setSelectedId(rule.id); setDraft(null); }}>Ver detalle</button>{!lock && <button className="crm-link" onClick={() => { setSelectedId(rule.id); setDraft({ ...rule }); }}>Configurar</button>}
     </RuleRow>)}</div>
     {selected && <section className="crm-card" style={{ marginTop: 12 }}><div className="crm-card-head"><div><h2>{ruleSentence(selected.kind, `${selected.delay} ${selected.unit}`)}</h2><p>{selected.name} · {ruleStateLabel(selected.enabled)} · Automatización de ejemplo</p></div><button className="crm-btn" onClick={() => { setSelectedId(null); setDraft(null); }}>Cerrar</button></div>
       <DetailList columns={4} items={[

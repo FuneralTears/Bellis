@@ -13,6 +13,7 @@ import { isLatePayment, latePaymentTag } from "@/lib/late-payments";
 import { canCancelAppointment, canRecordPayment, chargeLabel, describeCancelError, describePaymentError, paymentLabel, type CancelArgs, type PaymentMethod } from "@/lib/manual-appointment";
 import { CancelManualAppointment } from "@/components/agenda/CancelManualAppointment";
 import { friendlyError } from "@/lib/friendly-error";
+import { hasCapability } from "@/lib/entitlements";
 import { RecordOfflinePayment } from "@/components/payments/RecordOfflinePayment";
 import { FollowUpCard, OpportunityRow, ProfileHeader, StatusTag, Tabs, Tag, Timeline, dateOnly, type Tone } from "@/components/crm/CrmUi";
 import { PatientNotes, type NoteDraft } from "@/components/crm/PatientNotes";
@@ -132,7 +133,7 @@ export default function PatientDetailPage() {
   }) : [], [patient, context, details, serviceById, professionalById]);
   const today = context ? todayInTimezone(context.market.timezone) : "";
   const pendingFollowUps = details.followUps.filter((item) => item.status === "pending");
-  const opportunities = patient ? detectOpportunities(patient) : [];
+  const opportunities = patient ? detectOpportunities(patient, hasCapability(context?.access, "smart_followups")) : [];
   const nextFollowUp = pendingFollowUps[0];
   const whatsappDigits = patient?.phone?.replace(/\D/g, "") ?? "";
   const whatsappUrl = whatsappDigits.startsWith("54") && whatsappDigits.length >= 12 && whatsappDigits.length <= 14

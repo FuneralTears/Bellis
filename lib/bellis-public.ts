@@ -15,6 +15,8 @@ export type PublicProfile = {
   questionnaires: Record<string, Questionnaire>;
   market: { timezone: string; currency: string; locale: string };
   canCheckout: boolean;
+  /** Whether a patient can book online here today, and what to tell them when not. The server decides both. */
+  bookingAvailable?: boolean; bookingUnavailableMessage?: string | null;
   paymentFlow: { guidance: string; actionLabel: string; confirmationLabel: string };
 };
 

@@ -14,7 +14,7 @@ export function PatientFilters({ query, onQuery, sort, onSort, filters, onFilter
   sort: string; onSort: (value: string) => void;
   filters: PatientFilterState; onFilters: (next: PatientFilterState) => void;
   /** The specific situations a patient can be filtered by ("Pagos pendientes"…). */
-  situations: { value: string; label: string }[];
+  situations: { value: string; label: string; /** Part of Bellis Pro: shown, not selectable. */ locked?: boolean }[];
 }) {
   const [open, setOpen] = useState(false);
   const id = useId();
@@ -46,7 +46,7 @@ export function PatientFilters({ query, onQuery, sort, onSort, filters, onFilter
       <div className="crm-filter-group">
         <label htmlFor={`${id}-situation`}>Situación puntual</label>
         <select id={`${id}-situation`} className="crm-filter-select" value={situationOf(filters)} onChange={(event) => onFilters(applySituation(filters, event.target.value))}>
-          <option value="all">Cualquiera</option>{situations.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+          <option value="all">Cualquiera</option>{situations.map((item) => <option key={item.value} value={item.value} disabled={item.locked}>{item.label}{item.locked ? " · Bellis Pro" : ""}</option>)}
         </select>
       </div>
     </div>}

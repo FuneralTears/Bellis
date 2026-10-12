@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import {
   ArrowRight,
   Bell,
@@ -18,6 +18,7 @@ import { followUpBucket, priorityLabels } from "../pacientes/timeline";
 import {
   detectOpportunities,
   hasAttention,
+  isSmartOpportunity,
   opportunityFilters,
 } from "../pacientes/opportunities";
 import {
@@ -106,7 +107,16 @@ export function DemoDashboard({
   onAppointment,
   agenda,
   navigate,
+  top,
+  automationsLock,
+  pendingFooter,
 }: {
+  /** Inside the pending panel: what the example plan leaves out of it. */
+  pendingFooter?: ReactNode;
+  /** The notices of the example plan, above the numbers. */
+  top?: ReactNode;
+  /** Shown in place of the automations summary when the example plan does not include them. */
+  automationsLock?: ReactNode;
   state: State;
   appointments: {
     time: string;
@@ -135,6 +145,7 @@ export function DemoDashboard({
           <CalendarDays size={16} />3 de octubre · Demo
         </span>
       </div>
+      {top}
       <div className="metric-grid">
         {[
           {
@@ -261,10 +272,11 @@ export function DemoDashboard({
             {state.notifications.filter((item) => !item.read).length}{" "}
             notificaciones sin leer <ArrowRight size={15} />
           </button>
+          {pendingFooter}
         </section>
       </div>
       <div className="dashboard-secondary-grid">
-        <section className="demo-panel">
+        {automationsLock ?? <section className="demo-panel">
           <div className="panel-head">
             <h2>Automatizaciones</h2>
             <button onClick={() => navigate("Automatizaciones")}>
@@ -295,7 +307,7 @@ export function DemoDashboard({
               <span>Pendientes</span>
             </div>
           </div>
-        </section>
+        </section>}
         <section className="demo-panel quick-panel">
           <div className="panel-head">
             <h2>Tu página de turnos</h2>
@@ -318,7 +330,10 @@ export function DemoFollowUps({
   state,
   patient,
   automation,
+  smart,
 }: {
+  /** Whether the example plan includes the suggestions of Bellis Pro. */
+  smart: boolean;
   state: State;
   patient: (name: string) => void;
   automation: () => void;
@@ -351,7 +366,7 @@ export function DemoFollowUps({
   const attention = patients.filter(hasAttention).length;
   const signals = patients
     .flatMap((item) =>
-      detectOpportunities(item)
+      detectOpportunities(item, smart)
         .filter(
           (found) =>
             signal === "all" ||
@@ -429,8 +444,8 @@ export function DemoFollowUps({
             Mostrar
             <select value={signal} onChange={(e) => setSignal(e.target.value)}>
               {opportunityFilters.map((item) => (
-                <option key={item.kind} value={item.kind}>
-                  {item.label}
+                <option key={item.kind} value={item.kind} disabled={!smart && isSmartOpportunity(item.kind)}>
+                  {item.label}{!smart && isSmartOpportunity(item.kind) ? " · Bellis Pro" : ""}
                 </option>
               ))}
             </select>

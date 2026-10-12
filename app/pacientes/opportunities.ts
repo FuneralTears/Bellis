@@ -18,6 +18,13 @@ export type OpportunityOverview = PatientOverview & {
 export type OpportunityKind = "pending_payment" | "overdue_follow_up" | "first_without_next" | "inactive" | "without_next" | "upcoming" | "new" | "recurrent";
 export type Opportunity = { kind: OpportunityKind; title: string; reason: string; level: "attention" | "context"; priority: number };
 
+/**
+ * Suggestions rather than plain facts: they read the patient's history and propose who to contact again. They
+ * are part of Bellis Pro (capability smart_followups). Everything else is a fact of the practice and is always shown.
+ */
+export const smartOpportunityKinds: readonly OpportunityKind[] = ["first_without_next", "inactive", "recurrent"];
+export const isSmartOpportunity = (kind: string) => (smartOpportunityKinds as readonly string[]).includes(kind);
+
 export const opportunityFilters: { kind: OpportunityKind | "all" | "attention"; label: string; column?: keyof OpportunityOverview }[] = [
   { kind: "all", label: "Todos" },
   { kind: "attention", label: "Necesitan atención" },
@@ -31,7 +38,13 @@ export const opportunityFilters: { kind: OpportunityKind | "all" | "attention"; 
   { kind: "recurrent", label: "Recurrentes", column: "is_recurrent_patient" },
 ];
 
-export function detectOpportunities(patient: OpportunityOverview): Opportunity[] {
+/**
+ * The signals of a patient. `smart` is whether the workspace has the suggestions of Bellis Pro
+ * (hasCapability(access, "smart_followups")): without it only facts come back, and "Sin próximo turno" covers the
+ * patients the suggestions would have described in more detail.
+ */
+export function detectOpportunities(source: OpportunityOverview, smart: boolean): Opportunity[] {
+  const patient = smart ? source : { ...source, first_completed_without_next: false, inactive_after_care: false, is_recurrent_patient: false };
   const result: Opportunity[] = [];
   if (patient.has_pending_payment) result.push({ kind: "pending_payment", title: "Pago pendiente", reason: `${patient.pending_payment_count} ${patient.pending_payment_count === 1 ? "pago pendiente" : "pagos pendientes"} de cobro o verificación.`, level: "attention", priority: 0 });
   if (patient.has_overdue_follow_up) result.push({ kind: "overdue_follow_up", title: "Seguimiento vencido", reason: `${patient.overdue_follow_up_count} ${patient.overdue_follow_up_count === 1 ? "acción pendiente venció" : "acciones pendientes vencieron"}.`, level: "attention", priority: 1 });

@@ -3,11 +3,13 @@ import Link from "next/link";
 import AppTopbar from "@/components/layout/AppTopbar";
 import AppMobileNav from "@/components/layout/AppMobileNav";
 import { appNav, navItems, profileTabs, type NavKey, type ProfileSectionTab } from "@/components/layout/AppNav";
-import { Tabs } from "@/components/crm/CrmUi";
+import { PageHeader, Tabs } from "@/components/crm/CrmUi";
+import { BookingsPausedNotice, PlanNoticeCard, ProLock, ProOverview } from "@/components/plan/PlanUi";
+import { bookingsPaused, bookingsPausedCopy, exampleAccess, hasCapability, proLockCopy, type Tier } from "@/lib/entitlements";
 import BookingPreferences, { type BookingPreferencesValue } from "@/components/agenda/BookingPreferences";
 import { DemoDashboard, DemoFollowUps, useShowroom } from "./showroom";
 import { DemoAutomations, DemoBell, DemoNotifications } from "./automation-views";
-import { demoServices as initialServices, demoAppointments as initialAppointments, demoPatients as patients } from "./showroom-data";
+import { demoServices as initialServices, demoAppointments as initialAppointments, demoPatients as patients, demoToday } from "./showroom-data";
 import { DemoAgenda } from "./agenda";
 import { DemoPatients } from "./patients";
 import { demoLatePayments, demoPatientId, demoPatients as crmPatients, demoServiceNames } from "./crm-data";
@@ -22,7 +24,7 @@ import "../automatizaciones/automations.css";
 import "../notificaciones/notifications.css";
 import "./showroom.css";
 import { useState } from "react";
-import { FileText, Clock3, ArrowUpRight, Plus, Check, ExternalLink } from "lucide-react";
+import { FileText, Clock3, ArrowRight, ArrowUpRight, Plus, Check, ExternalLink } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { QuestionnaireBuilder } from "./questionnaire-builder";
 import { PreconsultationSummary } from "./preconsultation-summary";
@@ -38,8 +40,14 @@ const demoConnections: { label: string; connection: MercadoPagoConnection }[] = 
 ];
 const initialPayments: DemoPayments = { method: "external_link", url: "", connection: { status: "disconnected" }, connecting: false, notice: null, pending: [{ id: "demo-1", patient: "Lucía Fernández", detail: "Consulta psicológica · $25.000 ARS" }] };
 
+const demoPlans: { tier: Tier; label: string }[] = [{ tier: "pro_trial", label: "Prueba de Bellis Pro" }, { tier: "free", label: "Bellis Free" }, { tier: "pro", label: "Bellis Pro" }];
+
 export default function Demo(){
   const showroom = useShowroom();
+  // The plan of the example workspace. Mock access, shaped as the server answers it; nothing is asked or charged.
+  const [plan,setPlan]=useState<Tier>("pro_trial"); const [asked,setAsked]=useState(false);
+  const access = { ...exampleAccess(plan, demoToday), upgrade_requested: asked };
+  const smart = hasCapability(access, "smart_followups");
   const [section,setSection]=useState<Section>("Resumen"); const [services,setServices]=useState(initialServices); const [appointments,setAppointments]=useState(initialAppointments); const [selected,setSelected]=useState<number|null>(null); const [profile,setProfile]=useState<string|null>(null); const [fromFollowUps,setFromFollowUps]=useState(false); const [profileTab,setProfileTab]=useState<ProfileSectionTab>("perfil"); const [newService,setNewService]=useState({name:"",price:"",duration:"60",mode:"Online"}); const [created,setCreated]=useState(false); const [days,setDays]=useState([true,true,true,true,true,false,false]); const [saved,setSaved]=useState(false);
   // Disponibilidad: same fields as the product, kept in local state only.
   const [bookingPrefs,setBookingPrefs]=useState<BookingPreferencesValue>({slotInterval:30,maxPerDay:null}); const [prefsSaved,setPrefsSaved]=useState(false);
@@ -50,14 +58,22 @@ export default function Demo(){
   const showPatient = (name: string, origin?: "Seguimientos") => { setProfile(demoPatientId(name)); setFromFollowUps(origin === "Seguimientos"); setSection("Pacientes"); };
   const go = (name: Section) => { setProfile(null); setFromFollowUps(false); showroom.setAutomation({ view: "rules", runId: null }); setSection(name); window.scrollTo(0, 0); };
   const local = Object.fromEntries(appNav.map(({ key }) => [key, () => go(key)])) as Record<NavKey, () => void>;
+  const proButton = <button type="button" className="plan-link" onClick={() => go("Bellis Pro")}>Conocer Bellis Pro <ArrowRight size={15}/></button>;
   const breadcrumb = section === "Automatizaciones" && showroom.automation.view === "runs" ? "Historial de actividad" : section;
   return <div className="demo-shell bellis-phase-a bellis-showroom"><aside className="demo-sidebar"><Link className="brand" href="/"><BellisLogo /></Link><div className="workspace-label">ESPACIO DE TRABAJO</div><div className="workspace-card"><span className="workspace-avatar">AL</span><span><b>Dra. Ana López</b><small>Psicología clínica</small></span></div><nav aria-label="Panel profesional">{navItems({ active: section, variant: "sidebar", local })}</nav><div className="demo-side-bottom"><a href="/profesional/ana-lopez"><ExternalLink size={16}/> Ver página pública</a><Link href="/demo/landing">Ver landing demo <ArrowUpRight size={16}/></Link><Link href="/demo/auth">Ver acceso demo <ArrowUpRight size={16}/></Link><Link href="/demo/onboarding">Ver onboarding demo <ArrowUpRight size={16}/></Link><span>Vista de demostración</span></div></aside><div className="demo-content"><AppTopbar breadcrumb={breadcrumb}><DemoBell state={showroom} navigate={setSection}/><a className="demo-top-link" href="/profesional/ana-lopez">Ver página pública <ArrowUpRight size={16}/></a><button className="app-user" aria-label="Ver perfil de demostración" onClick={() => setSection("Perfil")}><span className="app-user-avatar">A</span><span className="app-user-name">Ana</span></button></AppTopbar><AppMobileNav activeKey={section}>{navItems({ active: section, variant: "mobile", local })}<a href="/profesional/ana-lopez">Página pública <ArrowUpRight size={16}/></a><Link href="/demo/landing">Ver landing demo <ArrowUpRight size={16}/></Link><Link href="/demo/auth">Ver acceso demo <ArrowUpRight size={16}/></Link><Link href="/demo/onboarding">Ver onboarding demo <ArrowUpRight size={16}/></Link></AppMobileNav><main className={section === "Resumen" ? "demo-main bellis-dashboard" : section === "Agenda" ? "demo-main bellis-agenda" : "demo-main crm-main"}><div className="demo-notice"><span>Demo interactiva</span> Datos de ejemplo. Los cambios duran durante esta visita.</div>
-      {section === "Resumen" && <DemoDashboard state={showroom} appointments={appointments} onAppointment={setSelected} agenda={() => setSection("Agenda")} navigate={setSection}/>}
-      {section === "Seguimientos" && <DemoFollowUps state={showroom} patient={(name) => showPatient(name, "Seguimientos")} automation={() => setSection("Automatizaciones")}/>}
-      {section === "Automatizaciones" && <DemoAutomations state={showroom} patient={showPatient}/>}
+      <div className="pay-demo-bar" role="group" aria-label="Demo: plan del espacio"><span>Demo: ver el plan como</span>{demoPlans.map((item) => <button key={item.tier} type="button" aria-pressed={plan === item.tier} onClick={() => setPlan(item.tier)}>{item.label}</button>)}</div>
+      {section === "Resumen" && <DemoDashboard state={showroom} appointments={appointments} onAppointment={setSelected} agenda={() => setSection("Agenda")} navigate={setSection}
+        top={<><PlanNoticeCard key={plan} access={access} usesMercadoPago={pay.method === "mercado_pago_ar"} action={proButton}/>
+          {bookingsPaused(access, pay.method) && <BookingsPausedNotice useLink={<button type="button" className="plan-link" onClick={() => { go("Perfil"); setProfileTab("cobros"); }}>{bookingsPausedCopy.useLink}</button>} learn={proButton}/>}</>}
+        pendingFooter={smart ? undefined : <ProLock compact title={proLockCopy.smart_followups.title} text={proLockCopy.smart_followups.text}/>}
+        automationsLock={hasCapability(access, "automations") ? undefined : <ProLock title={proLockCopy.automations.title} text={proLockCopy.automations.text}/>}/>}
+      {section === "Bellis Pro" && <><PageHeader title="Bellis Pro" description="Bellis es gratis para organizarte. Pro es para automatizar y entender mejor tu práctica."/>
+        <ProOverview key={plan} access={access} canRequest onRequest={async () => { const created = !asked; setAsked(true); return { created }; }}/></>}
+      {section === "Seguimientos" && <DemoFollowUps smart={smart} state={showroom} patient={(name) => showPatient(name, "Seguimientos")} automation={() => setSection("Automatizaciones")}/>}
+      {section === "Automatizaciones" && <DemoAutomations state={showroom} patient={showPatient} lock={hasCapability(access, "automations") ? undefined : <ProLock title={proLockCopy.automations.title} text={`${proLockCopy.automations.text} Tus automatizaciones y su historial siguen acá; mientras tanto no se ejecutan.`} action={proButton}/>}/>}
       {section === "Notificaciones" && <DemoNotifications state={showroom} navigate={setSection}/>}
       {section === "Agenda" && <DemoAgenda appointments={appointments} services={services}/>}
-      {section === "Pacientes" && <DemoPatients state={showroom} profile={profile} setProfile={(id) => { setFromFollowUps(false); setProfile(id); }} fromFollowUps={fromFollowUps} followUps={() => { setProfile(null); setFromFollowUps(false); setSection("Seguimientos"); }} automation={() => setSection("Automatizaciones")}/>}
+      {section === "Pacientes" && <DemoPatients smart={smart} state={showroom} profile={profile} setProfile={(id) => { setFromFollowUps(false); setProfile(id); }} fromFollowUps={fromFollowUps} followUps={() => { setProfile(null); setFromFollowUps(false); setSection("Seguimientos"); }} automation={() => setSection("Automatizaciones")}/>}
       {section==="Formularios"&&<QuestionnaireBuilder/>}{section==="Servicios"&&<><div className="demo-title-row"><div><p className="demo-date">TU OFERTA</p><h1>Mis servicios</h1><p>Organizá las sesiones que pueden reservar tus pacientes.</p></div><button className="demo-primary" onClick={()=>setCreated(true)}><Plus size={17}/> Nuevo servicio</button></div><div className="service-list">{services.map((s,i)=><article className="demo-panel service-row" key={s.name}><div className="service-icon"><FileText size={22}/></div><div><h3>{s.name}</h3><p>{s.duration} min · {s.mode}</p></div><strong>{formatMoney(s.price)}</strong><button className={s.active?"status paid":"status muted"} onClick={()=>setServices(services.map((v,j)=>i===j?{...v,active:!v.active}:v))}>{s.active?"Activo":"Inactivo"}</button></article>)}</div></>}
       {section==="Disponibilidad"&&<><div className="demo-title-row"><div><p className="demo-date">TU TIEMPO</p><h1>Disponibilidad</h1><p>Definí los días en que aceptás turnos.</p></div></div><div className="demo-panel settings-panel"><h2>Horario semanal</h2>{["Lunes","Martes","Miércoles","Jueves","Viernes","Sábado","Domingo"].map((d,i)=><label className="day-row" key={d}><input type="checkbox" checked={days[i]} onChange={()=>setDays(days.map((x,j)=>j===i?!x:x))}/><b>{d}</b><span>{days[i]?i===2?"09:00 – 14:00":i===4?"09:00 – 16:00":"09:00 – 18:00":"No disponible"}</span></label>)}<div className="setting-summary"><Clock3 size={18}/> Anticipación mínima: 24 horas · Tiempo entre turnos: 15 minutos</div></div><BookingPreferences className="demo-panel settings-panel" value={bookingPrefs} onChange={(next)=>{setBookingPrefs(next);setPrefsSaved(false)}} onSave={()=>setPrefsSaved(true)} saveLabel="Guardar en la demo">{prefsSaved&&<p className="success-line" role="status"><Check size={17}/> Cada {bookingPrefs.slotInterval} minutos · {bookingPrefs.maxPerDay?`hasta ${bookingPrefs.maxPerDay} ${bookingPrefs.maxPerDay===1?"turno":"turnos"} por día`:"sin límite diario"}. Visible durante esta sesión.</p>}</BookingPreferences></>}
       {section==="Perfil"&&<><div className="demo-title-row"><div><p className="demo-date">TU ESPACIO</p><h1>Perfil</h1><p>Datos generales de tu perfil profesional.</p></div></div><Tabs label="Secciones del perfil" active={profileTab} onChange={(tab) => { setProfileTab(tab); setSaved(false); }} tabs={[...profileTabs]}/>
@@ -65,7 +81,7 @@ export default function Demo(){
         {profileTab === "pagina" && <div role="tabpanel" aria-labelledby="crm-tab-pagina"><div className="demo-panel settings-panel"><h2>Compartí tu link</h2><p className="muted-copy">Página de ejemplo para que tus pacientes reserven.</p><a className="live-link" href="/profesional/ana-lopez">/profesional/ana-lopez</a><div className="setting-summary"><Clock3 size={18}/> Zona horaria: America/Argentina/Buenos_Aires · Moneda: ARS</div></div></div>}
         {profileTab === "cobros" && <div role="tabpanel" aria-labelledby="crm-tab-cobros">
           <div className="pay-demo-bar" role="group" aria-label="Demo: estado de Mercado Pago"><span>Demo: ver Mercado Pago como</span>{demoConnections.map((item) => <button key={item.label} type="button" aria-pressed={pay.connection.status === item.connection.status} onClick={() => setPay({ ...pay, connection: item.connection, connecting: false, notice: null, method: item.connection.status === "connected" ? pay.method : "external_link" })}>{item.label}</button>)}</div>
-          <PaymentSettings key={pay.connection.status} method={pay.method} paymentUrl={pay.url} hasServiceLinks={false} connection={pay.connection} canManage notice={pay.notice} connecting={pay.connecting} busy={false} pendingMercadoPago={2}
+          <PaymentSettings key={`${pay.connection.status}:${plan}`} proLocked={!hasCapability(access, "mercado_pago")} proAction={proButton} method={pay.method} paymentUrl={pay.url} hasServiceLinks={false} connection={pay.connection} canManage notice={pay.notice} connecting={pay.connecting} busy={false} pendingMercadoPago={2}
             formatDate={() => "2 de octubre de 2026"}
             onConnect={() => { setPay((current) => ({ ...current, connecting: true, notice: null })); window.setTimeout(() => setPay((current) => ({ ...current, connecting: false, connection: demoConnections[1].connection, notice: mercadoPagoReturnNotice("connected") })), 1200); }}
             onDisconnect={() => setPay({ ...pay, connection: { status: "disconnected" }, method: "external_link", notice: { tone: "success", text: pay.method === "mercado_pago_ar" && pay.url ? "Mercado Pago quedó desconectado. Tus pacientes vuelven a pagar con tu link de pago." : "Mercado Pago quedó desconectado." } })}

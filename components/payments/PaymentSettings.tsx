@@ -2,6 +2,8 @@
 
 import { useId, useRef, useState, type ReactNode } from "react";
 import { AlertCircle, Check, CircleCheck, Info } from "lucide-react";
+import { ProBadge } from "@/components/plan/PlanUi";
+import { bookingsPausedCopy, proLockCopy } from "@/lib/entitlements";
 import "./payment-settings.css";
 
 /**
@@ -23,6 +25,7 @@ export function mercadoPagoReturnNotice(code: string | null): PaymentNotice | nu
   if (code === "cancelled") return { tone: "info", text: "No se conectó ninguna cuenta. Podés intentarlo cuando quieras." };
   if (code === "invalid_state") return { tone: "error", text: "No pudimos validar la conexión. Iniciá el proceso nuevamente." };
   if (code === "error") return { tone: "error", text: "No pudimos conectar Mercado Pago. Intentá nuevamente." };
+  if (code === "plan_required") return { tone: "info", text: "Mercado Pago integrado es parte de Bellis Pro. No se conectó ninguna cuenta." };
   return null;
 }
 
@@ -43,17 +46,25 @@ function StatusBadge({ status }: { status: MercadoPagoConnection["status"] }) {
   return <span className={`pay-badge pay-badge-${tone}`}><Icon size={14} aria-hidden />{statusLabel[status]}</span>;
 }
 
-export default function PaymentSettings({ method, paymentUrl, hasServiceLinks, connection, canManage, notice, connecting, busy, pendingMercadoPago = 0, onConnect, onDisconnect, onSaveMethod, formatDate }: {
+export default function PaymentSettings({ method, paymentUrl, hasServiceLinks, connection, canManage, notice, connecting, busy, pendingMercadoPago = 0, proLocked = false, proAction, onConnect, onDisconnect, onSaveMethod, formatDate }: {
   /** The method saved for the workspace, and its saved link. */
   method: PaymentMethod; paymentUrl: string; hasServiceLinks: boolean;
   connection: MercadoPagoConnection; canManage: boolean; notice: PaymentNotice | null;
   connecting: boolean; busy: boolean;
   /** Mercado Pago payments still waiting for confirmation. Disconnecting leaves Bellis unable to check them. */
   pendingMercadoPago?: number;
+  /** The plan does not include Mercado Pago: it shows locked, cannot be connected or chosen, and what was saved stays. */
+  proLocked?: boolean;
+  /** Where to learn about Bellis Pro: a link in the product, a button in the demo. */
+  proAction?: ReactNode;
   onConnect: () => void; onDisconnect: () => void; onSaveMethod: (method: PaymentMethod, url: string) => void;
   formatDate: (value: string) => string;
 }) {
-  const [choice, setChoice] = useState<PaymentMethod>(method);
+  // Online bookings are on hold: the practice charges with Mercado Pago and the plan no longer includes it.
+  const paused = proLocked && method === "mercado_pago_ar";
+  const [choice, setChoice] = useState<PaymentMethod>(paused ? "external_link" : method);
+  const urlInput = useRef<HTMLInputElement>(null);
+  const useLink = () => { setChoice("external_link"); setTimeout(() => { urlInput.current?.focus(); urlInput.current?.scrollIntoView({ block: "center" }); }, 0); };
   const [url, setUrl] = useState(paymentUrl);
   const dialog = useRef<HTMLDialogElement>(null);
   const ids = useId();
@@ -63,7 +74,7 @@ export default function PaymentSettings({ method, paymentUrl, hasServiceLinks, c
   const unknown = connection.status === "unavailable" || connection.status === "restricted";
   const canConnect = canManage && connection.status !== "unavailable" && connection.status !== "restricted" && connection.status !== "loading";
   // Whether patients can pay today with what is saved.
-  const configured = method === "mercado_pago_ar" ? connected : !!paymentUrl || hasServiceLinks;
+  const configured = method === "mercado_pago_ar" ? connected && !proLocked : !!paymentUrl || hasServiceLinks;
   const urlInvalid = !!url && !url.startsWith("https://");
   const connectLabel = connecting ? "Conectando…" : needsAttention ? "Volver a conectar" : "Conectar Mercado Pago";
   const connectButton = (className: string) => <button type="button" className={className} disabled={connecting || busy} aria-busy={connecting} onClick={onConnect}>{connectLabel}</button>;
@@ -71,7 +82,10 @@ export default function PaymentSettings({ method, paymentUrl, hasServiceLinks, c
   return <div className="pay-root">
     <header className="pay-head"><h2>Cobros y pagos</h2><p>Elegí cómo querés recibir los pagos de tus pacientes.</p></header>
     {notice && <Notice notice={notice} />}
-    {connection.status !== "loading" && !configured && <div className="pay-warning" role="status"><AlertCircle size={20} aria-hidden /><div>
+    {paused ? <div className="pay-warning pay-paused" role="status"><Info size={20} aria-hidden /><div>
+      <b>{bookingsPausedCopy.title}</b><span>{bookingsPausedCopy.text}</span>
+      <div className="plan-actions"><button type="button" className="plan-link" onClick={useLink}>{bookingsPausedCopy.useLink}</button>{proAction}</div>
+    </div></div> : connection.status !== "loading" && !configured && <div className="pay-warning" role="status"><AlertCircle size={20} aria-hidden /><div>
       {method === "mercado_pago_ar" && needsAttention ? <><b>Tus pacientes no pueden pagar en este momento.</b><span>Volvé a conectar Mercado Pago o elegí otro método de cobro.</span></>
         : method === "mercado_pago_ar" && unknown ? <><b>No pudimos comprobar tu conexión con Mercado Pago.</b><span>Volvé a entrar en unos minutos. Si sigue igual, tus pacientes podrían no poder pagar.</span></>
         : <><b>Todavía no configuraste cómo recibir pagos.</b><span>Elegí un método de cobro para poder recibir reservas desde tu página.</span></>}
@@ -82,21 +96,28 @@ export default function PaymentSettings({ method, paymentUrl, hasServiceLinks, c
         <h3 id={`${ids}-method`}>Método de cobro</h3>
         <fieldset className="pay-options" disabled={!canManage}>
           <legend>¿Cómo querés cobrar?</legend>
-          <label className="pay-option"><input type="radio" name={`${ids}-choice`} checked={choice === "mercado_pago_ar"} onChange={() => setChoice("mercado_pago_ar")} />
-            <span><b>Mercado Pago{method === "mercado_pago_ar" && configured && <em>En uso</em>}</b><small>Bellis genera y confirma el pago automáticamente.</small></span></label>
+          <label className={proLocked ? "pay-option pay-option-locked" : "pay-option"}><input type="radio" name={`${ids}-choice`} disabled={proLocked} checked={choice === "mercado_pago_ar"} onChange={() => setChoice("mercado_pago_ar")} />
+            <span><b>{proLocked ? proLockCopy.mercado_pago.title : "Mercado Pago"}{proLocked ? <ProBadge /> : method === "mercado_pago_ar" && configured && <em>En uso</em>}</b><small>{proLocked ? proLockCopy.mercado_pago.text : "Bellis genera y confirma el pago automáticamente."}</small></span></label>
           <label className="pay-option"><input type="radio" name={`${ids}-choice`} checked={choice === "external_link"} onChange={() => setChoice("external_link")} />
             <span><b>Link de pago externo{method === "external_link" && configured && <em>En uso</em>}</b><small>Usá un link de cobro que ya tengas.</small></span></label>
         </fieldset>
         {choice === "mercado_pago_ar" && !connected && <div className="pay-hint" role="status"><p>Primero conectá tu cuenta de Mercado Pago.</p>{canConnect && connectButton("pay-secondary")}</div>}
         {choice === "external_link" && <label className="pay-field">Link de pago
-          <input type="url" inputMode="url" placeholder="https://…" value={url} disabled={!canManage} onChange={(event) => setUrl(event.target.value)} aria-describedby={`${ids}-url-help`} aria-invalid={urlInvalid} />
+          <input ref={urlInput} type="url" inputMode="url" placeholder="https://…" value={url} disabled={!canManage} onChange={(event) => setUrl(event.target.value)} aria-describedby={`${ids}-url-help`} aria-invalid={urlInvalid} />
           <small id={`${ids}-url-help`}>{urlInvalid ? "El link tiene que empezar con https://" : "Pegá el enlace que querés que tus pacientes usen para pagar. Vos verificás cada pago y lo registrás acá."}</small>
         </label>}
         {canManage ? <button type="button" className="pay-primary pay-save" disabled={busy || connecting || (choice === "mercado_pago_ar" ? !connected : urlInvalid)} onClick={() => onSaveMethod(choice, url)}>{busy ? "Guardando…" : "Guardar método de cobro"}</button>
           : <p className="pay-muted">Solo quien administra el espacio puede cambiar el método de cobro.</p>}
       </section>
 
-      <section className="demo-panel pay-panel" aria-labelledby={`${ids}-mp`}>
+      {proLocked ? <section className="demo-panel pay-panel" aria-labelledby={`${ids}-mp`}>
+        <div className="pay-panel-head"><h3 id={`${ids}-mp`}>{proLockCopy.mercado_pago.title}</h3><ProBadge /></div>
+        <p>{proLockCopy.mercado_pago.text}</p>
+        {(connected || needsAttention) && <p className="pay-saved"><b>Tu conexión está guardada.</b>{connection.accountHint ? ` Cuenta terminada en ${connection.accountHint.replace(/\D/g, "")}.` : ""} {needsAttention ? "Con Bellis Pro vas a poder volver a conectarla." : "Con Bellis Pro vas a poder usarla de nuevo, sin volver a conectarla."}</p>}
+        <p className="pay-muted">Tus pagos anteriores de Mercado Pago siguen en el historial de cada paciente.</p>
+        {proAction && <div className="plan-actions">{proAction}</div>}
+        {(connected || needsAttention) && canManage && <button type="button" className="pay-secondary pay-danger pay-disconnect-locked" disabled={busy} onClick={() => dialog.current?.showModal()}>Desconectar Mercado Pago</button>}
+      </section> : <section className="demo-panel pay-panel" aria-labelledby={`${ids}-mp`}>
         <div className="pay-panel-head"><h3 id={`${ids}-mp`}>{connected ? "Mercado Pago conectado" : "Mercado Pago"}</h3><StatusBadge status={connection.status} /></div>
         {connection.status === "loading" ? <p className="pay-muted" role="status">Consultando el estado de Mercado Pago…</p>
           : connection.status === "restricted" ? <p className="pay-muted">Solo quien administra el espacio puede ver esta conexión.</p>
@@ -118,14 +139,14 @@ export default function PaymentSettings({ method, paymentUrl, hasServiceLinks, c
             {canConnect && connectButton("pay-primary")}
           </>}
         {!canManage && connection.status !== "restricted" && connection.status !== "loading" && <p className="pay-muted">Solo quien administra el espacio puede conectar o desconectar Mercado Pago.</p>}
-      </section>
+      </section>}
     </div>
 
     <dialog className="pay-dialog" ref={dialog} aria-labelledby={`${ids}-confirm`} onClick={(event) => { if (event.target === event.currentTarget) dialog.current?.close(); }}>
       <div><h3 id={`${ids}-confirm`}>¿Desconectar Mercado Pago?</h3>
-        <p>Bellis dejará de generar nuevos cobros con esta cuenta. Los pagos ya registrados no se eliminan.</p>
+        <p>{proLocked ? "Tu conexión se va a eliminar. Mientras uses Bellis Free, necesitás Bellis Pro para volver a conectar Mercado Pago." : "Bellis dejará de generar nuevos cobros con esta cuenta."} Los pagos ya registrados no se eliminan.</p>
         {pendingMercadoPago > 0 && <p className="pay-notice pay-dialog-warning" role="alert"><AlertCircle size={18} aria-hidden /><span>{pendingMercadoPago === 1 ? "Hay 1 pago pendiente de confirmación." : `Hay ${pendingMercadoPago} pagos pendientes de confirmación.`} Si desconectás Mercado Pago ahora, Bellis no podrá verificar esos pagos hasta que vuelvas a conectarlo.</span></p>}
-        <div className="pay-dialog-actions"><button type="button" className="pay-secondary" autoFocus onClick={() => dialog.current?.close()}>Cancelar</button><button type="button" className="pay-primary pay-confirm-danger" onClick={() => { dialog.current?.close(); onDisconnect(); }}>Desconectar</button></div>
+        <div className="pay-dialog-actions"><button type="button" className="pay-secondary" autoFocus onClick={() => dialog.current?.close()}>No desconectar</button><button type="button" className="pay-primary pay-confirm-danger" onClick={() => { dialog.current?.close(); onDisconnect(); }}>Sí, desconectar</button></div>
       </div>
     </dialog>
   </div>;
