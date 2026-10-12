@@ -39,13 +39,14 @@ export function RecordOfflinePayment({ priceMinor, formatMoney, onSave }: {
 
   if (!open) return <button type="button" className="crm-btn rop-open" onClick={() => { setOpen(true); setError(""); }}>Registrar pago</button>;
   return <div ref={box} className="ma rop" role="group" aria-label="Registrar pago">
+    <p className="cma-title">¿Cómo se cobró?</p>
     <div className="ma-methods" role="radiogroup" aria-label="Medio de cobro">{paymentMethods.map((item) => <button key={item} type="button" role="radio" aria-checked={method === item} className={method === item ? "on" : ""} disabled={busy} onClick={() => { setMethod(item); setError(""); }}>{paymentMethodLabels[item]}</button>)}</div>
-    <label className="ma-field">Importe cobrado (ARS)<input inputMode="decimal" autoComplete="off" disabled={busy} value={amount} onChange={(event) => { setAmount(event.target.value); setError(""); }}/></label>
-    <p className="ma-hint">Se registra como cobrado fuera de Bellis; no es un pago de Mercado Pago. Precio del servicio: {formatMoney(priceMinor)}.</p>
+    <label className="ma-field">Importe cobrado (ARS)<input inputMode="decimal" autoComplete="off" disabled={busy} value={amount} onChange={(event) => { setAmount(event.target.value); setError(""); }} onKeyDown={(event) => { if (event.key === "Enter") void save(); }}/></label>
+    <p className="ma-hint">Bellis no cobra nada acá: solo anota que ya lo cobraste. Precio del servicio: {formatMoney(priceMinor)}.</p>
     {error && <p className="live-error" role="alert">{error}</p>}
     <div className="rop-actions">
       <button type="button" className="demo-primary" disabled={busy} aria-busy={busy} onClick={() => void save()}>{busy ? "Guardando…" : "Guardar cobro"}</button>
-      <button type="button" className="live-secondary" disabled={busy} onClick={() => setOpen(false)}>Cancelar</button>
+      <button type="button" className="live-secondary" disabled={busy} onClick={() => setOpen(false)}>Volver</button>
     </div>
   </div>;
 }

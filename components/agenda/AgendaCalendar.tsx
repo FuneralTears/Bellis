@@ -346,7 +346,11 @@ export default function AgendaCalendar({
  * The detail sits below the calendar, which is taller than the screen. `focusKey` is the selected appointment:
  * when it changes, the detail is brought into view, so what can be done with that appointment is seen.
  */
-export function AgendaDetails({ children, focusKey }: { children: ReactNode; focusKey?: string | null }) {
+export function AgendaDetails({ children, focusKey, feedback }: {
+  children: ReactNode; focusKey?: string | null;
+  /** What was just done to this appointment ("Cobro registrado."). The page announces it; here it is only shown. */
+  feedback?: string;
+}) {
   const box = useRef<HTMLElement>(null);
   useEffect(() => {
     if (focusKey) box.current?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -358,6 +362,7 @@ export function AgendaDetails({ children, focusKey }: { children: ReactNode; foc
       aria-label="Detalle del turno"
     >
       <h2>Detalle del turno</h2>
+      {feedback && <p className="live-success">{feedback}</p>}
       {children}
     </section>
   );

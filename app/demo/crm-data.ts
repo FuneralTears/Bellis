@@ -4,7 +4,7 @@ import type { Activity, Appointment, FollowUp, Intent, Note, Payment } from "../
 import { demoToday, type DemoTask } from "./showroom-data";
 import { latePayments } from "@/lib/late-payments";
 
-export const demoStatusLabels = { new: "Nuevo", active: "Activo", follow_up: "Seguimiento", inactive: "Inactivo" } as const;
+export const demoStatusLabels = { new: "Nuevo", active: "Activo", follow_up: "En seguimiento", inactive: "Inactivo" } as const;
 export const demoProfessional = "Dra. Ana López";
 export const demoServiceNames = new Map([["s1", "Consulta psicológica"], ["s2", "Primera consulta"], ["s3", "Sesión de seguimiento"]]);
 const at = (date: string, time: string) => `${date}T${time}:00-03:00`;

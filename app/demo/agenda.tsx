@@ -35,6 +35,16 @@ function exampleTimes(day: string) {
 }
 /** What the showroom keeps for a turn created by hand. In memory only. */
 type ManualInfo = { patient: ManualPatient; method: ManualAppointmentInput["method"]; amountMinor: number | null; priceMinor: number };
+// Examples loaded by the practice for the Monday after the demo's "today": one still to be charged, one charged.
+function exampleManualTurns(): { appointment: AgendaAppointment; info: ManualInfo }[] {
+  const service = demoServices[0];
+  return ([[demoPatients[1], "14:00", null], [demoPatients[2], "15:00", "transfer"]] as const).map(([person, startTime, method], index) => ({
+    appointment: { id: `demo-manual-example-${index + 1}`, dateKey: "2026-10-05", weekday: "lunes", dateLabel: "5 oct 2026", startTime,
+      endTime: clock(new Date(new Date(`2026-10-05T${startTime}:00-03:00`).getTime() + service.duration * 60000).toISOString()),
+      patient: person.name, service: service.name, status: "scheduled", paid: method !== null },
+    info: { patient: { id: person.name, full_name: person.name, phone: person.phone, email: person.email }, method, amountMinor: method ? service.price * 100 : null, priceMinor: service.price * 100 },
+  }));
+}
 
 export function DemoAgenda({
   appointments,
@@ -55,7 +65,7 @@ export function DemoAgenda({
   const [creating, setCreating] = useState(false);
   const [notice, setNotice] = useState("");
   const [addedPatients, setAddedPatients] = useState<ManualPatient[]>([]);
-  const [created, setCreated] = useState<{ appointment: AgendaAppointment; info: ManualInfo }[]>([]);
+  const [created, setCreated] = useState<{ appointment: AgendaAppointment; info: ManualInfo }[]>(exampleManualTurns);
   const today: AgendaAppointment[] = appointments.map((item, index) => ({
     id: `demo-agenda-today-${index}`,
     dateKey: demoToday,
@@ -170,7 +180,7 @@ export function DemoAgenda({
           </button>
         ))}
       />
-      <AgendaDetails focusKey={selected}>
+      <AgendaDetails focusKey={selected} feedback={notice}>
         {appointment ? (
           <>
             <div className="live-detail">

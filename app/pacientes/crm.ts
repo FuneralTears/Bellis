@@ -3,7 +3,7 @@ import { landingRouteForUser } from "@/lib/auth/navigation";
 import { formatDate, formatDateTime, formatMoney, type MarketConfig } from "@/lib/market";
 
 export type PatientStatus = "new" | "active" | "follow_up" | "inactive";
-export const statusLabels: Record<PatientStatus, string> = { new: "Nuevo", active: "Activo", follow_up: "Seguimiento", inactive: "Inactivo" };
+export const statusLabels: Record<PatientStatus, string> = { new: "Nuevo", active: "Activo", follow_up: "En seguimiento", inactive: "Inactivo" };
 export type CrmContext = { workspaceId: string; professionalId: string; professionalName: string; specialty: string; market: MarketConfig };
 export type PatientOverview = { id: string; workspace_id: string; first_name: string; last_name: string; full_name: string; /** Null for a patient loaded by hand without one. */ email: string | null; phone: string | null; date_of_birth: string | null; status: PatientStatus; created_at: string; last_turn: string | null; next_turn: string | null; turn_count: number; approved_total_minor: number; currency_code: string; follow_up_due_date: string | null };
 

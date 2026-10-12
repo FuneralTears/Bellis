@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ArrowRight, Cake, CalendarDays, Check, Mail, MessageCircle, Phone, Plus, Search } from "lucide-react";
+import { ArrowLeft, ArrowRight, Cake, CalendarDays, Check, Mail, MessageCircle, Phone, Plus } from "lucide-react";
 import { FollowUpCard, OpportunityRow, PageHeader, PatientsTable, ProfileHeader, StatusTag, Tabs, Tag, Timeline, dateOnly } from "@/components/crm/CrmUi";
 import { PatientNotes, type NoteDraft } from "@/components/crm/PatientNotes";
 import { NewPatientForm, type NewPatientValues } from "@/components/crm/NewPatientForm";
@@ -14,6 +14,8 @@ import { demoToday, type DemoTask } from "./showroom-data";
 import { isLatePayment, latePaymentTag } from "@/lib/late-payments";
 import { canCancelAppointment, canRecordPayment, chargeLabel, paymentLabel, type CancelArgs, type PaymentMethod } from "@/lib/manual-appointment";
 import { CancelManualAppointment } from "@/components/agenda/CancelManualAppointment";
+import { PatientFilters } from "@/components/crm/PatientFilters";
+import type { FollowUpFilter } from "@/lib/patient-filters";
 import { RecordOfflinePayment } from "@/components/payments/RecordOfflinePayment";
 
 type Showroom = { tasks: DemoTask[]; complete: (id: string) => void };
@@ -27,7 +29,7 @@ const professionals = new Map([["pro", demoProfessional]]);
 export function DemoPatients({ state, profile, setProfile, fromFollowUps, followUps, automation }: { state: Showroom; profile: string | null; setProfile: (id: string | null) => void; fromFollowUps: boolean; followUps: () => void; automation: () => void }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<Status | "all">("all");
-  const [followUp, setFollowUp] = useState("all");
+  const [followUp, setFollowUp] = useState<FollowUpFilter>("all");
   const [opportunity, setOpportunity] = useState("all");
   const [sort, setSort] = useState("last_turn");
   const [statuses, setStatuses] = useState<Record<string, Status>>({});
@@ -66,15 +68,10 @@ export function DemoPatients({ state, profile, setProfile, fromFollowUps, follow
     {creating && <NewPatientForm lookup={async () => patients.map((item) => ({ id: item.id, full_name: item.full_name, phone: item.phone, email: item.email, created_at: item.created_at }))} onSave={createPatient} onCancel={() => setCreating(false)}
       renderOpen={(patient, content, variant) => <button type="button" className={variant === "primary" ? "demo-primary" : "crm-link"} onClick={() => { setCreating(false); setProfile(patient.id); }}>{content}</button>}/>}
     <section className="crm-card">
-      <div className="crm-filterbar">
-        <label className="crm-search"><Search size={16}/><input aria-label="Buscar pacientes" placeholder="Buscar por nombre, email o teléfono" value={query} onChange={(event) => setQuery(event.target.value)}/></label>
-        <label className="crm-select">Para revisar <select aria-label="Filtrar por sugerencia de seguimiento" value={opportunity} onChange={(event) => setOpportunity(event.target.value)}>{opportunityFilters.map((item) => <option key={item.kind} value={item.kind}>{item.label}</option>)}</select></label>
-        <label className="crm-select">Ordenar por <select value={sort} onChange={(event) => setSort(event.target.value)}><option value="last_turn">Último turno</option><option value="next_turn">Próximo turno</option><option value="full_name">Nombre</option></select></label>
-      </div>
-      <div className="crm-chip-rows">
-        <div className="crm-chip-row"><span id="demo-filter-status">Estado</span><div className="crm-chips" role="group" aria-labelledby="demo-filter-status">{([["all", "Todos"], ["new", "Nuevos"], ["active", "Activos"], ["follow_up", "Seguimiento"], ["inactive", "Inactivos"]] as const).map(([value, label]) => <button key={value} aria-pressed={status === value} className={status === value ? "on" : ""} onClick={() => setStatus(value)}>{label}</button>)}</div></div>
-        <div className="crm-chip-row"><span id="demo-filter-follow-up">Seguimiento</span><div className="crm-chips" role="group" aria-labelledby="demo-filter-follow-up">{([["all", "Todos"], ["with", "Con seguimiento"], ["without", "Sin seguimiento"], ["overdue", "Vencidos"], ["today", "Hoy"]] as const).map(([value, label]) => <button key={value} aria-pressed={followUp === value} className={followUp === value ? "on" : ""} onClick={() => setFollowUp(value)}>{label}</button>)}</div></div>
-      </div>
+      <PatientFilters query={query} onQuery={setQuery} sort={sort} onSort={setSort}
+        filters={{ status, followUp, opportunity }}
+        onFilters={(next) => { setStatus(next.status as Status | "all"); setFollowUp(next.followUp); setOpportunity(next.opportunity); }}
+        situations={opportunityFilters.filter((item) => item.column).map((item) => ({ value: item.kind, label: item.label }))}/>
       {visible.length === 0 ? <p className="live-empty">{filtered ? "No encontramos pacientes con esos filtros." : "Todavía no tenés pacientes."}</p> : <>
         <p className="crm-result-count">{visible.length} {visible.length === 1 ? "paciente" : "pacientes"}{filtered ? " con estos filtros" : ""}</p>
         <PatientsTable patients={visible} today={demoToday} automaticIds={automatic} formatDate={date} statusLabel={(value) => demoStatusLabels[value]}

@@ -20,7 +20,7 @@ export type Opportunity = { kind: OpportunityKind; title: string; reason: string
 
 export const opportunityFilters: { kind: OpportunityKind | "all" | "attention"; label: string; column?: keyof OpportunityOverview }[] = [
   { kind: "all", label: "Todos" },
-  { kind: "attention", label: "Requieren atención" },
+  { kind: "attention", label: "Necesitan atención" },
   { kind: "pending_payment", label: "Pagos pendientes", column: "has_pending_payment" },
   { kind: "overdue_follow_up", label: "Seguimientos vencidos", column: "has_overdue_follow_up" },
   { kind: "first_without_next", label: "Primera consulta sin próximo turno", column: "first_completed_without_next" },

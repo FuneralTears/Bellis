@@ -12,6 +12,7 @@ import { detectOpportunities, type OpportunityOverview } from "../opportunities"
 import { isLatePayment, latePaymentTag } from "@/lib/late-payments";
 import { canCancelAppointment, canRecordPayment, chargeLabel, describeCancelError, describePaymentError, paymentLabel, type CancelArgs, type PaymentMethod } from "@/lib/manual-appointment";
 import { CancelManualAppointment } from "@/components/agenda/CancelManualAppointment";
+import { friendlyError } from "@/lib/friendly-error";
 import { RecordOfflinePayment } from "@/components/payments/RecordOfflinePayment";
 import { FollowUpCard, OpportunityRow, ProfileHeader, StatusTag, Tabs, Tag, Timeline, dateOnly, type Tone } from "@/components/crm/CrmUi";
 import { PatientNotes, type NoteDraft } from "@/components/crm/PatientNotes";
@@ -99,7 +100,7 @@ export default function PatientDetailPage() {
         const message = errorMessage(caught);
         if (message === "onboarding_required") window.location.replace("/onboarding");
         else if (message.includes("sesión")) window.location.replace("/ingresar");
-        else if (!cancelled) setError(message);
+        else if (!cancelled) setError(friendlyError(caught, "No pudimos cargar la ficha. Intentá de nuevo."));
       } finally { if (!cancelled) setLoading(false); }
     }
     void load();
@@ -145,7 +146,7 @@ export default function PatientDetailPage() {
       const { data, error: saveError } = await client.from("patients").update({ status }).eq("id", patient.id).eq("workspace_id", context.workspaceId).select("status").single();
       if (saveError) throw saveError;
       setPatient({ ...patient, status: data.status as PatientStatus }); setNotice("Estado guardado.");
-    } catch (caught) { setError(errorMessage(caught)); } finally { setSaving(false); }
+    } catch (caught) { setError(friendlyError(caught, "No pudimos guardar los cambios. Intentá de nuevo.")); } finally { setSaving(false); }
   }
 
   async function saveActivity() {
@@ -162,7 +163,7 @@ export default function PatientDetailPage() {
       setDetails((value) => ({ ...value, activities: [data as Activity, ...value.activities] }));
       setActivityOpen(false); setActivityTitle(""); setActivityDescription("");
       setNotice("Actividad registrada.");
-    } catch (caught) { setError(errorMessage(caught)); } finally { setSaving(false); }
+    } catch (caught) { setError(friendlyError(caught, "No pudimos guardar los cambios. Intentá de nuevo.")); } finally { setSaving(false); }
   }
 
   // Both reject on failure so the notes form can stay open and offer a retry.
@@ -206,7 +207,7 @@ export default function PatientDetailPage() {
       const saved = result.data as FollowUp;
       setDetails((value) => ({ ...value, followUps: (editingFollowUp ? value.followUps.map((item) => item.id === saved.id ? saved : item) : [...value.followUps, saved]).sort((a, b) => a.due_date.localeCompare(b.due_date)) }));
       setFollowUpOpen(false); if (editingFollowUp) focusFollowUp(editingFollowUp); setEditingFollowUp(null); setNotice("Seguimiento guardado.");
-    } catch (caught) { setError(errorMessage(caught)); } finally { setSaving(false); }
+    } catch (caught) { setError(friendlyError(caught, "No pudimos guardar los cambios. Intentá de nuevo.")); } finally { setSaving(false); }
   }
 
   // A charge made outside Bellis on a turn the practice loaded. One payment per turn: if it was already recorded,
@@ -236,7 +237,7 @@ export default function PatientDetailPage() {
       if (saveError || !data) throw saveError ?? new Error("No pudimos actualizar el seguimiento.");
       setDetails((value) => ({ ...value, followUps: value.followUps.map((existing) => existing.id === item.id ? data as FollowUp : existing) }));
       setNotice(status === "completed" ? "Seguimiento completado." : "Seguimiento cancelado.");
-    } catch (caught) { setError(errorMessage(caught)); } finally { setSaving(false); }
+    } catch (caught) { setError(friendlyError(caught, "No pudimos guardar los cambios. Intentá de nuevo.")); } finally { setSaving(false); }
   }
 
   const openActivity = () => { setTab("resumen"); setActivityOpen(true); setActivityType("call"); setActivityTitle(""); setActivityDescription(""); };

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowRight, Plus, Search } from "lucide-react";
+import { ArrowRight, Plus } from "lucide-react";
 import { getSupabase } from "@/lib/supabase/browser";
 import CrmShell from "./CrmShell";
 import { crmDate, errorMessage, loadCrmContext, statusLabels, type CrmContext, type PatientStatus } from "./crm";
@@ -12,10 +12,11 @@ import { opportunityFilters, type OpportunityKind, type OpportunityOverview } fr
 import { PageHeader, PatientsTable } from "@/components/crm/CrmUi";
 import { NewPatientForm, type NewPatientValues } from "@/components/crm/NewPatientForm";
 import { createManualPatient, lookupPatientDuplicates } from "./manual-patient";
+import { PatientFilters } from "@/components/crm/PatientFilters";
+import type { FollowUpFilter } from "@/lib/patient-filters";
 
 const PAGE_SIZE = 25;
 type Sort = "last_turn" | "next_turn" | "full_name";
-type FollowUpFilter = "all" | "with" | "without" | "overdue" | "today";
 type OpportunityFilter = OpportunityKind | "all" | "attention";
 
 export default function PatientsPage() {
@@ -85,15 +86,10 @@ export default function PatientsPage() {
     {creating && context && <NewPatientForm lookup={lookupDuplicates} onSave={createPatient} onCancel={() => setCreating(false)}
       renderOpen={(patient, content, variant) => <Link className={variant === "primary" ? "demo-primary" : "crm-link"} href={`/pacientes/${patient.id}`}>{content}</Link>}/>}
     <section className="crm-card">
-      <div className="crm-filterbar">
-        <label className="crm-search"><Search size={16}/><input aria-label="Buscar pacientes" placeholder="Buscar por nombre, email o teléfono" value={query} onChange={(event) => setQuery(event.target.value)}/></label>
-        <label className="crm-select">Para revisar <select aria-label="Filtrar por sugerencia de seguimiento" value={opportunityFilter} onChange={(event) => { setOpportunityFilter(event.target.value as OpportunityFilter); setPage(0); }}>{opportunityFilters.map((item) => <option key={item.kind} value={item.kind}>{item.label}</option>)}</select></label>
-        <label className="crm-select">Ordenar por <select value={sort} onChange={(event) => { setSort(event.target.value as Sort); setPage(0); }}><option value="last_turn">Último turno</option><option value="next_turn">Próximo turno</option><option value="full_name">Nombre</option></select></label>
-      </div>
-      <div className="crm-chip-rows">
-        <div className="crm-chip-row"><span id="crm-filter-status">Estado</span><div className="crm-chips" role="group" aria-labelledby="crm-filter-status">{([ ["all","Todos"], ["new","Nuevos"], ["active","Activos"], ["follow_up","Seguimiento"], ["inactive","Inactivos"] ] as const).map(([value,label]) => <button key={value} aria-pressed={status === value} className={status === value ? "on" : ""} onClick={() => { setStatus(value); setPage(0); }}>{label}</button>)}</div></div>
-        <div className="crm-chip-row"><span id="crm-filter-follow-up">Seguimiento</span><div className="crm-chips" role="group" aria-labelledby="crm-filter-follow-up">{([ ["all","Todos"], ["with","Con seguimiento"], ["without","Sin seguimiento"], ["overdue","Vencidos"], ["today","Hoy"] ] as const).map(([value,label]) => <button key={value} aria-pressed={followUpFilter === value} className={followUpFilter === value ? "on" : ""} onClick={() => { setFollowUpFilter(value); setPage(0); }}>{label}</button>)}</div></div>
-      </div>
+      <PatientFilters query={query} onQuery={setQuery} sort={sort} onSort={(value) => { setSort(value as Sort); setPage(0); }}
+        filters={{ status, followUp: followUpFilter, opportunity: opportunityFilter }}
+        onFilters={(next) => { setStatus(next.status as PatientStatus | "all"); setFollowUpFilter(next.followUp); setOpportunityFilter(next.opportunity as OpportunityFilter); setPage(0); }}
+        situations={opportunityFilters.filter((item) => item.column).map((item) => ({ value: item.kind, label: item.label }))}/>
       {error && <p className="live-error" role="alert">{error} <button onClick={() => setReload((value) => value + 1)} aria-label="Reintentar">Reintentá la búsqueda</button></p>}
       {loading ? <p className="live-empty" role="status">Cargando pacientes…</p> : error ? null : patients.length === 0 ? <p className="live-empty">{filtered ? "No encontramos pacientes con esos filtros." : "Todavía no tenés pacientes."}</p> : <>
         <p className="crm-result-count">{total} {total === 1 ? "paciente" : "pacientes"}{filtered ? " con estos filtros" : ""}</p>

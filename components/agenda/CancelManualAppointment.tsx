@@ -40,7 +40,7 @@ export function CancelManualAppointment({ charge, priceMinor, formatMoney, onCan
     catch (caught) { setError(describeCancelError(caught instanceof Error ? caught.message : String(caught)).text); }
     finally { setBusy(false); }
   }
-  const back = <button type="button" className="live-secondary" disabled={busy} onClick={() => { setStep(view === "charge" ? "question" : "closed"); setError(""); }}>Volver</button>;
+  const back = <button type="button" className="live-secondary" disabled={busy} onClick={() => { setStep(view === "charge" ? "question" : "closed"); setError(""); }}>{view === "charge" ? "Volver" : "No cancelar el turno"}</button>;
 
   if (view === "closed") return <button type="button" className="crm-btn rop-open cma-open" onClick={() => { setStep("question"); setError(""); }}>Cancelar turno</button>;
   return <div ref={box} className="ma rop cma" role="group" aria-label="Cancelar turno">
@@ -72,7 +72,7 @@ export function CancelManualAppointment({ charge, priceMinor, formatMoney, onCan
       <p className="cma-title">¿Cómo se cobró?</p>
       <div className="ma-methods" role="radiogroup" aria-label="Medio de cobro">{paymentMethods.map((item) => <button key={item} type="button" role="radio" aria-checked={method === item} className={method === item ? "on" : ""} disabled={busy} onClick={() => { setMethod(item); setError(""); }}>{paymentMethodLabels[item]}</button>)}</div>
       <label className="ma-field">Importe cobrado (ARS)<input inputMode="decimal" autoComplete="off" disabled={busy} value={amount} onChange={(event) => { setAmount(event.target.value); setError(""); }}/></label>
-      <p className="ma-hint">Se registra como cobrado fuera de Bellis; no es un pago de Mercado Pago. Precio del servicio: {formatMoney(priceMinor)}.</p>
+      <p className="ma-hint">Bellis no cobra nada acá: solo anota que ya lo cobraste. Precio del servicio: {formatMoney(priceMinor)}.</p>
       {error && <p className="live-error" role="alert">{error}</p>}
       <div className="rop-actions">
         <button type="button" className="demo-primary cma-danger" disabled={busy} aria-busy={busy} onClick={() => void cancel(true)}>{busy ? "Cancelando…" : "Cancelar turno y guardar cobro"}</button>

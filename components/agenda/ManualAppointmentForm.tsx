@@ -5,7 +5,7 @@ import { Check, Search, UserPlus, X } from "lucide-react";
 import { SlotPicker } from "@/components/booking/BookingUi";
 import { NewPatientForm, type NewPatientValues } from "@/components/crm/NewPatientForm";
 import type { DuplicateCandidate } from "@/lib/patient-duplicates";
-import { afterCreateError, draftProblem, emptyDraft, paymentArgs, paymentMethodLabels, paymentMethods, paymentProblem, selectDay, selectProfessional, selectService, selectSlot, setPaid, type ManualDraft, type PaymentMethod } from "@/lib/manual-appointment";
+import { afterCreateError, draftProblem, emptyDraft, paymentArgs, paymentMethodLabels, paymentMethods, selectDay, selectProfessional, selectService, selectSlot, setPaid, type ManualDraft, type PaymentMethod } from "@/lib/manual-appointment";
 import "./manual-appointment.css";
 
 export type ManualPatient = { id: string; full_name: string; phone: string | null; email: string | null };
@@ -50,6 +50,7 @@ export function ManualAppointmentForm({ professionals, services, timezone, local
   // Where the failure is told: a time that was taken is told next to the times, where the person has to act.
   const [errorAtSlots, setErrorAtSlots] = useState(false);
   const errorBox = useRef<HTMLParagraphElement>(null);
+  const [discarding, setDiscarding] = useState(false);
   // Only the answer to the latest question is kept: a slow search or a slow day must not overwrite a newer one.
   const searchRun = useRef(0);
   const slotsRun = useRef(0);
@@ -96,6 +97,8 @@ export function ManualAppointmentForm({ professionals, services, timezone, local
   const change = (next: ManualDraft, reload = false) => { setDraft(next); setError(""); setErrorAtSlots(false); if (reload) void refreshSlots(next); };
   const choosePatient = (next: ManualPatient) => { setPatient(next); setQuick(false); setQuery(""); setResults(null); change({ ...draft, patientId: next.id }); };
   const clearPatient = () => { setPatient(null); change({ ...draft, patientId: "" }); };
+  // Nothing typed is lost by mistake: with a patient chosen or being loaded, closing asks before discarding.
+  const close = () => { if (patient || quick) setDiscarding(true); else onCancel(); };
 
   async function create() {
     if (saving || problem || !patient || !professional || !service) return;
@@ -111,7 +114,7 @@ export function ManualAppointmentForm({ professionals, services, timezone, local
 
   return <section className="crm-main ma" aria-labelledby="ma-title">
     <div className="ma-card">
-      <header className="ma-head"><h2 id="ma-title">Nuevo turno</h2><button type="button" className="ma-close" aria-label="Cerrar" disabled={saving} onClick={onCancel}><X size={18}/></button></header>
+      <header className="ma-head"><h2 id="ma-title">Nuevo turno</h2><button type="button" className="ma-close" aria-label="Cerrar sin guardar" title="Cerrar sin guardar" disabled={saving} onClick={close}><X size={18}/></button></header>
 
       <div className="ma-section">
         <h3><span className="ma-step">1</span> Paciente</h3>
@@ -120,12 +123,13 @@ export function ManualAppointmentForm({ professionals, services, timezone, local
               onSave={async (values) => choosePatient(await createPatient(values))}
               renderOpen={(found, _content, variant) => <button type="button" className={variant === "primary" ? "demo-primary" : "crm-link"} onClick={() => choosePatient({ id: found.id, full_name: found.full_name, phone: found.phone, email: found.email })}>Usar este paciente</button>}/>
           : <>
-            <label className="ma-search"><Search size={16}/><input autoFocus type="search" aria-label="Buscar paciente" placeholder="Buscar por nombre, teléfono o email" value={query} onChange={(event) => { setQuery(event.target.value); if (event.target.value.trim().length < 2) { setResults(null); setSearchError(""); } }}/></label>
+            <label className="ma-search-label" htmlFor="ma-patient-search">¿Para quién es el turno? Buscalo por nombre, teléfono o email.</label>
+            <label className="ma-search"><Search size={16}/><input id="ma-patient-search" autoFocus type="search" placeholder="Escribí al menos 2 letras" value={query} onChange={(event) => { setQuery(event.target.value); if (event.target.value.trim().length < 2) { setResults(null); setSearchError(""); } }}/></label>
             {searchError && <p className="live-error" role="alert">{searchError}</p>}
             {searching && !results && <p className="ma-hint" role="status">Buscando…</p>}
             {results && (results.length ? <ul className="ma-results" aria-label="Pacientes encontrados">{results.map((item) => <li key={item.id}><button type="button" onClick={() => choosePatient(item)}><b>{item.full_name}</b><small>{[item.phone, item.email].filter(Boolean).join(" · ") || "Sin datos de contacto"}</small></button></li>)}</ul>
-              : <p className="ma-hint">No encontramos pacientes con esos datos.</p>)}
-            <button type="button" className="crm-btn ma-quick" onClick={() => setQuick(true)}><UserPlus size={15}/> Crear paciente rápido</button>
+              : <p className="ma-hint">No encontramos pacientes con esos datos. Si es nuevo, tocá el botón «Crear paciente nuevo».</p>)}
+            <button type="button" className="crm-btn ma-quick" onClick={() => setQuick(true)}><UserPlus size={15}/> Crear paciente nuevo</button>
           </>}
       </div>
 
@@ -143,24 +147,25 @@ export function ManualAppointmentForm({ professionals, services, timezone, local
         {error && errorAtSlots && <p ref={errorBox} tabIndex={-1} className="live-error ma-conflict" role="alert">{error}</p>}
         <SlotPicker day={draft.day} min={today} onDay={(day) => change(selectDay(draft, day), true)} busy={slotsBusy} slots={slotsError ? [] : slots.map((value) => ({ value, label: time(value) }))} selected={draft.slot} onSelect={(value) => change(selectSlot(draft, value, slots))} />
         {slotsError && <p className="live-error" role="alert">{slotsError} <button type="button" onClick={() => void refreshSlots(draft)}>Reintentar</button></p>}
-        <p className="ma-hint">Son los horarios libres de la agenda. Los turnos manuales no usan la anticipación mínima del servicio.</p>
+        <p className="ma-hint">Solo se muestran los horarios que están libres en la agenda.</p>
       </div>}
 
       {patient && service && draft.slot && <div className="ma-section">
         <h3><span className="ma-step">4</span> Cobro</h3>
         <div className="ma-options ma-options-two" role="radiogroup" aria-label="Estado del cobro">
-          <button type="button" role="radio" aria-checked={!draft.paid} className={!draft.paid ? "ma-option on" : "ma-option"} disabled={saving} onClick={() => change(setPaid(draft, false))}><span><b>Pendiente</b><small>Todavía no se cobró</small></span></button>
-          <button type="button" role="radio" aria-checked={draft.paid} className={draft.paid ? "ma-option on" : "ma-option"} disabled={saving} onClick={() => change(setPaid(draft, true))}><span><b>Pagado fuera de Bellis</b><small>Efectivo, transferencia u otro</small></span></button>
+          <button type="button" role="radio" aria-checked={!draft.paid} className={!draft.paid ? "ma-option on" : "ma-option"} disabled={saving} onClick={() => change(setPaid(draft, false))}><span><b>Todavía no se cobró</b><small>Queda como pago pendiente. Lo podés registrar después.</small></span></button>
+          <button type="button" role="radio" aria-checked={draft.paid} className={draft.paid ? "ma-option on" : "ma-option"} disabled={saving} onClick={() => change(setPaid(draft, true))}><span><b>Ya está cobrado</b><small>En efectivo, por transferencia u otro medio.</small></span></button>
         </div>
         {draft.paid && <div className="ma-payment">
+          <p className="ma-hint">¿Cómo se cobró?</p>
           <div className="ma-methods" role="radiogroup" aria-label="Medio de cobro">{paymentMethods.map((method) => <button key={method} type="button" role="radio" aria-checked={draft.method === method} className={draft.method === method ? "on" : ""} disabled={saving} onClick={() => change({ ...draft, method })}>{paymentMethodLabels[method]}</button>)}</div>
           <label className="ma-field">Importe cobrado (ARS)<input inputMode="decimal" autoComplete="off" disabled={saving} value={draft.amount} onChange={(event) => change({ ...draft, amount: event.target.value })}/></label>
-          <p className="ma-hint">No es un cobro de Mercado Pago: Bellis solo registra que ya lo cobraste. Precio del servicio: {formatMoney(service.price_minor)}.</p>
+          <p className="ma-hint">Bellis no cobra nada acá: solo anota que ya lo cobraste. Precio del servicio: {formatMoney(service.price_minor)}.</p>
         </div>}
       </div>}
 
       {patient && professional && service && draft.slot && <div className="ma-section">
-        <h3><span className="ma-step">5</span> Confirmación</h3>
+        <h3><span className="ma-step">5</span> Revisá antes de crear</h3>
         <dl className="ma-summary">
           <div><dt>Paciente</dt><dd>{patient.full_name}</dd></div>
           <div><dt>Servicio</dt><dd>{service.name}</dd></div>
@@ -168,16 +173,21 @@ export function ManualAppointmentForm({ professionals, services, timezone, local
           <div><dt>Fecha</dt><dd>{longDay(draft.day)}</dd></div>
           <div><dt>Hora</dt><dd>{time(draft.slot)}</dd></div>
           <div><dt>Duración</dt><dd>{service.duration_minutes} minutos</dd></div>
-          <div><dt>Cobro</dt><dd>{draft.paid ? (payment.method && payment.amountMinor ? `${paymentMethodLabels[payment.method]} · ${formatMoney(payment.amountMinor)} · pagado fuera de Bellis` : "Pagado fuera de Bellis") : "Pendiente"}</dd></div>
+          <div><dt>Cobro</dt><dd>{draft.paid ? (payment.method && payment.amountMinor ? `Ya cobrado · ${paymentMethodLabels[payment.method]} · ${formatMoney(payment.amountMinor)}` : "Ya cobrado") : "Pendiente (todavía no se cobró)"}</dd></div>
         </dl>
-        {draft.paid && paymentProblem(draft) && <p className="ma-hint ma-missing">{paymentProblem(draft)}</p>}
       </div>}
 
       {error && !errorAtSlots && <p ref={errorBox} tabIndex={-1} className="live-error" role="alert">{error}</p>}
       <div className="ma-actions">
-        <button type="button" className="demo-primary" disabled={saving || !!problem} aria-busy={saving} onClick={() => void create()}>{saving ? "Creando…" : <><Check size={16}/> Crear turno</>}</button>
-        <button type="button" className="live-secondary" disabled={saving} onClick={onCancel}>Cancelar</button>
-        {problem && !draft.slot && <span className="ma-hint">{problem}</span>}
+        {discarding ? <div className="ma-discard" role="alertdialog" aria-label="Descartar este turno">
+          <p>¿Cerrar sin crear el turno? Lo que cargaste acá no se guarda.</p>
+          <button type="button" className="crm-btn" autoFocus onClick={() => setDiscarding(false)}>Seguir cargando</button>
+          <button type="button" className="live-secondary" onClick={onCancel}>Sí, cerrar sin guardar</button>
+        </div> : <>
+          <button type="button" className="demo-primary" disabled={saving || !!problem} aria-busy={saving} onClick={() => void create()}>{saving ? "Creando…" : <><Check size={16}/> Crear turno</>}</button>
+          <button type="button" className="live-secondary" disabled={saving} onClick={close}>Cerrar sin guardar</button>
+          {problem && <span className="ma-hint" role="status">Para crear el turno: {problem.charAt(0).toLocaleLowerCase("es-AR") + problem.slice(1)}</span>}
+        </>}
       </div>
     </div>
   </section>;

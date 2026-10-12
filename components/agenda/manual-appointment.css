@@ -422,3 +422,78 @@
 .cma .cma-title + .ma-methods {
   margin-top: 10px;
 }
+/* Legibility for the flows the practice uses by hand (new turn, charge, cancel): nothing under 13px, every
+   control at least 44px tall, and the chosen option marked with more than colour. */
+.agenda-details .live-detail,
+.agenda-details .live-detail p {
+  font-size: 14px;
+  line-height: 1.5;
+}
+.agenda-details .live-detail > b {
+  font-size: 15px;
+}
+.agenda-details .live-detail .agenda-manual-tag {
+  font-size: 12px;
+}
+.agenda-details .live-success {
+  margin: 0 0 12px;
+}
+.ma .ma-hint,
+.ma-results small,
+.ma-option small,
+.ma-chosen small,
+.ma-summary dt {
+  font-size: 13px;
+}
+.ma .ma-field,
+.ma .cma-charge {
+  font-size: 14px;
+}
+.ma-close {
+  width: 44px;
+  height: 44px;
+}
+.ma .crm-btn,
+.ma .demo-primary,
+.rop-open,
+.cma-open {
+  min-height: 44px;
+  font-size: 14px;
+}
+.ma .live-secondary {
+  min-height: 44px;
+  padding: 10px 14px;
+  font-size: 14px;
+}
+.ma-option.on b::before,
+.ma-methods button.on::before {
+  content: "✓ ";
+}
+/* "¿Descartar este turno?" before closing a form that already has answers. */
+.ma-discard {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.ma .ma-discard p {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+.ma-search-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 14px;
+  color: var(--foreground);
+}
+.ma .rop-actions > button {
+  height: auto;
+  min-height: 44px;
+}
+.agenda-details .live-empty {
+  font-size: 14px;
+}
