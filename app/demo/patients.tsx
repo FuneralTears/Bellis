@@ -1,13 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { ProLock } from "@/components/plan/PlanUi";
+import { proLockCopy } from "@/lib/entitlements";
 import { ArrowLeft, ArrowRight, Cake, CalendarDays, Check, Mail, MessageCircle, Phone, Plus } from "lucide-react";
 import { FollowUpCard, OpportunityRow, PageHeader, PatientsTable, ProfileHeader, StatusTag, Tabs, Tag, Timeline, dateOnly } from "@/components/crm/CrmUi";
 import { PatientNotes, type NoteDraft } from "@/components/crm/PatientNotes";
 import { NewPatientForm, type NewPatientValues } from "@/components/crm/NewPatientForm";
 import { useProfileTab } from "@/components/crm/useProfileTab";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/market";
-import { detectOpportunities, hasAttention, isSmartOpportunity, opportunityFilters, type OpportunityOverview } from "../pacientes/opportunities";
+import { detectOpportunities, hasAttention, opportunityFilters, type OpportunityOverview } from "../pacientes/opportunities";
 import { buildPatientTimeline, followUpBucket, followUpLabels, type Note, type Payment } from "../pacientes/timeline";
 import { demoDetails, demoFollowUp, demoNewPatient, demoPatients, demoProfessional, demoServiceNames, demoStatusLabels, emptyDemoDetails } from "./crm-data";
 import { demoToday, type DemoTask } from "./showroom-data";
@@ -15,7 +17,7 @@ import { isLatePayment, latePaymentTag } from "@/lib/late-payments";
 import { canCancelAppointment, canRecordPayment, chargeLabel, paymentLabel, type CancelArgs, type PaymentMethod } from "@/lib/manual-appointment";
 import { CancelManualAppointment } from "@/components/agenda/CancelManualAppointment";
 import { PatientFilters } from "@/components/crm/PatientFilters";
-import type { FollowUpFilter } from "@/lib/patient-filters";
+import { shownStatus, statusFilterValues, type FollowUpFilter } from "@/lib/patient-filters";
 import { RecordOfflinePayment } from "@/components/payments/RecordOfflinePayment";
 
 type Showroom = { tasks: DemoTask[]; complete: (id: string) => void };
@@ -26,7 +28,7 @@ const appointmentLabels: Record<string, string> = { scheduled: "Programado", com
 const professionals = new Map([["pro", demoProfessional]]);
 
 /** Showroom mirror of /pacientes and /pacientes/[id]. Mock data only; nothing is saved. */
-export function DemoPatients({ state, profile, setProfile, fromFollowUps, followUps, automation, smart }: { /** Whether the example plan includes the suggestions of Bellis Pro. */ smart: boolean; state: Showroom; profile: string | null; setProfile: (id: string | null) => void; fromFollowUps: boolean; followUps: () => void; automation: () => void }) {
+export function DemoPatients({ state, profile, setProfile, fromFollowUps, followUps, automation, crm, proAction }: { /** Whether the example plan includes follow-ups and the CRM of Bellis Pro. */ crm: boolean; proAction: ReactNode; state: Showroom; profile: string | null; setProfile: (id: string | null) => void; fromFollowUps: boolean; followUps: () => void; automation: () => void }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<Status | "all">("all");
   const [followUp, setFollowUp] = useState<FollowUpFilter>("all");
@@ -39,18 +41,18 @@ export function DemoPatients({ state, profile, setProfile, fromFollowUps, follow
   const patients = useMemo(() => [...added.map((item) => item.patient), ...demoPatients(state.tasks)].map((item) => ({ ...item, status: statuses[item.id] ?? item.status })), [added, state.tasks, statuses]);
   const automatic = new Set(state.tasks.filter((task) => task.status === "pending" && task.source === "automation").map((task) => patients.find((item) => item.full_name === task.patient)?.id ?? ""));
   const selected = patients.find((item) => item.id === profile);
-  if (selected) return <DemoProfile key={selected.id} smart={smart} patient={selected} initialNotes={added.find((item) => item.patient.id === selected.id)?.notes} state={state} back={fromFollowUps ? followUps : () => setProfile(null)} backLabel={fromFollowUps ? "Volver a seguimientos" : "Volver a pacientes"} automation={automation} setStatus={(value) => setStatuses({ ...statuses, [selected.id]: value })}/>;
+  if (selected) return <DemoProfile key={selected.id} crm={crm} proAction={proAction} patient={selected} initialNotes={added.find((item) => item.patient.id === selected.id)?.notes} state={state} back={fromFollowUps ? followUps : () => setProfile(null)} backLabel={fromFollowUps ? "Volver a seguimientos" : "Volver a pacientes"} automation={automation} setStatus={(value) => setStatuses({ ...statuses, [selected.id]: value })}/>;
 
   const text = query.trim().toLocaleLowerCase("es-AR");
   const column = opportunityFilters.find((item) => item.kind === opportunity)?.column;
   const visible = patients.filter((item) => {
-    if (status !== "all" && item.status !== status) return false;
-    if (followUp === "with" && !item.follow_up_due_date) return false;
-    if (followUp === "without" && item.follow_up_due_date) return false;
-    if (followUp === "overdue" && !(item.follow_up_due_date && item.follow_up_due_date < demoToday)) return false;
-    if (followUp === "today" && item.follow_up_due_date !== demoToday) return false;
-    if (opportunity === "attention" && !hasAttention(item)) return false;
-    if (column && item[column] !== true) return false;
+    if (statusFilterValues(status, crm).length && !statusFilterValues(status, crm).includes(item.status)) return false;
+    if (crm && followUp === "with" && !item.follow_up_due_date) return false;
+    if (crm && followUp === "without" && item.follow_up_due_date) return false;
+    if (crm && followUp === "overdue" && !(item.follow_up_due_date && item.follow_up_due_date < demoToday)) return false;
+    if (crm && followUp === "today" && item.follow_up_due_date !== demoToday) return false;
+    if (crm && opportunity === "attention" && !hasAttention(item, crm)) return false;
+    if (crm && column && item[column] !== true) return false;
     return !text || [item.full_name, item.email ?? "", item.phone ?? ""].some((value) => value.toLocaleLowerCase("es-AR").includes(text));
   }).sort((a, b) => sort === "full_name" ? a.full_name.localeCompare(b.full_name, "es-AR")
     : sort === "next_turn" ? (a.next_turn ?? "9").localeCompare(b.next_turn ?? "9") : (b.last_turn ?? "").localeCompare(a.last_turn ?? ""));
@@ -64,17 +66,17 @@ export function DemoPatients({ state, profile, setProfile, fromFollowUps, follow
   };
 
   return <>
-    <PageHeader title="Pacientes" description="Información, turnos y seguimiento en un solo lugar."><button className="crm-btn" onClick={followUps}>Ver seguimientos <ArrowRight size={16}/></button><button className="demo-primary" type="button" disabled={creating} onClick={() => setCreating(true)}><Plus size={16}/> Nuevo paciente</button></PageHeader>
+    <PageHeader title="Pacientes" description="Información, turnos y seguimiento en un solo lugar.">{crm && <button className="crm-btn" onClick={followUps}>Ver seguimientos <ArrowRight size={16}/></button>}<button className="demo-primary" type="button" disabled={creating} onClick={() => setCreating(true)}><Plus size={16}/> Nuevo paciente</button></PageHeader>
     {creating && <NewPatientForm lookup={async () => patients.map((item) => ({ id: item.id, full_name: item.full_name, phone: item.phone, email: item.email, created_at: item.created_at }))} onSave={createPatient} onCancel={() => setCreating(false)}
       renderOpen={(patient, content, variant) => <button type="button" className={variant === "primary" ? "demo-primary" : "crm-link"} onClick={() => { setCreating(false); setProfile(patient.id); }}>{content}</button>}/>}
     <section className="crm-card">
       <PatientFilters query={query} onQuery={setQuery} sort={sort} onSort={setSort}
         filters={{ status, followUp, opportunity }}
         onFilters={(next) => { setStatus(next.status as Status | "all"); setFollowUp(next.followUp); setOpportunity(next.opportunity); }}
-        situations={opportunityFilters.filter((item) => item.column).map((item) => ({ value: item.kind, label: item.label, locked: !smart && isSmartOpportunity(item.kind) }))}/>
+        crm={crm} situations={opportunityFilters.filter((item) => item.column).map((item) => ({ value: item.kind, label: item.label }))}/>
       {visible.length === 0 ? <p className="live-empty">{filtered ? "No encontramos pacientes con esos filtros." : "Todavía no tenés pacientes."}</p> : <>
         <p className="crm-result-count">{visible.length} {visible.length === 1 ? "paciente" : "pacientes"}{filtered ? " con estos filtros" : ""}</p>
-        <PatientsTable patients={visible} today={demoToday} automaticIds={automatic} smart={smart} formatDate={date} statusLabel={(value) => demoStatusLabels[value]}
+        <PatientsTable patients={visible} today={demoToday} automaticIds={automatic} crm={crm} formatDate={date} statusLabel={(value) => demoStatusLabels[value]}
           renderOpen={(patient, content, { className, label }) => <button type="button" className={className} aria-label={label} onClick={() => setProfile(patient.id)}>{content}</button>}/>
         <div className="crm-pagination"><span>Página 1 de 1</span><div><button disabled>Anterior</button><button disabled>Siguiente</button></div></div>
       </>}
@@ -82,7 +84,7 @@ export function DemoPatients({ state, profile, setProfile, fromFollowUps, follow
   </>;
 }
 
-function DemoProfile({ patient, initialNotes, state, back, backLabel, automation, setStatus, smart }: { smart: boolean; patient: OpportunityOverview; initialNotes?: Note[]; state: Showroom; back: () => void; backLabel: string; automation: () => void; setStatus: (status: Status) => void }) {
+function DemoProfile({ patient, initialNotes, state, back, backLabel, automation, setStatus, crm, proAction }: { crm: boolean; proAction: ReactNode; patient: OpportunityOverview; initialNotes?: Note[]; state: Showroom; back: () => void; backLabel: string; automation: () => void; setStatus: (status: Status) => void }) {
   // Same navigation as the real record; the demo is one page, so its entries are cleared on leaving.
   const { tab, setTab, showFollowUp, clear } = useProfileTab(true);
   useEffect(() => clear, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -118,7 +120,7 @@ function DemoProfile({ patient, initialNotes, state, back, backLabel, automation
   const followUps = state.tasks.filter((task) => task.patient === patient.full_name).map(demoFollowUp).sort((a, b) => a.due_date.localeCompare(b.due_date));
   const pending = followUps.filter((item) => item.status === "pending");
   const closed = followUps.filter((item) => item.status !== "pending");
-  const opportunities = detectOpportunities({ ...patient, pending_payment_count: Math.max(0, patient.pending_payment_count - charged), has_pending_payment: patient.pending_payment_count - charged > 0 }, smart);
+  const opportunities = detectOpportunities({ ...patient, pending_payment_count: Math.max(0, patient.pending_payment_count - charged), has_pending_payment: patient.pending_payment_count - charged > 0 }, crm);
   const timeline = buildPatientTimeline({ patientCreatedAt: patient.created_at, appointments, intents: data.intents, payments, notes, activities: data.activities, followUps, services: demoServiceNames, professionals, money, paymentName: paymentLabel, isLatePayment });
   const service = (intentId: string) => demoServiceNames.get(data.intents.find((item) => item.id === intentId)?.service_id ?? "") ?? "Servicio";
   const next = patient.next_turn ? data.appointments.find((item) => item.starts_at === patient.next_turn) : undefined;
@@ -127,19 +129,19 @@ function DemoProfile({ patient, initialNotes, state, back, backLabel, automation
 
   return <>
     <button className="crm-back showroom-text-button" onClick={back}><ArrowLeft size={15}/> {backLabel}</button>
-    <ProfileHeader name={patient.full_name} status={<StatusTag status={patient.status}>{demoStatusLabels[patient.status]}</StatusTag>}
+    <ProfileHeader name={patient.full_name} status={<StatusTag status={shownStatus(patient.status, crm)}>{demoStatusLabels[shownStatus(patient.status, crm)]}</StatusTag>}
       contact={<>{patient.email && <span><Mail size={14}/> {patient.email}</span>}{patient.phone && <span><Phone size={14}/> {patient.phone}</span>}{patient.date_of_birth && <span><Cake size={14}/> {formatDate(patient.date_of_birth)}</span>}</>}
-      actions={<><button className="crm-btn" onClick={sample}><Plus size={15}/> Registrar actividad</button><button className="demo-primary" onClick={sample}><Plus size={15}/> Nuevo seguimiento</button></>}
+      actions={<><button className="crm-btn" onClick={sample}><Plus size={15}/> Registrar actividad</button>{crm && <button className="demo-primary" onClick={sample}><Plus size={15}/> Nuevo seguimiento</button>}</>}
       stats={[
         { label: "Último turno", value: date(patient.last_turn) },
         { label: "Próximo turno", value: date(patient.next_turn) },
         { label: "Turnos", value: patient.turn_count },
         { label: "Total pagado", value: money(patient.approved_total_minor + recorded) },
-        { label: "Seguimiento", value: pending[0] ? `${followUpLabels[followUpBucket(pending[0].due_date, demoToday)]} · ${dateOnly(pending[0].due_date)}` : "Sin seguimiento" },
+        ...(crm ? [{ label: "Seguimiento", value: pending[0] ? `${followUpLabels[followUpBucket(pending[0].due_date, demoToday)]} · ${dateOnly(pending[0].due_date)}` : "Sin seguimiento" }] : []),
       ]}/>
     <Tabs label="Secciones de la ficha" active={tab} onChange={setTab} tabs={[
       { id: "resumen", label: "Resumen" },
-      { id: "seguimientos", label: "Seguimientos", count: pending.length },
+      ...(crm || followUps.length > 0 ? [{ id: "seguimientos" as const, label: "Seguimientos", count: crm ? pending.length : undefined }] : []),
       { id: "turnos", label: "Turnos", count: data.appointments.length },
       { id: "cuestionarios", label: "Cuestionarios", count: data.answers.length ? 1 : 0 },
     ]}/>
@@ -151,20 +153,24 @@ function DemoProfile({ patient, initialNotes, state, back, backLabel, automation
           <Timeline events={timeline} formatAt={(event) => `${date(event.at)}${event.approximate ? " · fecha aproximada" : ""}`} renderLinks={(event) => event.followUpId ? <button onClick={() => showFollowUp(event.followUpId!)}>Ver seguimiento</button> : null}/>
         </section>
         <PatientNotes notes={notes} authorName={() => demoProfessional} formatAt={date} canManage={() => true} onSave={saveNote} onDelete={deleteNote}/>
-        <section className="crm-card"><div className="crm-card-head"><h2>Próximos seguimientos</h2><button className="crm-link" onClick={() => setTab("seguimientos")}>Ver todos <ArrowRight size={14}/></button></div>{pendingList}</section>
+        {crm && <section className="crm-card"><div className="crm-card-head"><h2>Próximos seguimientos</h2><button className="crm-link" onClick={() => setTab("seguimientos")}>Ver todos <ArrowRight size={14}/></button></div>{pendingList}</section>}
       </div>
       <div>
         <section className="crm-card"><div className="crm-card-head"><h2>Próximo turno</h2></div>{patient.next_turn ? <div className="crm-next-turn"><span className="crm-signal-icon crm-tone-sage"><CalendarDays size={16}/></span><div><strong>{date(patient.next_turn)}</strong>{next && <small>{service(next.booking_intent_id)}</small>}</div></div> : <p className="live-empty">Sin próximo turno reservado.</p>}</section>
         <section className="crm-card"><div className="crm-card-head"><h2>Datos del paciente</h2></div><dl className="crm-info">
           <div><dt>Nombre</dt><dd>{patient.first_name}</dd></div><div><dt>Apellido</dt><dd>{patient.last_name}</dd></div><div><dt>Email</dt><dd>{patient.email || "No informado"}</dd></div><div><dt>Teléfono</dt><dd>{patient.phone || "No informado"}</dd></div><div><dt>Nacimiento</dt><dd>{patient.date_of_birth ? formatDate(patient.date_of_birth) : "No informada"}</dd></div>
-        </dl><label className="crm-status-field">Estado<select value={patient.status} onChange={(event) => { setStatus(event.target.value as Status); setNotice("Estado actualizado en la demo."); }}>{Object.entries(demoStatusLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label></section>
+        </dl><label className="crm-status-field">Estado<select value={shownStatus(patient.status, crm)} onChange={(event) => { setStatus(event.target.value as Status); setNotice("Estado actualizado en la demo."); }}>{Object.entries(demoStatusLabels).filter(([key]) => crm || key !== "follow_up").map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label></section>
         <section className="crm-card"><div className="crm-card-head"><h2>Preconsulta</h2></div>{data.answers.length ? <div className="crm-mini"><b>{data.answers[0].questionnaire}</b><small>{date(data.answers[0].date)} · {data.answers.length} {data.answers.length === 1 ? "respuesta" : "respuestas"}</small><button className="crm-link" onClick={() => setTab("cuestionarios")}>Ver respuestas <ArrowRight size={14}/></button></div> : <p className="live-empty">Todavía no hay respuestas de preconsulta.</p>}</section>
         <section className="crm-card"><div className="crm-card-head"><h2>Acciones rápidas</h2></div><div className="crm-quick-actions">{patient.email && <button className="crm-btn" onClick={sample}><Mail size={15}/> Enviar email</button>}{patient.phone && <button className="crm-btn" onClick={sample}><MessageCircle size={15}/> WhatsApp</button>}</div>
           <p className="crm-hint">Abrir un enlace no registra un envío. Podés anotarlo como actividad después.</p></section>
       </div>
     </div>}
 
-    {tab === "seguimientos" && <div className="crm-stack" role="tabpanel" aria-labelledby="crm-tab-seguimientos">
+    {tab === "seguimientos" && !crm && <div className="crm-stack" role="tabpanel" aria-labelledby="crm-tab-seguimientos">
+      <ProLock title={proLockCopy.followups.title} text={`${proLockCopy.followups.text} Los seguimientos que ya tenías siguen acá, solo para consultar.`} action={proAction}/>
+      {followUps.length > 0 && <section className="crm-card"><div className="crm-card-head"><h2>Seguimientos guardados</h2></div><div className="crm-tasks">{followUps.map((item) => <FollowUpCard key={item.id} item={item} today={demoToday}/>)}</div></section>}
+    </div>}
+    {tab === "seguimientos" && crm && <div className="crm-stack" role="tabpanel" aria-labelledby="crm-tab-seguimientos">
       <section className="crm-card"><div className="crm-card-head"><div><h2>Sugerencias de seguimiento</h2><p>Se actualizan según turnos, pagos y seguimientos. Revisá cada caso antes de actuar.</p></div></div>
         {opportunities.length ? <div className="crm-signals">{opportunities.map((item) => <OpportunityRow key={item.kind} item={item}>{item.level === "attention" && <button className="crm-link" onClick={sample}>Crear seguimiento</button>}</OpportunityRow>)}</div> : <p className="live-empty">No detectamos oportunidades de seguimiento en este momento.</p>}
       </section>

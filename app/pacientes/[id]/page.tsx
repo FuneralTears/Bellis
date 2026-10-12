@@ -13,7 +13,9 @@ import { isLatePayment, latePaymentTag } from "@/lib/late-payments";
 import { canCancelAppointment, canRecordPayment, chargeLabel, describeCancelError, describePaymentError, paymentLabel, type CancelArgs, type PaymentMethod } from "@/lib/manual-appointment";
 import { CancelManualAppointment } from "@/components/agenda/CancelManualAppointment";
 import { friendlyError } from "@/lib/friendly-error";
-import { hasCapability } from "@/lib/entitlements";
+import { hasCapability, proLockCopy } from "@/lib/entitlements";
+import { shownStatus } from "@/lib/patient-filters";
+import { ProLock } from "@/components/plan/PlanUi";
 import { RecordOfflinePayment } from "@/components/payments/RecordOfflinePayment";
 import { FollowUpCard, OpportunityRow, ProfileHeader, StatusTag, Tabs, Tag, Timeline, dateOnly, type Tone } from "@/components/crm/CrmUi";
 import { PatientNotes, type NoteDraft } from "@/components/crm/PatientNotes";
@@ -133,7 +135,10 @@ export default function PatientDetailPage() {
   }) : [], [patient, context, details, serviceById, professionalById]);
   const today = context ? todayInTimezone(context.market.timezone) : "";
   const pendingFollowUps = details.followUps.filter((item) => item.status === "pending");
-  const opportunities = patient ? detectOpportunities(patient, hasCapability(context?.access, "smart_followups")) : [];
+  const crm = hasCapability(context?.access, "crm");
+  const opportunities = patient ? detectOpportunities(patient, crm) : [];
+  // Follow-ups are part of Bellis Pro. Without it the ones that already exist stay readable; none is created or changed.
+  const canFollowUp = hasCapability(context?.access, "followups");
   const nextFollowUp = pendingFollowUps[0];
   const whatsappDigits = patient?.phone?.replace(/\D/g, "") ?? "";
   const whatsappUrl = whatsappDigits.startsWith("54") && whatsappDigits.length >= 12 && whatsappDigits.length <= 14
@@ -255,24 +260,24 @@ export default function PatientDetailPage() {
     {loading ? <div className="demo-panel live-state" role="status">Cargando ficha del paciente…</div>
       : error && !patient ? <div className="demo-panel live-state" role="alert">{error}</div>
       : patient && context && <>
-        <ProfileHeader name={patient.full_name} status={<StatusTag status={patient.status}>{statusLabels[patient.status]}</StatusTag>}
+        <ProfileHeader name={patient.full_name} status={<StatusTag status={shownStatus(patient.status, crm)}>{statusLabels[shownStatus(patient.status, crm)]}</StatusTag>}
           contact={<>{patient.email && <span><Mail size={14}/> {patient.email}</span>}{patient.phone && <span><Phone size={14}/> {patient.phone}</span>}{patient.date_of_birth && <span><Cake size={14}/> {crmBirthDate(patient.date_of_birth, context.market)}</span>}</>}
-          actions={<><button className="crm-btn" onClick={openActivity}><Plus size={15}/> Registrar actividad</button><button className="demo-primary" onClick={() => openFollowUp()}><Plus size={15}/> Nuevo seguimiento</button></>}
+          actions={<><button className="crm-btn" onClick={openActivity}><Plus size={15}/> Registrar actividad</button>{canFollowUp && <button className="demo-primary" onClick={() => openFollowUp()}><Plus size={15}/> Nuevo seguimiento</button>}</>}
           stats={[
             { label: "Último turno", value: crmDate(patient.last_turn, context.market) },
             { label: "Próximo turno", value: crmDate(patient.next_turn, context.market) },
             { label: "Turnos", value: patient.turn_count },
             { label: "Total pagado", value: crmMoney(patient.approved_total_minor, context.market) },
-            { label: "Seguimiento", value: nextFollowUp ? `${followUpLabels[followUpBucket(nextFollowUp.due_date, today)]} · ${dateOnly(nextFollowUp.due_date)}` : "Sin seguimiento" },
+            ...(canFollowUp ? [{ label: "Seguimiento", value: nextFollowUp ? `${followUpLabels[followUpBucket(nextFollowUp.due_date, today)]} · ${dateOnly(nextFollowUp.due_date)}` : "Sin seguimiento" }] : []),
           ]}/>
         <Tabs label="Secciones de la ficha" active={tab} onChange={setTab} tabs={[
           { id: "resumen", label: "Resumen" },
-          { id: "seguimientos", label: "Seguimientos", count: pendingFollowUps.length },
+          ...(canFollowUp || pendingFollowUps.length + closedFollowUps.length > 0 ? [{ id: "seguimientos" as const, label: "Seguimientos", count: canFollowUp ? pendingFollowUps.length : undefined }] : []),
           { id: "turnos", label: "Turnos", count: details.appointments.length },
           { id: "cuestionarios", label: "Cuestionarios", count: answerGroups.length },
         ]}/>
         {error && <p className="live-error" role="alert">{error}</p>}{notice && <p className="live-success" role="status">{notice}</p>}
-        {followUpOpen && <section id="crm-follow-up-form" className="crm-card crm-form-card"><div className="crm-card-head"><h2>{editingFollowUp ? "Editar seguimiento" : "Nuevo seguimiento"}</h2></div><div className="crm-form-grid">
+        {followUpOpen && canFollowUp && <section id="crm-follow-up-form" className="crm-card crm-form-card"><div className="crm-card-head"><h2>{editingFollowUp ? "Editar seguimiento" : "Nuevo seguimiento"}</h2></div><div className="crm-form-grid">
           <label>Título<input maxLength={160} value={followUpDraft.title} onChange={(e) => setFollowUpDraft({ ...followUpDraft, title: e.target.value })}/></label>
           <label>Fecha<input type="date" value={followUpDraft.due_date} onChange={(e) => setFollowUpDraft({ ...followUpDraft, due_date: e.target.value })}/></label>
           <label>Hora opcional<input type="time" value={followUpDraft.due_time} onChange={(e) => setFollowUpDraft({ ...followUpDraft, due_time: e.target.value })}/></label>
@@ -293,20 +298,24 @@ export default function PatientDetailPage() {
             </section>
             <PatientNotes notes={details.notes} authorName={(note) => professionalById.get(note.author_id) ?? "Equipo"} formatAt={(iso) => crmDate(iso, context.market)}
               canManage={(note) => managesNotes || note.author_id === userId} onSave={saveNote} onDelete={deleteNote}/>
-            <section className="crm-card"><div className="crm-card-head"><h2>Próximos seguimientos</h2><button className="crm-link" onClick={() => setTab("seguimientos")}>Ver todos <ArrowRight size={14}/></button></div>{pendingList}</section>
+            {canFollowUp && <section className="crm-card"><div className="crm-card-head"><h2>Próximos seguimientos</h2><button className="crm-link" onClick={() => setTab("seguimientos")}>Ver todos <ArrowRight size={14}/></button></div>{pendingList}</section>}
           </div>
           <div>
             <section className="crm-card"><div className="crm-card-head"><h2>Próximo turno</h2></div>{patient.next_turn ? <div className="crm-next-turn"><span className="crm-signal-icon crm-tone-sage"><CalendarDays size={16}/></span><div><strong>{crmDate(patient.next_turn, context.market)}</strong>{nextAppointment && <small>{serviceById.get(intentById.get(nextAppointment.booking_intent_id)?.service_id ?? "") ?? "Servicio no disponible"}</small>}</div></div> : <p className="live-empty">Sin próximo turno reservado.</p>}</section>
             <section className="crm-card"><div className="crm-card-head"><h2>Datos del paciente</h2></div><dl className="crm-info">
               <div><dt>Nombre</dt><dd>{patient.first_name}</dd></div><div><dt>Apellido</dt><dd>{patient.last_name}</dd></div><div><dt>Email</dt><dd>{patient.email || "No informado"}</dd></div><div><dt>Teléfono</dt><dd>{patient.phone || "No informado"}</dd></div><div><dt>Nacimiento</dt><dd>{crmBirthDate(patient.date_of_birth, context.market)}</dd></div>
-            </dl><label className="crm-status-field">Estado<select value={patient.status} disabled={saving} onChange={(event) => void saveStatus(event.target.value as PatientStatus)}>{Object.entries(statusLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label></section>
+            </dl><label className="crm-status-field">Estado<select value={shownStatus(patient.status, crm)} disabled={saving} onChange={(event) => void saveStatus(event.target.value as PatientStatus)}>{Object.entries(statusLabels).filter(([key]) => crm || key !== "follow_up").map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label></section>
             <section className="crm-card"><div className="crm-card-head"><h2>Preconsulta</h2></div>{lastAnswers ? <div className="crm-mini"><b>{questionnaireById.get(lastAnswers[0].questionnaire_id) ?? "Preconsulta"}</b><small>{crmDate(intentById.get(lastAnswers[0].booking_intent_id)?.created_at ?? lastAnswers[0].created_at, context.market)} · {lastAnswers.length} {lastAnswers.length === 1 ? "respuesta" : "respuestas"}</small><button className="crm-link" onClick={() => setTab("cuestionarios")}>Ver respuestas <ArrowRight size={14}/></button></div> : <p className="live-empty">Todavía no hay respuestas de preconsulta.</p>}</section>
             <section className="crm-card"><div className="crm-card-head"><h2>Acciones rápidas</h2></div><div className="crm-quick-actions">{patient.email && <a className="crm-btn" href={`mailto:${patient.email}`}><Mail size={15}/> Enviar email</a>}{whatsappUrl && <a className="crm-btn" href={whatsappUrl} target="_blank" rel="noreferrer"><MessageCircle size={15}/> WhatsApp</a>}</div>
               <p className="crm-hint">Abrir un enlace no registra un envío. Podés anotarlo como actividad después.</p></section>
           </div>
         </div>}
 
-        {tab === "seguimientos" && <div className="crm-stack" role="tabpanel" aria-labelledby="crm-tab-seguimientos">
+        {tab === "seguimientos" && !canFollowUp && <div className="crm-stack" role="tabpanel" aria-labelledby="crm-tab-seguimientos">
+          <ProLock title={proLockCopy.followups.title} text={`${proLockCopy.followups.text} Los seguimientos que ya tenías siguen acá, solo para consultar.`} action={<Link className="plan-link" href="/pro">Conocer Bellis Pro <ArrowRight size={15}/></Link>}/>
+          {pendingFollowUps.length + closedFollowUps.length > 0 && <section className="crm-card"><div className="crm-card-head"><h2>Seguimientos guardados</h2></div><div className="crm-tasks">{[...pendingFollowUps, ...closedFollowUps].map((item) => <FollowUpCard key={item.id} item={item} today={today}/>)}</div></section>}
+        </div>}
+        {tab === "seguimientos" && canFollowUp && <div className="crm-stack" role="tabpanel" aria-labelledby="crm-tab-seguimientos">
           <section className="crm-card"><div className="crm-card-head"><div><h2>Sugerencias de seguimiento</h2><p>Se actualizan según turnos, pagos y seguimientos. Revisá cada caso antes de actuar.</p></div></div>
             {opportunities.length ? <div className="crm-signals">{opportunities.map((item) => <OpportunityRow key={item.kind} item={item}>{item.level === "attention" && <button className="crm-link" onClick={() => { openFollowUp(); setFollowUpDraft({ ...emptyFollowUp, title: item.title, due_date: today, priority: item.priority <= 1 ? "high" : "medium" }); }}>Crear seguimiento</button>}</OpportunityRow>)}</div> : <p className="live-empty">No detectamos oportunidades de seguimiento en este momento.</p>}
           </section>

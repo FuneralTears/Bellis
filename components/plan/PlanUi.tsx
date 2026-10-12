@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { Check, CircleCheck, Info, Lock, Sparkles } from "lucide-react";
-import { describeUpgradeError, planNotice, planNoticeKey, planStatus, proBenefits, proPrice, upgradeRequestMessage, bookingsPausedCopy, type WorkspaceAccess } from "@/lib/entitlements";
+import { describeUpgradeError, freeSummary, planNotice, planNoticeKey, planStatus, proBenefits, proPrice, upgradeRequestMessage, bookingsPausedCopy, type WorkspaceAccess } from "@/lib/entitlements";
 import "./plan-ui.css";
 
 /**
@@ -22,6 +22,20 @@ export function ProLock({ title, text, action, compact = false }: { title: strin
     <div className="plan-lock-head"><h3>{title}</h3><ProBadge /></div>
     <p>{text}</p>
     {action && <div className="plan-actions">{action}</div>}
+  </section>;
+}
+
+/**
+ * The page of a section that is part of Bellis Pro. The section stays in the navigation and opens here: what it
+ * is for, and the way to Bellis Pro. `secondary` is for what can still be read (a history, for example).
+ */
+export function ProLockedPage({ title, text, action, secondary }: { title: string; text: string; action: ReactNode; secondary?: ReactNode }) {
+  return <section className="plan-locked-page" aria-labelledby="plan-locked-title">
+    <span className="plan-locked-icon"><Lock size={22} aria-hidden /></span>
+    <ProBadge />
+    <h2 id="plan-locked-title">{title}</h2>
+    <p>{text}</p>
+    <div className="plan-actions">{action}{secondary}</div>
   </section>;
 }
 
@@ -81,9 +95,9 @@ export function ProOverview({ access, canRequest, onRequest }: {
     <section className="plan-hero">
       <h2>Bellis Pro</h2>
       <p className="plan-price">{proPrice}</p>
-      <p className="plan-claim">Automatizá tareas y ahorrá tiempo en la gestión de tu práctica.</p>
+      <p className="plan-claim">Seguimientos, automatizaciones y cobros integrados en un solo lugar.</p>
       <ul className="plan-benefits">{proBenefits.map((item) => <li key={item.capability}><Check size={18} aria-hidden /><div><b>{item.title}</b><span>{item.text}</span></div></li>)}</ul>
-      <p className="plan-free">Bellis Free es gratis para siempre: agenda, pacientes, turnos y cobros manuales, notas, seguimientos y tu página pública con link de pago.</p>
+      <p className="plan-free">{freeSummary}</p>
       {!isPro && <div className="plan-request">
         {sent ? <p className="plan-sent" role="status"><CircleCheck size={18} aria-hidden /> {sent}</p>
           : canRequest ? <button type="button" className="demo-primary plan-cta" disabled={busy} aria-busy={busy} onClick={() => void request()}>{busy ? "Enviando…" : "Quiero Bellis Pro"}</button>

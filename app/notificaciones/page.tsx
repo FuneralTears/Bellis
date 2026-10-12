@@ -6,7 +6,11 @@ import { getSupabase } from "@/lib/supabase/browser";
 import CrmShell from "../pacientes/CrmShell";
 import { crmDate, errorMessage, loadCrmContext, type CrmContext } from "../pacientes/crm";
 import { notificationHref, relativeNotificationTime, type InternalNotification } from "./notifications";
+import Link from "next/link";
+import { ArrowRight, History } from "lucide-react";
 import { PageHeader } from "@/components/crm/CrmUi";
+import { hasCapability, proLockCopy } from "@/lib/entitlements";
+import { ProLockedPage } from "@/components/plan/PlanUi";
 import { NotificationGroups, notificationKind } from "@/components/automation/AutomationUi";
 import "./notifications.css";
 
@@ -85,6 +89,13 @@ export default function NotificationsPage() {
     window.location.assign(notificationHref(item));
   }
 
+  // Notifications are what automations report. Without Bellis Pro none arrive; what already ran is in the activity history.
+  if (context && !hasCapability(context.access, "automations")) return <CrmShell context={context} breadcrumb="Notificaciones">
+    <PageHeader title="Notificaciones" description="Los avisos de lo que Bellis hace automáticamente."/>
+    <ProLockedPage title={proLockCopy.notifications.title} text={proLockCopy.notifications.text}
+      action={<Link className="demo-primary plan-cta-link" href="/pro">Conocer Bellis Pro <ArrowRight size={16}/></Link>}
+      secondary={<Link className="plan-link" href="/automatizaciones/ejecuciones"><History size={15}/> Ver historial de actividad</Link>}/>
+  </CrmShell>;
   return <CrmShell context={context} breadcrumb="Notificaciones">
     <PageHeader title="Notificaciones" description={unread ? `Acá vas a encontrar cosas que necesitan tu atención. Tenés ${unread} sin leer.` : "Acá vas a encontrar cosas que necesitan tu atención."}/>
     {error && <p className="live-error" role="alert">{error}</p>}

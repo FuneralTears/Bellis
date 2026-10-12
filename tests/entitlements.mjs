@@ -1,13 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { bookingsPaused, bookingsPausedCopy, describeUpgradeError, exampleAccess, hasCapability, lastDayOf, planNotice, planNoticeKey, planStatus, proBenefits, proLockCopy, proPrice, shortDay, upgradeRequestMessage } from "../lib/entitlements.ts";
+import { bookingsPaused, bookingsPausedCopy, describeUpgradeError, exampleAccess, freeSummary, hasCapability, lastDayOf, navEntry, planNotice, planNoticeKey, planStatus, proBenefits, planSections, proLockCopy, proPrice, shortDay, showsNotificationBell, upgradeRequestMessage } from "../lib/entitlements.ts";
 
 // Lo que responde workspace_access para una prueba que empezó el 15/10 a la tarde.
 const trial = (days) => ({ tier: "pro_trial", plan_code: "free", has_pro_access: true, status: "active",
   trial_started_at: "2026-10-15T18:00:00Z", trial_ends_at: "2026-11-15T03:00:00Z", trial_last_day: "2026-11-14", trial_days_remaining: days,
   pro_started_at: null, pro_ends_at: null, upgrade_requested: false,
-  capabilities: ["manual_patients", "manual_appointments", "manual_payments", "manual_followups", "public_booking", "external_payment_link", "mercado_pago", "automations", "smart_followups"] });
-const free = { ...trial(null), tier: "free", has_pro_access: false, capabilities: ["manual_patients", "manual_appointments", "manual_payments", "manual_followups", "public_booking", "external_payment_link"] };
+  capabilities: ["manual_patients", "manual_appointments", "manual_payments", "patient_notes", "public_booking", "external_payment_link", "followups", "crm", "smart_followups", "automations", "mercado_pago"] });
+const free = { ...trial(null), tier: "free", has_pro_access: false, capabilities: ["manual_patients", "manual_appointments", "manual_payments", "patient_notes", "public_booking", "external_payment_link"] };
 const pro = { ...trial(null), tier: "pro", plan_code: "pro", pro_started_at: "2026-11-01T15:00:00Z", pro_ends_at: "2026-12-02T03:00:00Z" };
 
 test("las capacidades salen solo de lo que respondió el servidor", () => {
@@ -15,10 +15,13 @@ test("las capacidades salen solo de lo que respondió el servidor", () => {
   assert.equal(hasCapability(free, "mercado_pago"), false);
   assert.equal(hasCapability(free, "automations"), false);
   assert.equal(hasCapability(free, "smart_followups"), false);
-  // Free conserva todo lo manual, la página pública y el link de pago.
-  for (const capability of ["manual_patients", "manual_appointments", "manual_payments", "manual_followups", "public_booking", "external_payment_link"]) assert.equal(hasCapability(free, capability), true, capability);
-  // Pro vuelve a habilitar lo que Free no tenía.
-  for (const capability of ["mercado_pago", "automations", "smart_followups"]) assert.equal(hasCapability(pro, capability), true, capability);
+  // Free es la operación básica: agenda, pacientes, cobros manuales, notas, página pública y link de pago.
+  for (const capability of ["manual_patients", "manual_appointments", "manual_payments", "patient_notes", "public_booking", "external_payment_link"]) assert.equal(hasCapability(free, capability), true, capability);
+  // Seguimientos y CRM no son de Free: ni crear seguimientos ni las señales que agrupan pacientes.
+  for (const capability of ["followups", "crm", "smart_followups", "automations", "mercado_pago"]) assert.equal(hasCapability(free, capability), false, capability);
+  assert.equal(hasCapability(free, "manual_followups"), false);
+  // La prueba y Pro tienen todo.
+  for (const access of [trial(20), pro]) for (const capability of ["followups", "crm", "smart_followups", "automations", "mercado_pago", "patient_notes"]) assert.equal(hasCapability(access, capability), true, capability);
   // Sin respuesta (cargando o falló): nada de Pro se ofrece.
   assert.equal(hasCapability(null, "mercado_pago"), false);
   assert.equal(hasCapability(undefined, "manual_patients"), false);
@@ -81,7 +84,10 @@ test("página Bellis Pro: estado según el plan, precio y solo beneficios que ex
   assert.equal(lastDayOf("2026-11-15T03:00:00Z"), "14/11");
   assert.equal(shortDay("2026-11-14"), "14/11");
   assert.equal(proPrice, "ARS 39.900 / mes");
-  assert.deepEqual(proBenefits.map((item) => item.title), ["Mercado Pago integrado", "Automatizaciones", "Seguimientos inteligentes"]);
+  assert.deepEqual(proBenefits.map((item) => item.title), ["Seguimientos y CRM", "Automatizaciones", "Mercado Pago integrado"]);
+  // Lo que se dice de Free ya no incluye seguimientos.
+  assert.doesNotMatch(freeSummary, /seguimiento/i);
+  assert.match(freeSummary, /agenda, pacientes, turnos y cobros manuales, notas/);
   assert.doesNotMatch(JSON.stringify([proBenefits, proLockCopy]), /recordatorio|whatsapp|email|mi semana|métrica|obra social/i);
 });
 
@@ -103,7 +109,61 @@ test("reservas online en pausa: solo en Free con Mercado Pago como medio", () =>
   assert.equal(bookingsPausedCopy.title, "Tus reservas online están en pausa");
   assert.match(bookingsPausedCopy.text, /Tu conexión y tus pagos anteriores quedan guardados\./);
   assert.equal(proLockCopy.mercado_pago.title, "Mercado Pago integrado");
-  assert.equal(proLockCopy.automations.title, "Automatizaciones es parte de Bellis Pro.");
+  assert.equal(proLockCopy.automations.title, "Automatizaciones es parte de Bellis Pro");
+});
+
+// Las secciones de la navegación, en orden. Las tres que dependen del plan están después de las cuatro pestañas del móvil.
+const sections = ["Resumen", "Agenda", "Pacientes", "Servicios", "Disponibilidad", "Perfil", "Seguimientos", "Automatizaciones", "Notificaciones", "Formularios", "Bellis Pro"];
+const shown = (access) => sections.filter((name) => navEntry(name, access) !== "hidden" && navEntry(name, access) !== "pending");
+const entries = (access) => Object.fromEntries(planSections.map((name) => [name, navEntry(name, access)]));
+
+test("navegación en Free: Seguimientos y Automatizaciones con candado, sin Notificaciones y sin campana", () => {
+  assert.deepEqual(entries(free), { Seguimientos: "locked", Automatizaciones: "locked", Notificaciones: "hidden" });
+  assert.equal(shown(free).includes("Notificaciones"), false);
+  assert.equal(showsNotificationBell(free), false);
+  // Lo demás es igual en cualquier plan.
+  for (const name of ["Resumen", "Agenda", "Pacientes", "Servicios", "Disponibilidad", "Perfil", "Formularios", "Bellis Pro"]) assert.equal(navEntry(name, free), "open", name);
+  assert.equal(proLockCopy.notifications.title, "Notificaciones es parte de Bellis Pro");
+  assert.equal(proLockCopy.followups.title, "Seguimientos es parte de Bellis Pro");
+  assert.equal(proLockCopy.followups.text, "Llevá un control de los pacientes que necesitan atención y qué tenés que revisar después.");
+  assert.equal(proLockCopy.automations.text, "Automatizá tareas repetitivas y reducí trabajo manual en tu práctica.");
+  assert.doesNotMatch(JSON.stringify(proLockCopy), /recordatorio|whatsapp|email/i);
+});
+
+test("navegación con prueba o con Pro: todo abierto, Notificaciones visible y campana visible", () => {
+  for (const access of [trial(12), pro]) {
+    assert.deepEqual(entries(access), { Seguimientos: "open", Automatizaciones: "open", Notificaciones: "open" });
+    assert.deepEqual(shown(access), sections);
+    assert.equal(showsNotificationBell(access), true);
+  }
+});
+
+test("navegación mientras el plan no está resuelto: nada que dependa del plan se muestra, ni como Pro ni como Free", () => {
+  // undefined = todavía cargando. Las tres secciones ocupan su lugar sin decir nada; la campana no aparece.
+  assert.deepEqual(entries(undefined), { Seguimientos: "pending", Automatizaciones: "pending", Notificaciones: "pending" });
+  assert.equal(shown(undefined).includes("Notificaciones"), false);
+  assert.equal(showsNotificationBell(undefined), false);
+  // Lo común a todos los planes sí está, desde el primer momento.
+  assert.deepEqual(shown(undefined), ["Resumen", "Agenda", "Pacientes", "Servicios", "Disponibilidad", "Perfil", "Formularios", "Bellis Pro"]);
+  // null = se consultó y no se pudo leer. No es "cargando": se trata como sin Pro, de forma estable.
+  assert.deepEqual(entries(null), { Seguimientos: "locked", Automatizaciones: "locked", Notificaciones: "hidden" });
+  assert.equal(showsNotificationBell(null), false);
+});
+
+test("al cargar, un workspace Free nunca ve pasar algo de Pro, y uno Pro nunca ve pasar un candado", () => {
+  // Lo que se ve en cada momento de una carga: primero sin resolver, después la respuesta del servidor.
+  const frames = (access) => [undefined, access].map((moment) => ({ entries: entries(moment), bell: showsNotificationBell(moment) }));
+  for (const frame of frames(free)) {
+    assert.notEqual(frame.entries.Notificaciones, "open");
+    assert.notEqual(frame.entries.Seguimientos, "open");
+    assert.notEqual(frame.entries.Automatizaciones, "open");
+    assert.equal(frame.bell, false);
+  }
+  for (const access of [trial(12), pro]) for (const frame of frames(access)) {
+    assert.notEqual(frame.entries.Seguimientos, "locked");
+    assert.notEqual(frame.entries.Automatizaciones, "locked");
+    assert.notEqual(frame.entries.Notificaciones, "hidden");
+  }
 });
 
 test("los accesos de ejemplo de la demo tienen la forma de los del servidor", () => {

@@ -8,6 +8,7 @@ export function friendlyError(caught: unknown, fallback = "No pudimos completar 
   if (/failed to fetch|networkerror|load failed|network request failed/i.test(message)) return "No pudimos conectarnos. Revisá tu conexión e intentá de nuevo.";
   if (/\bJWT\b|authentication_required|not authenticated|invalid claim|session.*(missing|expired)/i.test(message)) return "Tu sesión venció. Volvé a ingresar.";
   if (/not_authorized|permission denied|row-level security/i.test(message)) return "No tenés permiso para hacer esto.";
+  if (/pro_access_required/.test(message)) return "Esta función es parte de Bellis Pro.";
   return isOwnMessage(message) ? message : fallback;
 }
 

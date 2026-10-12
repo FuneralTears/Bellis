@@ -1,13 +1,27 @@
 -- Datos sintéticos. La transacción completa se revierte.
 begin;
+-- Dos consultorios propios de este smoke, con Bellis Pro: no depende de ningún workspace real ni de su plan.
+insert into auth.users(instance_id,id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
+select '00000000-0000-0000-0000-000000000000',('fe100000-0000-4000-8000-00000000000' || n)::uuid,'authenticated','authenticated',
+  'patient-crm-phase2-' || n || '@example.invalid','',now(),'{}','{}',now(),now() from generate_series(1,2) n;
+insert into public.workspaces(id,name,slug,plan_code,pro_started_at) values
+  ('fe100000-0000-4000-8000-0000000000a1','CRM smoke A','patient-crm-phase2-a','pro','2020-01-01'),
+  ('fe100000-0000-4000-8000-0000000000a2','CRM smoke B','patient-crm-phase2-b','pro','2020-01-01');
+insert into public.workspace_members(workspace_id,user_id,role) values
+  ('fe100000-0000-4000-8000-0000000000a1','fe100000-0000-4000-8000-000000000001','owner'),('fe100000-0000-4000-8000-0000000000a2','fe100000-0000-4000-8000-000000000002','owner');
+insert into public.professionals(id,workspace_id,user_id,display_name,specialty,public_slug) values
+  ('fe100000-0000-4000-8000-0000000000b1','fe100000-0000-4000-8000-0000000000a1','fe100000-0000-4000-8000-000000000001','Smoke A','Psicología','patient-crm-phase2-a'),
+  ('fe100000-0000-4000-8000-0000000000b2','fe100000-0000-4000-8000-0000000000a2','fe100000-0000-4000-8000-000000000002','Smoke B','Psicología','patient-crm-phase2-b');
 create temp table crm_phase2_fixture as
 select a.workspace_id w1,a.user_id u1,a.id pr1,b.workspace_id w2,b.user_id u2,b.id pr2,
   gen_random_uuid() p1,gen_random_uuid() p2,gen_random_uuid() f2
 from (select p.workspace_id,p.user_id,p.id from public.professionals p
   join public.workspace_members m on m.workspace_id=p.workspace_id and m.user_id=p.user_id
+  where p.workspace_id in ('fe100000-0000-4000-8000-0000000000a1','fe100000-0000-4000-8000-0000000000a2')
   order by p.workspace_id limit 1) a
 cross join (select p.workspace_id,p.user_id,p.id from public.professionals p
   join public.workspace_members m on m.workspace_id=p.workspace_id and m.user_id=p.user_id
+  where p.workspace_id in ('fe100000-0000-4000-8000-0000000000a1','fe100000-0000-4000-8000-0000000000a2')
   order by p.workspace_id offset 1 limit 1) b;
 grant select on crm_phase2_fixture to authenticated;
 insert into public.patients(id,workspace_id,first_name,last_name,email)

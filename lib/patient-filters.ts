@@ -22,6 +22,25 @@ export const statusOptions = [
   { value: "follow_up", label: "En seguimiento" }, { value: "inactive", label: "Inactivos" },
 ] as const;
 
+/**
+ * "En seguimiento" says a patient is being followed up: it belongs to the CRM of Bellis Pro. Without it the
+ * status is one of the basic three. The stored value is never touched: a patient saved as "En seguimiento"
+ * reads as "Activo" while the workspace has no CRM, and reads as before when it has it again.
+ */
+export const basicStatusOptions = statusOptions.filter((item) => item.value !== "follow_up");
+export function statusOptionsFor(crm: boolean) {
+  return crm ? statusOptions : basicStatusOptions;
+}
+/** The status as it is shown. */
+export function shownStatus<T extends string>(status: T, crm: boolean): T | "active" {
+  return !crm && status === "follow_up" ? "active" : status;
+}
+/** The stored values a status filter matches. "Activos" without the CRM also covers the patients shown as active. */
+export function statusFilterValues(status: string, crm: boolean): string[] {
+  if (status === "all" || (!crm && status === "follow_up")) return [];
+  return !crm && status === "active" ? ["active", "follow_up"] : [status];
+}
+
 /** What "Mostrar" has selected. A specific situation or a due date chosen under "Más filtros" leaves it on "Todos". */
 export function showOf(state: PatientFilterState): ShowFilter {
   if (state.followUp === "with" || state.followUp === "without") return state.followUp;

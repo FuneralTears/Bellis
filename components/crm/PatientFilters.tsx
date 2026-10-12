@@ -2,23 +2,26 @@
 
 import { useId, useState } from "react";
 import { Search } from "lucide-react";
-import { advancedCount, applyDue, applyShow, applySituation, dueOf, dueOptions, showOf, showOptions, situationOf, statusOptions, type PatientFilterState } from "@/lib/patient-filters";
+import { ProBadge } from "@/components/plan/PlanUi";
+import { advancedCount, applyDue, applyShow, applySituation, dueOf, dueOptions, showOf, showOptions, situationOf, statusOptionsFor, type PatientFilterState } from "@/lib/patient-filters";
 
 /**
  * Filters of the patient list, shared by /pacientes and its demo. The search, a short "Mostrar" choice and the
  * order are always there; the rest waits under "Más filtros", closed until asked for.
  * Presentation only: the host keeps the three filters it always had and decides what they query.
  */
-export function PatientFilters({ query, onQuery, sort, onSort, filters, onFilters, situations }: {
+export function PatientFilters({ query, onQuery, sort, onSort, filters, onFilters, situations, crm }: {
+  /** Whether the workspace has the CRM of Bellis Pro. Without it only the basic filters are there: search, order and the patient's status. */
+  crm: boolean;
   query: string; onQuery: (value: string) => void;
   sort: string; onSort: (value: string) => void;
   filters: PatientFilterState; onFilters: (next: PatientFilterState) => void;
   /** The specific situations a patient can be filtered by ("Pagos pendientes"…). */
-  situations: { value: string; label: string; /** Part of Bellis Pro: shown, not selectable. */ locked?: boolean }[];
+  situations: { value: string; label: string }[];
 }) {
   const [open, setOpen] = useState(false);
   const id = useId();
-  const active = advancedCount(filters);
+  const active = crm ? advancedCount(filters) : filters.status !== "all" && filters.status !== "follow_up" ? 1 : 0;
   const chips = <T extends string>(options: readonly { value: T; label: string }[], selected: string, choose: (value: T) => void) =>
     options.map((item) => <button key={item.value} type="button" aria-pressed={selected === item.value} className={selected === item.value ? "on" : ""} onClick={() => choose(item.value)}>{item.label}</button>);
 
@@ -30,25 +33,27 @@ export function PatientFilters({ query, onQuery, sort, onSort, filters, onFilter
         {open ? "Ocultar filtros" : "Más filtros"}{active > 0 && ` (${active} ${active === 1 ? "activo" : "activos"})`}
       </button>
     </div>
-    <div className="crm-filter-group" role="group" aria-labelledby={`${id}-show`}>
+    {crm && <div className="crm-filter-group" role="group" aria-labelledby={`${id}-show`}>
       <span id={`${id}-show`}>Mostrar</span>
       <div className="crm-chips">{chips(showOptions, showOf(filters), (value) => onFilters(applyShow(filters, value)))}</div>
-    </div>
+    </div>}
     {open && <div id={`${id}-more`} className="crm-more">
       <div className="crm-filter-group" role="group" aria-labelledby={`${id}-status`}>
         <span id={`${id}-status`}>Estado del paciente</span>
-        <div className="crm-chips">{chips(statusOptions, filters.status, (value) => onFilters({ ...filters, status: value }))}</div>
+        <div className="crm-chips">{chips(statusOptionsFor(crm), filters.status, (value) => onFilters({ ...filters, status: value }))}</div>
       </div>
-      <div className="crm-filter-group" role="group" aria-labelledby={`${id}-due`}>
-        <span id={`${id}-due`}>Seguimientos</span>
-        <div className="crm-chips">{chips(dueOptions, dueOf(filters), (value) => onFilters(applyDue(filters, value)))}</div>
-      </div>
-      <div className="crm-filter-group">
-        <label htmlFor={`${id}-situation`}>Situación puntual</label>
-        <select id={`${id}-situation`} className="crm-filter-select" value={situationOf(filters)} onChange={(event) => onFilters(applySituation(filters, event.target.value))}>
-          <option value="all">Cualquiera</option>{situations.map((item) => <option key={item.value} value={item.value} disabled={item.locked}>{item.label}{item.locked ? " · Bellis Pro" : ""}</option>)}
-        </select>
-      </div>
+      {crm ? <>
+        <div className="crm-filter-group" role="group" aria-labelledby={`${id}-due`}>
+          <span id={`${id}-due`}>Seguimientos</span>
+          <div className="crm-chips">{chips(dueOptions, dueOf(filters), (value) => onFilters(applyDue(filters, value)))}</div>
+        </div>
+        <div className="crm-filter-group">
+          <label htmlFor={`${id}-situation`}>Situación puntual</label>
+          <select id={`${id}-situation`} className="crm-filter-select" value={situationOf(filters)} onChange={(event) => onFilters(applySituation(filters, event.target.value))}>
+            <option value="all">Cualquiera</option>{situations.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+          </select>
+        </div>
+      </> : <p className="crm-filter-pro"><ProBadge /> Con Bellis Pro también filtrás por seguimientos y por pacientes que necesitan atención.</p>}
     </div>}
   </div>;
 }

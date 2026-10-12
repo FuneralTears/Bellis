@@ -1,3 +1,4 @@
+import { shownStatus } from "@/lib/patient-filters";
 import type { ComponentType, ReactNode } from "react";
 import {
   ArrowRight,
@@ -223,14 +224,14 @@ export function FollowUpCard({ item, today, children }: { item: FollowUpView; to
 
 type Wrap<T> = (row: T, content: ReactNode, options: { className: string; label?: string }) => ReactNode;
 
-export function PatientsTable({ patients, today, automaticIds, smart, formatDate, statusLabel, renderOpen }: {
+export function PatientsTable({ patients, today, automaticIds, crm, formatDate, statusLabel, renderOpen }: {
   patients: OpportunityOverview[]; today: string; automaticIds: Set<string>;
-  /** Whether the suggestions of Bellis Pro are shown next to the facts. */
-  smart: boolean;
+  /** Whether the workspace has the CRM of Bellis Pro. Without it the two columns about what to review are not there. */
+  crm: boolean;
   formatDate: (value: string | null) => string; statusLabel: (status: PatientStatus) => string; renderOpen: Wrap<OpportunityOverview>;
 }) {
-  return <div className="crm-table-wrap"><table className="crm-table crm-stack-table"><thead><tr><th>Paciente</th><th>Teléfono</th><th>Último turno</th><th>Próximo turno</th><th>Turnos</th><th>Estado</th><th>Para revisar</th><th>Seguimiento</th><th><span className="sr-only">Abrir</span></th></tr></thead><tbody>{patients.map((patient) => {
-    const signals = detectOpportunities(patient, smart);
+  return <div className="crm-table-wrap"><table className="crm-table crm-stack-table"><thead><tr><th>Paciente</th><th>Teléfono</th><th>Último turno</th><th>Próximo turno</th><th>Turnos</th><th>Estado</th>{crm && <><th>Para revisar</th><th>Seguimiento</th></>}<th><span className="sr-only">Abrir</span></th></tr></thead><tbody>{patients.map((patient) => {
+    const signals = detectOpportunities(patient, crm);
     const primary = signals.find((signal) => signal.level === "attention") ?? signals[0];
     return <tr key={patient.id}>
       <td className="crm-cell-main">{renderOpen(patient, <><PatientAvatar name={patient.full_name} /><span><b>{patient.full_name}</b><small>{patient.email ?? "Sin email"}</small></span></>, { className: "crm-person" })}</td>
@@ -238,9 +239,9 @@ export function PatientsTable({ patients, today, automaticIds, smart, formatDate
       <td data-label="Último turno">{formatDate(patient.last_turn)}</td>
       <td data-label="Próximo turno">{formatDate(patient.next_turn)}</td>
       <td data-label="Turnos">{patient.turn_count}</td>
-      <td data-label="Estado"><StatusTag status={patient.status}>{statusLabel(patient.status)}</StatusTag></td>
-      <td data-label="Para revisar">{primary ? <OpportunityTag item={primary} more={signals.length - 1} /> : "—"}</td>
-      <td data-label="Seguimiento"><span className="crm-tag-group"><FollowUpBucketTag dueDate={patient.follow_up_due_date} today={today} />{automaticIds.has(patient.id) && <OriginTag source="automation" />}</span></td>
+      <td data-label="Estado"><StatusTag status={shownStatus(patient.status, crm)}>{statusLabel(shownStatus(patient.status, crm))}</StatusTag></td>
+      {crm && <><td data-label="Para revisar">{primary ? <OpportunityTag item={primary} more={signals.length - 1} /> : "—"}</td>
+      <td data-label="Seguimiento"><span className="crm-tag-group"><FollowUpBucketTag dueDate={patient.follow_up_due_date} today={today} />{automaticIds.has(patient.id) && <OriginTag source="automation" />}</span></td></>}
       <td className="crm-cell-open">{renderOpen(patient, <ArrowRight size={16} />, { className: "crm-open", label: `Ver ficha de ${patient.full_name}` })}</td>
     </tr>;
   })}</tbody></table></div>;

@@ -94,7 +94,7 @@ begin
   -- 3. Durante la prueba: Pro completo, y todo lo de Free.
   if a->>'tier' <> 'pro_trial' or (a->>'has_pro_access')::boolean is not true or a->>'plan_code' <> 'free' then raise exception 'trial_access_wrong: %', a; end if;
   if (a->>'trial_days_remaining')::integer <> 30 or (a->>'trial_last_day')::date <> (select today from pl) + 30 then raise exception 'trial_dates_wrong: %', a; end if;
-  if pg_temp.caps((select w3 from pl)) <> 'advanced_insights,advanced_tags,automations,external_payment_link,insurance_management,manual_appointments,manual_followups,manual_patients,manual_payments,marketing_tools,mercado_pago,patient_origin,public_booking,reports,smart_followups,weekly_metrics'
+  if pg_temp.caps((select w3 from pl)) <> 'advanced_insights,advanced_tags,automations,crm,external_payment_link,followups,insurance_management,manual_appointments,manual_patients,manual_payments,marketing_tools,mercado_pago,patient_notes,patient_origin,public_booking,reports,smart_followups,weekly_metrics'
     then raise exception 'trial_capabilities_wrong: %', pg_temp.caps((select w3 from pl)); end if;
   -- Un miembro no ve el plan de otro workspace.
   perform pg_temp.fails(format('select public.workspace_access(%L)',(select w1 from pl)),'not_authorized');
@@ -122,8 +122,9 @@ update public.workspaces set trial_started_at=now()-interval '31 days',trial_end
 set local role authenticated;
 do $$ declare a jsonb := public.workspace_access((select w3 from pl)); begin
   if a->>'tier' <> 'free' or (a->>'has_pro_access')::boolean or a->'trial_days_remaining' <> 'null'::jsonb or a->>'trial_started_at' is null then raise exception 'expired_trial_access_wrong: %', a; end if;
-  -- 6. Free conserva todo lo necesario para trabajar a mano, y nada de Pro.
-  if pg_temp.caps((select w3 from pl)) <> 'external_payment_link,manual_appointments,manual_followups,manual_patients,manual_payments,public_booking'
+  -- 6. Free conserva la operación básica (agenda, pacientes, cobros manuales, notas, reserva) y nada de Pro:
+  -- ni seguimientos, ni CRM, ni automatizaciones, ni Mercado Pago.
+  if pg_temp.caps((select w3 from pl)) <> 'external_payment_link,manual_appointments,manual_patients,manual_payments,patient_notes,public_booking'
     then raise exception 'free_capabilities_wrong: %', pg_temp.caps((select w3 from pl)); end if;
   -- Terminar el onboarding de nuevo no vuelve a dar la prueba.
   perform public.complete_bellis_onboarding('{"service":"Consulta","description":"","price":"25000","duration":"60","mode":"Online","start":"09:00","end":"18:00","notice":"24","buffer":"15","days":[true,true,true,true,true,false,false]}'::jsonb);
@@ -139,7 +140,7 @@ do $$ begin
   if (select count(*) from public.audit_events where workspace_id=(select w3 from pl) and action in ('trial_started','plan_changed','pro_activated')) <> 1 then raise exception 'expiry_wrote_events'; end if;
 end $$;
 
--- ===== 6. En Free se trabaja a mano: paciente, turno, cobro, cancelación, nota y seguimiento =====
+-- ===== 6. En Free se trabaja a mano: paciente, turno, cobro, cancelación y nota. Los seguimientos son de Pro =====
 -- W1 con la prueba vencida.
 update public.workspaces set trial_started_at=now()-interval '40 days',trial_ends_at=now()-interval '9 days' where id=(select w1 from pl);
 set local role authenticated;
@@ -157,8 +158,11 @@ do $$ declare f record; v_patient uuid; v_slot timestamptz; v_paid uuid; v_pendi
   v_paid := public.create_manual_appointment(f.pro,v_patient,f.svc,v_slot,'cash',2500000);
   perform public.cancel_manual_appointment(v_paid,'no_payment');
   insert into public.patient_notes(workspace_id,patient_id,author_id,content) values(f.w1,v_patient,f.u1,'Nota en Free');
-  insert into public.patient_follow_ups(workspace_id,patient_id,professional_id,title,due_date,created_by) values(f.w1,v_patient,f.pro,'Llamar',f.today + 1,f.u1);
   insert into pl_ids values('patient',v_patient);
+  -- Crear un seguimiento en Free se rechaza en la tabla misma, por cualquier camino.
+  perform pg_temp.fails(format('insert into public.patient_follow_ups(workspace_id,patient_id,professional_id,title,due_date,created_by) values(%L,%L,%L,%L,%L,%L)',
+    f.w1,v_patient,f.pro,'Llamar',f.today + 1,f.u1),'pro_access_required');
+  if exists(select 1 from public.patient_follow_ups where workspace_id=f.w1) then raise exception 'free_created_follow_up'; end if;
   if (select count(*) from public.payments p join public.booking_intents i on i.id=p.booking_intent_id where i.patient_id=v_patient and p.provider='offline' and p.status='approved') <> 2
     or (select status from public.appointments where id=v_paid) <> 'cancelled' then raise exception 'manual_work_failed_in_free'; end if;
 
@@ -234,6 +238,13 @@ end $$;
 -- ===== 8. Un pago de Mercado Pago iniciado con Pro se termina aunque Pro venza en el medio =====
 set local role authenticated;
 select pg_temp.as_user((select u1 from pl));
+-- Con Pro, los seguimientos vuelven a funcionar: se crea uno que después tiene que sobrevivir al vencimiento.
+do $$ declare f record; v_id uuid; begin
+  select * into f from pl;
+  insert into public.patient_follow_ups(workspace_id,patient_id,professional_id,title,due_date,created_by)
+  values(f.w1,(select id from pl_ids where tag='patient'),f.pro,'Llamar para reprogramar',f.today + 1,f.u1) returning id into v_id;
+  insert into pl_ids values('follow_up',v_id);
+end $$;
 -- Con Pro, elegir Mercado Pago vuelve a estar permitido.
 update public.workspaces set payment_provider='mercado_pago_ar' where id=(select w1 from pl);
 set local role service_role;
@@ -261,6 +272,17 @@ do $$ declare f record; v_intent uuid := (select id from pl_ids where tag='mp_in
   -- Pero no se abre otro checkout, y la conexión guardada sigue ahí.
   perform pg_temp.fails(format('select public.create_checkout_intent(%L,%L,%L,%L,%L,%L::jsonb,%L)',f.svc,'Prueba','Tarde','h27-late@example.invalid','+5491155552706',
     jsonb_build_array(jsonb_build_object('question_id',(select id from pl_ids where tag='question'),'answer','Consulta'))::text,repeat('5',64)),'pro_access_required');
+end $$;
+reset role;
+-- Sin Pro, el seguimiento que ya existía sigue ahí y se puede leer, pero no se puede completar ni editar.
+set local role authenticated;
+select pg_temp.as_user((select u1 from pl));
+do $$ declare v_id uuid := (select id from pl_ids where tag='follow_up'); begin
+  perform pg_temp.fails(format('update public.patient_follow_ups set status=%L where id=%L','completed',v_id),'pro_access_required');
+  perform pg_temp.fails(format('update public.patient_follow_ups set title=%L where id=%L','Otro título',v_id),'pro_access_required');
+  if (select status || ':' || title from public.patient_follow_ups where id=v_id) is distinct from 'pending:Llamar para reprogramar' then raise exception 'follow_up_lost_or_changed_on_downgrade'; end if;
+  -- Las notas no dependen del plan.
+  insert into public.patient_notes(workspace_id,patient_id,author_id,content) values((select w1 from pl),(select id from pl_ids where tag='patient'),(select u1 from pl),'Nota después de bajar a Free');
 end $$;
 reset role;
 do $$ begin
@@ -292,6 +314,14 @@ do $$ begin
 end $$;
 -- Con Pro, sí. Dos turnos: uno cuya ejecución va a llegar a su hora y otro que queda para más adelante.
 select private.admin_set_workspace_plan((select w1 from pl),'pro',now()+interval '30 days');
+-- Y el seguimiento que había quedado en pausa se puede completar: el historial volvió intacto.
+set local role authenticated;
+select pg_temp.as_user((select u1 from pl));
+update public.patient_follow_ups set status='completed' where id=(select id from pl_ids where tag='follow_up');
+reset role;
+do $$ begin
+  if (select status from public.patient_follow_ups where id=(select id from pl_ids where tag='follow_up')) <> 'completed' then raise exception 'follow_up_not_usable_after_upgrade'; end if;
+end $$;
 select pg_temp.completed_turn('due-turn',3);
 select pg_temp.completed_turn('future-turn',6);
 do $$ declare f record; begin

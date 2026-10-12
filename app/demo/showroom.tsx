@@ -18,7 +18,6 @@ import { followUpBucket, priorityLabels } from "../pacientes/timeline";
 import {
   detectOpportunities,
   hasAttention,
-  isSmartOpportunity,
   opportunityFilters,
 } from "../pacientes/opportunities";
 import {
@@ -109,10 +108,10 @@ export function DemoDashboard({
   navigate,
   top,
   automationsLock,
-  pendingFooter,
+  pendingLock,
 }: {
-  /** Inside the pending panel: what the example plan leaves out of it. */
-  pendingFooter?: ReactNode;
+  /** Shown in place of the follow-ups of the day when the example plan does not include them. */
+  pendingLock?: ReactNode;
   /** The notices of the example plan, above the numbers. */
   top?: ReactNode;
   /** Shown in place of the automations summary when the example plan does not include them. */
@@ -178,7 +177,7 @@ export function DemoDashboard({
             Icon: ListChecks,
             tone: "lilac",
           },
-        ].map(({ label, value, detail, Icon, tone }) => (
+        ].filter((item) => !pendingLock || item.label !== "Seguimientos pendientes").map(({ label, value, detail, Icon, tone }) => (
           <section key={label} className="demo-panel live-metric">
             <div className="live-metric-head">
               <span>{label}</span>
@@ -231,7 +230,7 @@ export function DemoDashboard({
             <p className="live-empty">No hay próximos turnos en esta demo.</p>
           )}
         </section>
-        <section className="demo-panel">
+        {pendingLock ?? <section className="demo-panel">
           <div className="panel-head">
             <h2>
               Pendientes del día{" "}
@@ -272,8 +271,7 @@ export function DemoDashboard({
             {state.notifications.filter((item) => !item.read).length}{" "}
             notificaciones sin leer <ArrowRight size={15} />
           </button>
-          {pendingFooter}
-        </section>
+        </section>}
       </div>
       <div className="dashboard-secondary-grid">
         {automationsLock ?? <section className="demo-panel">
@@ -330,10 +328,10 @@ export function DemoFollowUps({
   state,
   patient,
   automation,
-  smart,
+  locked,
 }: {
-  /** Whether the example plan includes the suggestions of Bellis Pro. */
-  smart: boolean;
+  /** The example plan does not include follow-ups: the section shows this page in place of its content. */
+  locked?: ReactNode;
   state: State;
   patient: (name: string) => void;
   automation: () => void;
@@ -345,6 +343,7 @@ export function DemoFollowUps({
   const [signal, setSignal] = useState("attention");
   const [notice, setNotice] = useState("");
   const text = search.trim().toLocaleLowerCase("es-AR");
+  if (locked) return <>{locked}</>;
   const rank = { overdue: 0, today: 1, upcoming: 2, none: 3 };
   const visible = state.tasks
     .filter(
@@ -363,10 +362,10 @@ export function DemoFollowUps({
     );
   const patients = demoPatients(state.tasks);
   const names = new Map(patients.map((item) => [item.id, item.full_name]));
-  const attention = patients.filter(hasAttention).length;
+  const attention = patients.filter((item) => hasAttention(item, true)).length;
   const signals = patients
     .flatMap((item) =>
-      detectOpportunities(item, smart)
+      detectOpportunities(item, true)
         .filter(
           (found) =>
             signal === "all" ||
@@ -444,8 +443,8 @@ export function DemoFollowUps({
             Mostrar
             <select value={signal} onChange={(e) => setSignal(e.target.value)}>
               {opportunityFilters.map((item) => (
-                <option key={item.kind} value={item.kind} disabled={!smart && isSmartOpportunity(item.kind)}>
-                  {item.label}{!smart && isSmartOpportunity(item.kind) ? " · Bellis Pro" : ""}
+                <option key={item.kind} value={item.kind}>
+                  {item.label}
                 </option>
               ))}
             </select>

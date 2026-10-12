@@ -28,8 +28,12 @@ export async function loadCrmContext(): Promise<CrmContext> {
 /** The plan of the workspace, resolved by the server. One call per screen; a failure reads as "nothing of Bellis Pro". */
 export async function loadWorkspaceAccess(workspaceId: string): Promise<WorkspaceAccess | null> {
   const client = await getSupabase();
-  const { data, error } = await client.rpc("workspace_access", { p_workspace: workspaceId });
-  return error || !data ? null : data as WorkspaceAccess;
+  // One more try before giving up: a plan read as "unknown" shows the workspace as if it had nothing of Bellis Pro.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const { data, error } = await client.rpc("workspace_access", { p_workspace: workspaceId });
+    if (!error && data) return data as WorkspaceAccess;
+  }
+  return null;
 }
 
 export function crmDate(value: string | null, market: MarketConfig): string {

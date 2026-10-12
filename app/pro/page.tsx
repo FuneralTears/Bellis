@@ -43,7 +43,7 @@ export default function BellisProPage() {
   }
 
   return <CrmShell context={context} breadcrumb="Bellis Pro">
-    <PageHeader title="Bellis Pro" description="Bellis es gratis para organizarte. Pro es para automatizar y entender mejor tu práctica." />
+    <PageHeader title="Bellis Pro" description="Bellis Free organiza tu agenda y tus pacientes. Bellis Pro te ayuda a hacer seguimiento, automatizar y cobrar con menos trabajo manual." />
     {error && <p className="live-error" role="alert">{error}</p>}
     {!context && !error ? <p className="live-empty" role="status">Cargando tu plan…</p>
       : context && <ProOverview key={context.access?.tier ?? "none"} access={context.access} canRequest={canRequest} onRequest={request} />}

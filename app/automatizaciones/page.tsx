@@ -11,7 +11,7 @@ import { KpiStrip, PageHeader } from "@/components/crm/CrmUi";
 import { DetailList, RuleRow, RunStatusTag, ruleSentence, ruleStateLabel, runExplanation } from "@/components/automation/AutomationUi";
 import { Switch } from "@/components/ui/switch";
 import { hasCapability, proLockCopy } from "@/lib/entitlements";
-import { ProLock } from "@/components/plan/PlanUi";
+import { ProLockedPage } from "@/components/plan/PlanUi";
 import "./automations.css";
 
 type Rule = { id: string; workspace_id: string; rule_key: "first_consultation" | "inactive_patient" | "pending_payment"; name: string; description: string; trigger_type: string; condition_type: string; action_title: string; action_priority: "low" | "medium" | "high"; delay_minutes: number; enabled: boolean; enabled_at: string | null; updated_at: string };
@@ -100,6 +100,12 @@ export default function AutomationsPage() {
   const active = rules.filter((rule) => rule.enabled).length;
   const wait = (rule: Rule) => `${rule.delay_minutes / descriptions[rule.rule_key].factor} ${descriptions[rule.rule_key].unit}`;
 
+  // Automations are part of Bellis Pro. Nothing runs or changes without it; what already ran can still be read.
+  if (context && !pro) return <CrmShell context={context} breadcrumb="Automatizaciones">
+    <PageHeader title="Automatizaciones" description="Tareas que Bellis hace por vos según lo que pasa con tus pacientes y turnos."/>
+    <ProLockedPage title={proLockCopy.automations.title} text={proLockCopy.automations.text} action={<Link className="demo-primary plan-cta-link" href="/pro">Conocer Bellis Pro <ArrowRight size={16}/></Link>}
+      secondary={<Link className="plan-link" href="/automatizaciones/ejecuciones"><History size={15}/> Ver historial de actividad</Link>}/>
+  </CrmShell>;
   return <CrmShell context={context} breadcrumb="Automatizaciones">
     <PageHeader title="Automatizaciones" description="Bellis puede hacer algunas tareas por vos para que no tengas que revisar paciente por paciente."><Link className="crm-btn" href="/automatizaciones/ejecuciones"><History size={15}/> Ver actividad</Link></PageHeader>
     {error && <p className="live-error" role="alert">{error}</p>}{notice && <p className="live-success" role="status">{notice}</p>}
@@ -109,7 +115,6 @@ export default function AutomationsPage() {
       { label: "Pausadas", value: loading ? "—" : rules.length - active, icon: Pause, tone: "neutral" },
       { label: "Para revisar", value: loading ? "—" : failedCount, icon: CircleAlert, tone: failedCount > 0 ? "coral" : "neutral" },
     ]}/>
-    {context && !pro && <ProLock title={proLockCopy.automations.title} text={`${proLockCopy.automations.text} Tus automatizaciones y su historial siguen acá; mientras tanto no se ejecutan.`} action={<Link className="plan-link" href="/pro">Conocer Bellis Pro <ArrowRight size={15}/></Link>}/>}
     {failedCount > 0 && <div className="auto-alert"><CircleAlert size={16}/><strong>{failedCount === 1 ? "Hay 1 tarea automática que necesita tu revisión." : `Hay ${failedCount} tareas automáticas que necesitan tu revisión.`}</strong><Link className="crm-link" href="/automatizaciones/ejecuciones?status=failed">Ver actividad <ArrowRight size={15}/></Link></div>}
     <p className="auto-note"><ShieldCheck size={15}/> <span>Cuando una automatización está activa, Bellis revisa esto automáticamente y te deja el seguimiento listo. No envía mensajes a tus pacientes ni toma decisiones clínicas. Empiezan pausadas y, al activarlas, tienen en cuenta lo que pase desde ese momento.{!loading && !canEdit ? " Solo quienes administran este espacio pueden cambiarlas." : ""}</span></p>
     {loading ? <p className="live-empty" role="status">Cargando automatizaciones…</p> : <>

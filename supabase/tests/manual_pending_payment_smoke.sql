@@ -8,6 +8,8 @@ from generate_series(1,2) n;
 insert into public.workspaces(id,name,slug,payment_provider) values
   ('fb000000-0000-4000-8000-0000000000a1','Pending payment smoke','pending-payment-smoke','external_link'),
   ('fb000000-0000-4000-8000-0000000000a2','Pending payment smoke B','pending-payment-smoke-b','external_link');
+-- Este smoke usa seguimientos, que son de Bellis Pro: sus workspaces de prueba lo tienen activo.
+update public.workspaces set plan_code='pro',pro_started_at='2020-01-01' where created_at=now();
 insert into public.workspace_members(workspace_id,user_id,role) values
   ('fb000000-0000-4000-8000-0000000000a1','fb000000-0000-4000-8000-000000000001','owner'),
   ('fb000000-0000-4000-8000-0000000000a2','fb000000-0000-4000-8000-000000000002','owner');

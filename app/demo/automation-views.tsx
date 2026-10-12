@@ -42,7 +42,7 @@ export function DemoBell({ state, navigate }: { state: State; navigate: Navigate
 }
 
 /** Showroom mirror of /automatizaciones and /automatizaciones/ejecuciones. Nothing runs for real. */
-export function DemoAutomations({ state, patient, lock }: { state: State; patient: (name: string) => void; /** The example plan does not include automations: shown on top, and everything is for reading. */ lock?: ReactNode }) {
+export function DemoAutomations({ state, patient, lock }: { state: State; patient: (name: string) => void; /** The example plan does not include automations: the rules page shows this in place of its content, and the history is for reading. */ lock?: (history: ReactNode) => ReactNode }) {
   const { view, runId } = state.automation;
   const setView = (next: "rules" | "runs") => state.setAutomation({ view: next, runId: null });
   const setRunId = (id: string | null) => state.setAutomation({ view: "runs", runId: id });
@@ -96,10 +96,14 @@ export function DemoAutomations({ state, patient, lock }: { state: State; patien
   const active = state.rules.filter((rule) => rule.enabled).length;
   const selected = state.rules.find((rule) => rule.id === selectedId);
   const history = runs.filter((run) => run.ruleId === selectedId);
+  // Without Bellis Pro the rules are not shown or changed; what already ran can still be read.
+  if (lock) return <>
+    <PageHeader title="Automatizaciones" description="Tareas que Bellis hace por vos según lo que pasa con tus pacientes y turnos."/>
+    {lock(<button type="button" className="plan-link" onClick={() => { setView("runs"); setStatus("all"); setNotice(""); }}><History size={15}/> Ver historial de actividad</button>)}
+  </>;
   return <>
     <PageHeader title="Automatizaciones" description="Bellis puede hacer algunas tareas por vos para que no tengas que revisar paciente por paciente."><button className="crm-btn" onClick={() => { setView("runs"); setStatus("all"); setNotice(""); }}><History size={15}/> Ver actividad</button></PageHeader>
     {notice && <p className="live-success" role="status">{notice}</p>}
-    {lock}
     <KpiStrip items={[
       { label: "Automatizaciones", value: state.rules.length, icon: Settings2, tone: "petrol" },
       { label: "Funcionando", value: active, icon: Check, tone: "sage" },

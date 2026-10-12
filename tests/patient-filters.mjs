@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { advancedCount, applyDue, applyShow, applySituation, dueOf, showOf, situationOf } from "../lib/patient-filters.ts";
+import { advancedCount, applyDue, applyShow, applySituation, basicStatusOptions, dueOf, showOf, shownStatus, situationOf, statusFilterValues, statusOptionsFor } from "../lib/patient-filters.ts";
 
 const none = { status: "all", followUp: "all", opportunity: "all" };
 
@@ -47,4 +47,22 @@ test("situación puntual: reemplaza a Necesitan atención y cuenta como filtro a
   assert.equal(advancedCount(applyShow(none, "attention")), 0);
   assert.equal(advancedCount(applyShow(none, "with")), 0);
   assert.equal(advancedCount({ status: "active", followUp: "today", opportunity: "pending_payment" }), 3);
+});
+
+test("En seguimiento es un estado del CRM: sin Bellis Pro no se ofrece ni se muestra, y el dato guardado no cambia", () => {
+  assert.deepEqual(statusOptionsFor(true).map((item) => item.value), ["all", "new", "active", "follow_up", "inactive"]);
+  assert.deepEqual(statusOptionsFor(false).map((item) => item.value), ["all", "new", "active", "inactive"]);
+  assert.equal(basicStatusOptions.some((item) => item.label === "En seguimiento"), false);
+  // Un paciente guardado como "En seguimiento" se lee como activo sin CRM, y como antes con CRM.
+  assert.equal(shownStatus("follow_up", false), "active");
+  assert.equal(shownStatus("follow_up", true), "follow_up");
+  for (const status of ["new", "active", "inactive"]) { assert.equal(shownStatus(status, false), status); assert.equal(shownStatus(status, true), status); }
+  // El filtro "Activos" sin CRM incluye a esos pacientes: lo que se ve y lo que se filtra coinciden.
+  assert.deepEqual(statusFilterValues("active", false), ["active", "follow_up"]);
+  assert.deepEqual(statusFilterValues("active", true), ["active"]);
+  assert.deepEqual(statusFilterValues("follow_up", true), ["follow_up"]);
+  // Un filtro "En seguimiento" que había quedado elegido no filtra nada sin CRM.
+  assert.deepEqual(statusFilterValues("follow_up", false), []);
+  assert.deepEqual(statusFilterValues("all", false), []);
+  assert.deepEqual(statusFilterValues("inactive", false), ["inactive"]);
 });
