@@ -11,7 +11,7 @@ export type PaymentErrorCode =
   | "mp_preference_failed" | "mp_payment_lookup_failed" | "mp_payment_mismatch" | "mp_payment_status_unsupported"
   | "mp_webhook_invalid_signature" | "mp_webhook_malformed"
   | "booking_resume_invalid" | "booking_resume_expired" | "booking_intent_invalid"
-  | "booking_payment_pending" | "booking_payment_rejected" | "booking_slot_unavailable"
+  | "booking_payment_pending" | "booking_payment_rejected" | "booking_slot_unavailable" | "booking_online_unavailable"
   | "rate_limited" | "internal_error";
 
 /** The short internal messages thrown by the payment modules and the database, and the code each one means. */
@@ -71,6 +71,8 @@ const patientMessages: Partial<Record<PaymentErrorCode, string>> = {
   booking_payment_pending: "El pago todavía no está confirmado",
   booking_payment_rejected: "El pago no se aprobó. Podés intentarlo de nuevo.",
   booking_slot_unavailable: "Ese horario ya no está disponible. Elegí otro.",
+  // One sentence for every reason a page cannot take bookings online. It never says why: that is for the practice's panel.
+  booking_online_unavailable: "Las reservas online no están disponibles por el momento. Para pedir un turno, comunicate directamente con el consultorio.",
   rate_limited: "Intentá nuevamente más tarde",
 };
 /** What a patient reads for a code. Anything about Mercado Pago or the connection reads the same: they cannot act on it. */

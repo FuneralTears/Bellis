@@ -13,6 +13,8 @@ do $$ begin if (select count(*) from crm_phase5_fixture where u1 is not null and
 insert into public.workspaces(id,name,slug)
 select w1,'CRM Phase 5 A','crm-phase5-'||w1 from crm_phase5_fixture
 union all select w2,'CRM Phase 5 B','crm-phase5-'||w2 from crm_phase5_fixture;
+-- Lo que prueba este smoke es de Bellis Pro: sus workspaces de prueba lo tienen activo.
+update public.workspaces set plan_code='pro',pro_started_at='2020-01-01' where created_at=now();
 insert into public.workspace_members(workspace_id,user_id,role)
 select w1,u1,'owner'::public.workspace_role from crm_phase5_fixture
 union all select w2,u2,'owner'::public.workspace_role from crm_phase5_fixture;

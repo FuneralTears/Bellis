@@ -22,7 +22,8 @@ export type ConnectionStore = {
 };
 /** Same shape the checkout already uses for a seller account. */
 export type ValidAccount = { seller_user_id: string; access_token: string; environment: "test" | "production" };
-export type CompletionOutcome = "connected" | "invalid_state" | "error";
+/** `plan_required`: the workspace's plan no longer includes Mercado Pago. Nothing was saved. */
+export type CompletionOutcome = "connected" | "invalid_state" | "error" | "plan_required";
 
 type Fetch = typeof fetch;
 /** `report` receives the short internal reason of a failure, for the log. Never a token or a code. */
@@ -126,6 +127,8 @@ export async function completeOAuth(
     await store.saveConnection(workspaceId, params.userId, tokens);
     return "connected";
   } catch (caught) {
+    // The plan ended between starting and coming back: the database refuses to save and the old connection stays as it was.
+    if (!(caught instanceof MercadoPagoOAuthError) && String((caught as { message?: unknown } | null)?.message ?? "").includes("pro_access_required")) return "plan_required";
     clock.report?.(caught instanceof MercadoPagoOAuthError ? caught.message : "connection_not_saved");
     return "error";
   }

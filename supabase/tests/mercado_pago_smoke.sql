@@ -2,6 +2,8 @@
 begin;
 insert into public.workspaces(id,name,slug,payment_provider)
 values('f3000000-0000-4000-8000-000000000001','MP smoke','mp-smoke','mercado_pago_ar');
+-- Lo que prueba este smoke es de Bellis Pro: sus workspaces de prueba lo tienen activo.
+update public.workspaces set plan_code='pro',pro_started_at='2020-01-01' where created_at=now();
 insert into auth.users(instance_id,id,aud,role,email,encrypted_password,email_confirmed_at,
   raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
 values('00000000-0000-0000-0000-000000000000','f3000000-0000-4000-8000-000000000002',

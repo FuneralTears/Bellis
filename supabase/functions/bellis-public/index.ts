@@ -52,6 +52,12 @@ async function limit(request: Request, action: string, max: number, windowMinute
   if (error) throw new Error("rate_limit_unavailable");
   return data === true;
 }
+/** What the workspace's plan includes, asked to the database every time: no dates or plans are decided here. */
+async function hasCapability(workspaceId: string, capability: string) {
+  const { data, error } = await db.rpc("workspace_capability", { p_workspace: workspaceId, p_capability: capability });
+  if (error) throw new Error("capability_unavailable");
+  return data === true;
+}
 async function getIntent(request: Request) {
   const token = request.headers.get("x-bellis-intent") ?? "";
   if (!/^[a-f0-9]{64}$/.test(token)) return null;
@@ -92,11 +98,9 @@ async function profile(request: Request, slug: string) {
     .eq("public_slug", slug).eq("active", true).maybeSingle();
   if (error || !professional) return json(request, { error: "Perfil no encontrado" }, 404);
   const { data: workspace } = await db.from("workspaces")
-    .select("id,name,timezone,currency_code,locale,status,trial_ends_at,payment_provider,external_payment_url")
+    .select("id,name,timezone,currency_code,locale,status,payment_provider,external_payment_url")
     .eq("id", professional.workspace_id).single();
-  if (!workspace || workspace.status === "suspended" ||
-    (workspace.status === "trial" && new Date(workspace.trial_ends_at).getTime() < Date.now()))
-    return json(request, { error: "Esta agenda no está disponible" }, 404);
+  if (!workspace || workspace.status === "suspended") return json(request, { error: "Esta agenda no está disponible" }, 404);
   const { data: services, error: serviceError } = await db.from("services")
     .select("id,name,description,price_minor,currency_code,duration_minutes,modality,external_payment_url")
     .eq("workspace_id", professional.workspace_id).eq("professional_id", professional.id).eq("active", true)
@@ -123,14 +127,20 @@ async function profile(request: Request, slug: string) {
         conditions: (conditionResult.data ?? []).filter((rule) => rule.target_question_id === item.id)
           .map((rule) => ({ id: rule.id, questionId: rule.question_id, operator: rule.operator, value: rule.value, action: rule.action })) })),
   }]));
+  // Mercado Pago checkout belongs to the plan. Without it the page stays up and nothing can be booked online.
   const mercadoPagoReady = workspace.payment_provider === "mercado_pago_ar" &&
     !!Deno.env.get("MERCADO_PAGO_WEBHOOK_SECRET") &&
+    await hasCapability(workspace.id, "mercado_pago") &&
     await mercadoPagoConnected(db, workspace.id);
   const externalReady = workspace.payment_provider === "external_link";
+  const listed = (services ?? []).map(({ external_payment_url, ...item }) => ({ ...item,
+    can_checkout: mercadoPagoReady || (externalReady && !!(external_payment_url || workspace.external_payment_url)) }));
+  const bookingAvailable = listed.some((item) => item.can_checkout);
   return json(request, {
     professional: { ...professional, workspace_id: undefined, id: undefined },
-    services: (services ?? []).map(({ external_payment_url, ...item }) => ({ ...item,
-      can_checkout: mercadoPagoReady || (externalReady && !!(external_payment_url || workspace.external_payment_url)) })), questionnaires,
+    services: listed, questionnaires,
+    // Said outright so the page does not have to work it out. The sentence is the same whatever the reason.
+    bookingAvailable, bookingUnavailableMessage: bookingAvailable ? null : patientMessage("booking_online_unavailable"),
     market: { timezone: workspace.timezone, currency: workspace.currency_code.trim(), locale: workspace.locale },
     canCheckout: mercadoPagoReady || externalReady,
     paymentFlow: mercadoPagoReady
@@ -164,6 +174,9 @@ Deno.serve(async (request) => {
       const { data: method } = target
         ? await db.from("workspaces").select("payment_provider").eq("id", target.workspace_id).maybeSingle() : { data: null };
       let account: ValidAccount | null = null;
+      // Decided before anything is created: no patient, no request and no checkout for a plan without Mercado Pago.
+      if (target && method?.payment_provider === "mercado_pago_ar" && !await hasCapability(target.workspace_id, "mercado_pago"))
+        return refuse(request, "booking_online_unavailable", 409);
       if (target && method?.payment_provider === "mercado_pago_ar") {
         try {
           if (!Deno.env.get("MERCADO_PAGO_WEBHOOK_SECRET")) throw new Error("webhook_secret_missing");
@@ -184,7 +197,9 @@ Deno.serve(async (request) => {
         p_answers: body.answers,
         p_token_hash: await sha256(token),
       });
-      if (error) return json(request, { error: "No pudimos crear la solicitud. Revisá el formulario y que el cobro esté configurado." }, 400);
+      // The database checks the plan and the payment setup again. Either way the patient reads the same sentence.
+      if (error && /pro_access_required|payment_not_configured/.test(error.message ?? "")) return refuse(request, "booking_online_unavailable", 409);
+      if (error) return json(request, { error: "No pudimos crear la solicitud. Revisá el formulario e intentá de nuevo." }, 400);
       const { data: intent } = await db.from("booking_intents")
         .select("id,workspace_id,service_id,professional_id,price_minor,currency_code,expires_at").eq("id", intentId).single();
       if (!intent) throw new Error("intent_unavailable");

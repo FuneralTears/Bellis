@@ -58,6 +58,9 @@ Deno.serve(async (request) => {
       } catch (caught) {
         if (caught instanceof Error && caught.message.includes("not_authorized"))
           return json(request, { error: "Solo quien administra el espacio puede conectar Mercado Pago." }, 403);
+        // The database decides what the plan includes; here it is only told apart from a failure.
+        if (caught instanceof Error && caught.message.includes("pro_access_required"))
+          return json(request, { error: "Mercado Pago integrado es parte de Bellis Pro.", code: "plan_required" }, 403);
         throw caught;
       }
     }
