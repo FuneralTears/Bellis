@@ -5,7 +5,7 @@
  *
  *   node scripts/assert-staging-env.mjs            checks the local site settings and the linked CLI project
  *   node scripts/assert-staging-env.mjs --dev      only what `next dev` would use
- *   node scripts/assert-staging-env.mjs --build    only what `next build` / `next start` would use
+ *   node scripts/assert-staging-env.mjs --build    only what `next build` / `next start` would use (runs as `prebuild`, on Vercel too)
  *   node scripts/assert-staging-env.mjs --cli      only the project `supabase db push` / `functions deploy` would touch
  *
  * It reads the project address from the same files Next.js reads, in the same order, and the project the Supabase
@@ -113,6 +113,7 @@ function main() {
   if (!result.ok) {
     console.error(`\nRefused: only "main" may reach the production project (${projects.production}).`);
     console.error(`For the site: set SUPABASE_URL to https://${projects.staging}.supabase.co in .env.development.local and .env.production.local (ignored by Git).`);
+    console.error(`On Vercel: set SUPABASE_URL (and its publishable key) for the Preview environment to the staging project; only Production keeps production.`);
     console.error(`For the CLI: npx supabase link --project-ref ${projects.staging}`);
     process.exit(1);
   }

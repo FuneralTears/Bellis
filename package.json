@@ -10,6 +10,7 @@
     "env:check": "node scripts/assert-staging-env.mjs",
     "predev": "node scripts/assert-staging-env.mjs --dev",
     "dev": "next dev -p 5173",
+    "prebuild": "node scripts/assert-staging-env.mjs --build",
     "build": "next build",
     "start": "next start -p 5173",
     "dev:sites": "node scripts/run-framework.mjs dev",
