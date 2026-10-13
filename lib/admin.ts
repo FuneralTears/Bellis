@@ -175,7 +175,54 @@ export function bookingLine(row: Pick<AdminWorkspaceRow, "onboarding_completed" 
 export function share(part: number, total: number): string {
   return total > 0 ? `${Math.round((part / total) * 100)}%` : "—";
 }
-/** What an admin RPC failure means for the screen: no access (shown as "not found") or a real error. */
+/**
+ * What the answer to an admin RPC means. Only the server saying "no" is "denied"; everything else that goes
+ * wrong is an error, never access and never "not found".
+ *   ok       it answered.
+ *   denied   the server refused: not part of the team (not_found) or no session at all (the call went out as anon).
+ *   session  the access token was not accepted (expired or unreadable): renew it and ask again.
+ *   error    anything else: network, timeout, a failure inside the function.
+ */
+export type AdminRpcStatus = "ok" | "denied" | "session" | "error";
+export function classifyAdminRpc(error: { message?: string; code?: string } | null | undefined): AdminRpcStatus {
+  if (!error) return "ok";
+  if (error.message === "not_found" || error.code === "P0002" || error.code === "42501") return "denied";
+  if (/^PGRST30[0-3]$/.test(error.code ?? "") || /\bjwt\b/i.test(error.message ?? "")) return "session";
+  return "error";
+}
+/** Shown as "not found": the server said this caller has no access. */
 export function isAdminDenied(error: { message?: string; code?: string } | null | undefined): boolean {
-  return !!error && (error.message === "not_found" || error.code === "P0002" || error.code === "42501" || error.code === "PGRST301");
+  return classifyAdminRpc(error) === "denied";
+}
+
+/**
+ * What supabase.auth.getUser() says about who is there.
+ *   session_ready  a confirmed user.
+ *   no_session     nobody is signed in, or the stored session is no longer valid.
+ *   error          it could not be asked (offline, the auth server did not answer): unknown, not "nobody".
+ */
+export type AdminAuthState = "pending" | "session_ready" | "no_session" | "error";
+export function classifyAuthUser(result: { data: { user: { id: string } | null }; error: { name?: string; status?: number; message?: string } | null }): Exclude<AdminAuthState, "pending"> {
+  if (result.data.user) return "session_ready";
+  const error = result.error;
+  if (!error || error.name === "AuthSessionMissingError") return "no_session";
+  // The auth server answered and said no (400, 401, 403): the stored session is not valid any more.
+  if (typeof error.status === "number" && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) return "no_session";
+  return "error";
+}
+
+/** What the gate knows at a given moment. Also what the temporary debug line prints: states only, no personal data. */
+export type AdminGateTrace = { auth_state: AdminAuthState; user: string | null; rpc_called: boolean; rpc_status: AdminRpcStatus | "pending"; admin_role: string | null; final_gate_state: "checking" | "denied" | "error" | AdminRole };
+/**
+ * The decision of the gate, from what is known so far. It only opens with a role the server confirmed, it only
+ * says "not found" when the server answered no, and while anything is still pending it says neither.
+ */
+export function adminGateState(known: { auth: AdminAuthState; rpc: AdminRpcStatus | "pending"; role?: string | null }): "checking" | "denied" | "error" | AdminRole {
+  if (known.auth === "pending") return "checking";
+  if (known.auth === "no_session") return "denied";
+  if (known.auth === "error") return "error";
+  if (known.rpc === "pending") return "checking";
+  if (known.rpc === "denied") return "denied";
+  if (known.rpc !== "ok") return "error";
+  return known.role === "admin" || known.role === "support" ? known.role : "denied";
 }

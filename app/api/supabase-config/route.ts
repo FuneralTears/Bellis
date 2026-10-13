@@ -1,4 +1,4 @@
-import { refusesProductionProject } from "@/lib/supabase-target";
+import { allowsAdminDebug, refusesProductionProject } from "@/lib/supabase-target";
 
 export const dynamic = "force-dynamic";
 
@@ -12,5 +12,5 @@ export async function GET() {
   if (refusesProductionProject(url, process.env)) {
     return Response.json({ error: "Este entorno no puede usar el proyecto de producción" }, { status: 503 });
   }
-  return Response.json({ url, publishableKey }, { headers: { "Cache-Control": "no-store" } });
+  return Response.json({ url, publishableKey, adminDebug: allowsAdminDebug(process.env) }, { headers: { "Cache-Control": "no-store" } });
 }

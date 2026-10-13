@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
-import { activeFilterCount, activityLine, adminDate, adminDateTime, adminPageSize, bookingLine, daysAgo, daysRemainingLabel, defaultWorkspaceFilters, eventKind, eventLabel,
+import { allowsAdminDebug } from "../lib/supabase-target.ts";
+import { activeFilterCount, activityLine, adminDate, adminGateState, classifyAdminRpc, classifyAuthUser, adminDateTime, adminPageSize, bookingLine, daysAgo, daysRemainingLabel, defaultWorkspaceFilters, eventKind, eventLabel,
   isAdminDenied, lastValidDay, pageCount, planLine, share, shownCapabilities, signInLine, workspaceQuery } from "../lib/admin.ts";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
@@ -111,6 +112,79 @@ test("capacidades visibles, porcentajes y acceso denegado", () => {
   assert.equal(isAdminDenied(null), false);
 });
 
+// ===== La puerta del backoffice =====
+const user = { id: "9f31e5dc-0000-4000-8000-000000000000" };
+const gate = (auth, rpc = "pending", role = null) => adminGateState({ auth, rpc, role });
+
+test("puerta: mientras la sesión o la respuesta no llegaron, ni 404 ni acceso", () => {
+  assert.equal(gate("pending"), "checking");
+  assert.equal(gate("session_ready", "pending"), "checking");
+  // Una sesión que tarda en aparecer y después resulta ser del equipo: primero espera, después entra.
+  assert.deepEqual([gate("pending"), gate("session_ready", "pending"), gate("session_ready", "ok", "admin")], ["checking", "checking", "admin"]);
+});
+
+test("puerta: sin sesión o sin ser del equipo es 'no encontrado'; solo el servidor lo decide", () => {
+  assert.equal(gate("no_session"), "denied");
+  assert.equal(gate("session_ready", "denied"), "denied");
+  // Una respuesta válida sin un rol conocido no abre nada.
+  assert.equal(gate("session_ready", "ok", null), "denied");
+  assert.equal(gate("session_ready", "ok", "owner"), "denied");
+  assert.equal(gate("session_ready", "ok", "admin"), "admin");
+  assert.equal(gate("session_ready", "ok", "support"), "support");
+});
+
+test("puerta: un error no es acceso y tampoco es 'no encontrado'", () => {
+  assert.equal(gate("error"), "error");
+  assert.equal(gate("session_ready", "error"), "error");
+  assert.equal(gate("session_ready", "session"), "error");
+  // Ningún estado que no sea una respuesta "ok" con rol del equipo deja pasar.
+  for (const auth of ["pending", "session_ready", "no_session", "error"]) for (const rpc of ["pending", "denied", "session", "error"]) for (const role of [null, "admin", "support"])
+    assert.equal(["admin", "support"].includes(adminGateState({ auth, rpc, role })), false, `${auth} ${rpc} ${role}`);
+  for (const auth of ["pending", "no_session", "error"]) assert.equal(["admin", "support"].includes(adminGateState({ auth, rpc: "ok", role: "admin" })), false, auth);
+});
+
+test("puerta: qué significa cada respuesta de la sesión y de la RPC", () => {
+  assert.equal(classifyAuthUser({ data: { user }, error: null }), "session_ready");
+  assert.equal(classifyAuthUser({ data: { user: null }, error: null }), "no_session");
+  assert.equal(classifyAuthUser({ data: { user: null }, error: { name: "AuthSessionMissingError", status: 400, message: "Auth session missing!" } }), "no_session");
+  assert.equal(classifyAuthUser({ data: { user: null }, error: { name: "AuthApiError", status: 403, message: "invalid claim" } }), "no_session");
+  // Sin red, o el servidor de auth no responde: no se sabe quién es. No es "nadie".
+  assert.equal(classifyAuthUser({ data: { user: null }, error: { name: "AuthRetryableFetchError", status: 0, message: "Failed to fetch" } }), "error");
+  assert.equal(classifyAuthUser({ data: { user: null }, error: { name: "AuthApiError", status: 503, message: "unavailable" } }), "error");
+  assert.equal(classifyAuthUser({ data: { user: null }, error: { name: "AuthApiError", status: 429, message: "rate limit" } }), "error");
+
+  assert.equal(classifyAdminRpc(null), "ok");
+  assert.equal(classifyAdminRpc({ code: "P0002", message: "not_found" }), "denied");
+  assert.equal(classifyAdminRpc({ code: "42501", message: "permission denied for function bellis_admin_session" }), "denied");
+  // Un token vencido no es "no sos del equipo": se renueva y se vuelve a preguntar.
+  assert.equal(classifyAdminRpc({ code: "PGRST301", message: "JWT expired" }), "session");
+  assert.equal(classifyAdminRpc({ code: "PGRST303", message: "JWT expired" }), "session");
+  assert.equal(classifyAdminRpc({ message: "TypeError: Failed to fetch" }), "error");
+  assert.equal(classifyAdminRpc({ code: "57014", message: "canceling statement due to statement timeout" }), "error");
+  // Una función que el servidor no conoce es un error del entorno, no un "no encontrado" del backoffice.
+  assert.equal(classifyAdminRpc({ code: "PGRST202", message: "Could not find the function public.bellis_admin_session without parameters in the schema cache" }), "error");
+  assert.equal(isAdminDenied({ code: "PGRST301", message: "JWT expired" }), false);
+});
+
+test("puerta: usa la misma lectura de sesión que el resto del panel, y el registro de depuración no lleva datos personales", () => {
+  const source = read("app/admin/AdminGate.tsx");
+  assert.match(source, /client\.auth\.getUser\(\)/);
+  assert.doesNotMatch(source, /getSession\(\)/);
+  // Lo único que se imprime: estados y los primeros seis caracteres del id. Nunca en producción.
+  assert.match(source, /if \(await adminDebugAllowed\(\)\.catch\(\(\) => false\)\) console\.info\("\[bellis-admin\] gate", \{ \.\.\.trace \}\);/);
+  assert.equal([...source.matchAll(/console\./g)].length, 1);
+  assert.match(source, /trace\.user = auth\.data\.user \? auth\.data\.user\.id\.slice\(0, 6\) : null;/);
+  const code = source.split("\n").filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line)).join("\n");
+  assert.doesNotMatch(code, /email|access_token|refresh_token|headers|session\.user/i);
+  assert.match(read("lib/admin.ts"), /export type AdminGateTrace = \{ auth_state: AdminAuthState; user: string \| null; rpc_called: boolean; rpc_status: AdminRpcStatus \| "pending"; admin_role: string \| null; final_gate_state:/);
+  assert.equal(allowsAdminDebug({ VERCEL: "1", VERCEL_ENV: "production" }), false);
+  assert.equal(allowsAdminDebug({ VERCEL: "1", VERCEL_ENV: "preview" }), true);
+  assert.equal(allowsAdminDebug({}), true);
+  // La puerta no abre nada por su cuenta: el contenido solo se dibuja con un rol confirmado.
+  assert.match(source, /if \(state === "denied"\) notFound\(\);/);
+  assert.match(source, /if \(state === "checking"\) return null;/);
+});
+
 // ===== Privacidad y seguridad, leídas del código =====
 const migrations = readdirSync(new URL("../supabase/migrations/", import.meta.url)).filter((name) => name.startsWith("20261017")).sort();
 const adminSql = migrations.map((name) => read(`supabase/migrations/${name}`)).join("\n");
@@ -129,7 +203,7 @@ test("el backoffice no lee contenido clínico", () => {
   // Ninguna pantalla del backoffice consulta tablas: solo llama a las funciones admin.
   const screens = ["app/admin/AdminGate.tsx", "app/admin/page.tsx", "app/admin/workspaces/page.tsx", "app/admin/workspaces/[id]/page.tsx", "app/admin/upgrades/page.tsx", "components/admin/AdminUi.tsx", "lib/admin.ts"];
   for (const file of screens) assert.doesNotMatch(read(file), /\.from\(/, `${file} consulta una tabla`);
-  assert.deepEqual([...new Set(screens.flatMap((file) => [...read(file).matchAll(/adminRpc<[^(]*\("([a-z_]+)"/g)].map((match) => match[1])))].sort(),
+  assert.deepEqual([...new Set(screens.flatMap((file) => [...read(file).matchAll(/(?:adminRpc<[^(]*|\.rpc)\("([a-z_]+)"/g)].map((match) => match[1])))].sort(),
     ["admin_overview", "admin_recent_activity", "admin_workspace_detail", "admin_workspaces", "bellis_admin_session"]);
 });
 
