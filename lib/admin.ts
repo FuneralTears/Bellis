@@ -211,8 +211,6 @@ export function classifyAuthUser(result: { data: { user: { id: string } | null }
   return "error";
 }
 
-/** What the gate knows at a given moment. Also what the temporary debug line prints: states only, no personal data. */
-export type AdminGateTrace = { auth_state: AdminAuthState; user: string | null; rpc_called: boolean; rpc_status: AdminRpcStatus | "pending"; admin_role: string | null; final_gate_state: "checking" | "denied" | "error" | AdminRole };
 /**
  * The decision of the gate, from what is known so far. It only opens with a role the server confirmed, it only
  * says "not found" when the server answered no, and while anything is still pending it says neither.

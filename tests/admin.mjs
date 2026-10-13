@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
-import { allowsAdminDebug } from "../lib/supabase-target.ts";
 import { activeFilterCount, activityLine, adminDate, adminGateState, classifyAdminRpc, classifyAuthUser, adminDateTime, adminPageSize, bookingLine, daysAgo, daysRemainingLabel, defaultWorkspaceFilters, eventKind, eventLabel,
   isAdminDenied, lastValidDay, pageCount, planLine, share, shownCapabilities, signInLine, workspaceQuery } from "../lib/admin.ts";
 
@@ -166,23 +165,24 @@ test("puerta: qué significa cada respuesta de la sesión y de la RPC", () => {
   assert.equal(isAdminDenied({ code: "PGRST301", message: "JWT expired" }), false);
 });
 
-test("puerta: usa la misma lectura de sesión que el resto del panel, y el registro de depuración no lleva datos personales", () => {
+test("puerta: usa la misma lectura de sesión que el resto del panel y no registra nada", () => {
   const source = read("app/admin/AdminGate.tsx");
-  assert.match(source, /client\.auth\.getUser\(\)/);
+  assert.match(source, /classifyAuthUser\(await client\.auth\.getUser\(\)\)/);
   assert.doesNotMatch(source, /getSession\(\)/);
-  // Lo único que se imprime: estados y los primeros seis caracteres del id. Nunca en producción.
-  assert.match(source, /if \(await adminDebugAllowed\(\)\.catch\(\(\) => false\)\) console\.info\("\[bellis-admin\] gate", \{ \.\.\.trace \}\);/);
-  assert.equal([...source.matchAll(/console\./g)].length, 1);
-  assert.match(source, /trace\.user = auth\.data\.user \? auth\.data\.user\.id\.slice\(0, 6\) : null;/);
+  // Sin registro de depuración: ni en la puerta ni en lo que la rodea. El id del usuario ni siquiera se lee.
+  for (const file of ["app/admin/AdminGate.tsx", "lib/admin.ts", "lib/supabase/browser.ts", "app/api/supabase-config/route.ts", "lib/supabase-target.ts", "components/admin/AdminUi.tsx"])
+    assert.doesNotMatch(read(file), /console\.|bellis-admin\]|adminDebug|AdminGateTrace/, file);
   const code = source.split("\n").filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line)).join("\n");
-  assert.doesNotMatch(code, /email|access_token|refresh_token|headers|session\.user/i);
-  assert.match(read("lib/admin.ts"), /export type AdminGateTrace = \{ auth_state: AdminAuthState; user: string \| null; rpc_called: boolean; rpc_status: AdminRpcStatus \| "pending"; admin_role: string \| null; final_gate_state:/);
-  assert.equal(allowsAdminDebug({ VERCEL: "1", VERCEL_ENV: "production" }), false);
-  assert.equal(allowsAdminDebug({ VERCEL: "1", VERCEL_ENV: "preview" }), true);
-  assert.equal(allowsAdminDebug({}), true);
-  // La puerta no abre nada por su cuenta: el contenido solo se dibuja con un rol confirmado.
+  assert.doesNotMatch(code, /email|access_token|refresh_token|headers|session\.user|user\.id/i);
+  // La configuración que recibe el navegador vuelve a ser solo la dirección y la clave publicable.
+  assert.match(read("app/api/supabase-config/route.ts"), /Response\.json\(\{ url, publishableKey \}, /);
+  // El comportamiento es el mismo: en blanco mientras se resuelve, "no encontrado" si el servidor dijo que no,
+  // mensaje con reintento ante un error, y una sola renovación del token.
   assert.match(source, /if \(state === "denied"\) notFound\(\);/);
   assert.match(source, /if \(state === "checking"\) return null;/);
+  assert.match(source, /if \(state === "error"\) return <main[^]*Reintentar<\/button>/);
+  assert.equal([...source.matchAll(/client\.auth\.refreshSession\(\)/g)].length, 1);
+  assert.equal([...source.matchAll(/client\.rpc\("bellis_admin_session"\)/g)].length, 2);
 });
 
 // ===== Privacidad y seguridad, leídas del código =====

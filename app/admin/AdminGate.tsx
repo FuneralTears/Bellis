@@ -2,8 +2,8 @@
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { notFound } from "next/navigation";
-import { adminDebugAllowed, getSupabase } from "@/lib/supabase/browser";
-import { adminGateState, classifyAdminRpc, classifyAuthUser, type AdminGateTrace, type AdminRole } from "@/lib/admin";
+import { getSupabase } from "@/lib/supabase/browser";
+import { adminGateState, classifyAdminRpc, classifyAuthUser, type AdminAuthState, type AdminRole, type AdminRpcStatus } from "@/lib/admin";
 
 /**
  * Nothing of the backoffice is rendered until the server says this person is part of the Bellis team.
@@ -51,33 +51,27 @@ export default function AdminGate({ children }: { children: ReactNode }) {
   const [state, setState] = useState<GateState>("checking");
   const [attempt, setAttempt] = useState(0);
   useEffect(() => { let cancelled = false;
-    const trace: AdminGateTrace = { auth_state: "pending", user: null, rpc_called: false, rpc_status: "pending", admin_role: null, final_gate_state: "checking" };
-    async function finish() {
-      trace.final_gate_state = adminGateState({ auth: trace.auth_state, rpc: trace.rpc_status, role: trace.admin_role });
-      // Temporary aid for staging and previews, off in production (the server decides). States and the first six
-      // characters of the user id: never an email, a token or a header.
-      if (await adminDebugAllowed().catch(() => false)) console.info("[bellis-admin] gate", { ...trace });
-      if (!cancelled) setState(trace.final_gate_state);
-    }
+    // What is known so far. Nothing here is shown or logged: it only feeds the decision.
+    const known: { auth: AdminAuthState; rpc: AdminRpcStatus | "pending"; role: string | null } = { auth: "pending", rpc: "pending", role: null };
+    let asked = false;
+    const finish = () => { if (!cancelled) setState(adminGateState(known)); };
     async function check() {
       try {
         const client = await getSupabase();
         // Same call the rest of the panel uses: it waits for the stored session and has the server confirm it.
-        const auth = await client.auth.getUser();
-        trace.auth_state = classifyAuthUser(auth);
-        trace.user = auth.data.user ? auth.data.user.id.slice(0, 6) : null;
-        if (trace.auth_state !== "session_ready") return finish();
-        trace.rpc_called = true;
+        known.auth = classifyAuthUser(await client.auth.getUser());
+        if (known.auth !== "session_ready") return finish();
+        asked = true;
         let answer = await client.rpc("bellis_admin_session");
-        trace.rpc_status = classifyAdminRpc(answer.error);
+        known.rpc = classifyAdminRpc(answer.error);
         // An access token that expired between the two calls: renew it once and ask again.
-        if (trace.rpc_status === "session") {
+        if (known.rpc === "session") {
           await client.auth.refreshSession();
           answer = await client.rpc("bellis_admin_session");
-          trace.rpc_status = classifyAdminRpc(answer.error);
+          known.rpc = classifyAdminRpc(answer.error);
         }
-        trace.admin_role = trace.rpc_status === "ok" ? (answer.data as { role?: string } | null)?.role ?? null : null;
-      } catch { trace.auth_state = trace.auth_state === "pending" ? "error" : trace.auth_state; if (trace.rpc_called) trace.rpc_status = "error"; }
+        known.role = known.rpc === "ok" ? (answer.data as { role?: string } | null)?.role ?? null : null;
+      } catch { if (known.auth === "pending") known.auth = "error"; if (asked) known.rpc = "error"; }
       return finish();
     }
     void check(); return () => { cancelled = true; };

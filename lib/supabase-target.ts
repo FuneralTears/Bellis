@@ -5,14 +5,6 @@
  * address is looked at: no key is read here.
  */
 
-/**
- * Whether the browser may print the backoffice gate's debug line (states only, no personal data).
- * Never on the production deployment; on previews and locally, yes.
- */
-export function allowsAdminDebug(environment: Record<string, string | undefined>): boolean {
-  return environment.VERCEL_ENV !== "production";
-}
-
 /** Same ref as `projects.production` in scripts/assert-staging-env.mjs; a test keeps the two equal. */
 export const productionProjectRef = "pinfdbvfzoratsntjgah";
 
