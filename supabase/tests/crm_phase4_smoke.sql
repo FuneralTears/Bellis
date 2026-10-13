@@ -1,9 +1,13 @@
 -- Synthetic, reversible smoke test. Execute as postgres in Bellis development Supabase.
 begin;
+-- Dos usuarios propios de este smoke (@example.invalid), creados dentro de la transacción: no depende de ningún
+-- usuario real ni lo toca. El rollback final se los lleva junto con todo lo demás.
+insert into auth.users(instance_id,id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
+select '00000000-0000-0000-0000-000000000000',('fe000000-0000-4000-8000-00000000000' || n)::uuid,'authenticated','authenticated',
+  'crm-phase4-' || n || '@example.invalid','',now(),'{}','{}',now(),now() from generate_series(1,2) n;
 create temp table crm_phase4_fixture as
 select gen_random_uuid() w1,gen_random_uuid() w2,
-  (select id from auth.users order by created_at limit 1) u1,
-  (select id from auth.users order by created_at offset 1 limit 1) u2,
+  'fe000000-0000-4000-8000-000000000001'::uuid u1,'fe000000-0000-4000-8000-000000000002'::uuid u2,
   gen_random_uuid() pr1,gen_random_uuid() pr2,gen_random_uuid() s1,
   gen_random_uuid() p1,gen_random_uuid() p2,gen_random_uuid() p3,
   gen_random_uuid() p4,gen_random_uuid() p5,gen_random_uuid() p6,gen_random_uuid() p_foreign,
@@ -11,8 +15,8 @@ select gen_random_uuid() w1,gen_random_uuid() w2,
   gen_random_uuid() i4,gen_random_uuid() i5,gen_random_uuid() i6,gen_random_uuid() i_future;
 grant select on crm_phase4_fixture to authenticated;
 do $$ begin
-  if (select count(*) from crm_phase4_fixture where u1 is not null and u2 is not null)<>1 then
-    raise exception 'Need two existing test users'; end if;
+  if (select count(*) from auth.users a join crm_phase4_fixture f on a.id in (f.u1,f.u2) where a.email like 'crm-phase4-%@example.invalid')<>2 then
+    raise exception 'Synthetic users missing'; end if;
 end $$;
 insert into public.workspaces(id,name,slug)
 select w1,'CRM Phase 4 A','crm-phase4-'||w1 from crm_phase4_fixture

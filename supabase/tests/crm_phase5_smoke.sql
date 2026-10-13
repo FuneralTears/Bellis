@@ -1,15 +1,19 @@
 -- Synthetic fixture, executed as postgres in development. No data persists.
 begin;
+-- Dos usuarios propios de este smoke (@example.invalid), creados dentro de la transacción: no depende de ningún
+-- usuario real ni lo toca. El rollback final se los lleva junto con todo lo demás.
+insert into auth.users(instance_id,id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
+select '00000000-0000-0000-0000-000000000000',('fa000000-0000-4000-8000-00000000000' || n)::uuid,'authenticated','authenticated',
+  'crm-phase5-' || n || '@example.invalid','',now(),'{}','{}',now(),now() from generate_series(1,2) n;
 create temp table crm_phase5_fixture as
 select gen_random_uuid() w1,gen_random_uuid() w2,
-  (select id from auth.users order by created_at limit 1) u1,
-  (select id from auth.users order by created_at offset 1 limit 1) u2,
+  'fa000000-0000-4000-8000-000000000001'::uuid u1,'fa000000-0000-4000-8000-000000000002'::uuid u2,
   gen_random_uuid() pr1,gen_random_uuid() pr2,gen_random_uuid() p1,gen_random_uuid() p2,
   gen_random_uuid() completed_run,gen_random_uuid() failed_run,gen_random_uuid() skipped_run,
   gen_random_uuid() foreign_run,gen_random_uuid() follow_up;
 grant select on crm_phase5_fixture to authenticated;
-do $$ begin if (select count(*) from crm_phase5_fixture where u1 is not null and u2 is not null)<>1
-  then raise exception 'Need two existing test users'; end if; end $$;
+do $$ begin if (select count(*) from auth.users a join crm_phase5_fixture f on a.id in (f.u1,f.u2) where a.email like 'crm-phase5-%@example.invalid')<>2
+  then raise exception 'Synthetic users missing'; end if; end $$;
 insert into public.workspaces(id,name,slug)
 select w1,'CRM Phase 5 A','crm-phase5-'||w1 from crm_phase5_fixture
 union all select w2,'CRM Phase 5 B','crm-phase5-'||w2 from crm_phase5_fixture;

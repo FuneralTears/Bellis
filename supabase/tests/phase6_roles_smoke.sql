@@ -1,16 +1,20 @@
 -- Synthetic role and workspace isolation checks. All changes roll back.
 begin;
+-- Dos usuarios propios de este smoke (@example.invalid), creados dentro de la transacción: no depende de ningún
+-- usuario real ni lo toca. El rollback final se los lleva junto con todo lo demás.
+insert into auth.users(instance_id,id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
+select '00000000-0000-0000-0000-000000000000',('f6000000-0000-4000-8000-00000000000' || n)::uuid,'authenticated','authenticated',
+  'phase6-roles-' || n || '@example.invalid','',now(),'{}','{}',now(),now() from generate_series(1,2) n;
 create temp table phase6_roles_fixture as
 select gen_random_uuid() w1, gen_random_uuid() w2,
-  (select id from auth.users order by created_at limit 1) u1,
-  (select id from auth.users order by created_at offset 1 limit 1) u2,
+  'f6000000-0000-4000-8000-000000000001'::uuid u1,'f6000000-0000-4000-8000-000000000002'::uuid u2,
   gen_random_uuid() pr1, gen_random_uuid() pr2,
   gen_random_uuid() p1, gen_random_uuid() p2,
   gen_random_uuid() run1, gen_random_uuid() run2;
 grant select on phase6_roles_fixture to authenticated;
 do $$ begin
-  if not exists(select 1 from phase6_roles_fixture where u1 is not null and u2 is not null and u1<>u2)
-    then raise exception 'Two auth users required'; end if;
+  if (select count(*) from auth.users a join phase6_roles_fixture f on a.id in (f.u1,f.u2) where a.email like 'phase6-roles-%@example.invalid')<>2
+    then raise exception 'Synthetic users missing'; end if;
 end $$;
 insert into public.workspaces(id,name,slug)
 select w1,'Fase 6 roles A','phase6-roles-'||w1 from phase6_roles_fixture

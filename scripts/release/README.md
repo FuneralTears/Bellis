@@ -10,12 +10,52 @@ whether to go on.
 | `npm run bellis:status` | Where things are: linked project, repository, local migrations. | Nothing. Reads local files. |
 | `npm run bellis:status -- --remote` | The same, and confirms the link with the account's list of projects. | One read-only request. |
 | `npm run bellis:check-core` | The tooling's own guardrails, and a rehearsal of the target guard against a simulated CLI. | Nothing. No request is sent. |
+| `npm run bellis:smoke` | Every SQL smoke of `supabase/tests`, against staging. | Staging, inside transactions that are rolled back. Nothing is kept. |
+| `npm run bellis:smoke -- --group core` | Only the smokes of a group: `core`, `crm`, `plans`, `admin`, `release`. Several groups run each smoke once. | The same. |
+| `npm run bellis:smoke -- --list` | Which smokes would run. | Nothing. |
 | `npm test` | Every unit test of the repository (`scripts/run-tests.mjs`). | Nothing. The SQL smokes are not run from here. |
 
-Add `-- --json` to get the report as JSON.
+Add `-- --json` to get the report as JSON. `bellis:smoke` also takes `--only <id...>`, `--all` and `--ndjson` (one JSON
+event per line, the report last).
 
 `check`, `staging`, `prod-precheck` and `prod-release` are **not available yet** and answer with exit 2. Nothing in
 this folder links the CLI to production, applies a migration, deploys or moves a branch today.
+
+## SQL smokes (`smoke/`)
+
+`smoke/manifest.json` lists every smoke, its groups and what it has to answer. A smoke file that is not listed is an
+error, and so is a listed file that does not exist.
+
+A smoke passes only when all of this is true:
+
+1. Before anything is sent, the file is read by a tokenizer (`smoke/sql.mjs`) that tells code apart from comments,
+   strings and dollar-quoted bodies: `BEGIN` is its first statement, there is no `COMMIT` or other transaction
+   control, and a plain `ROLLBACK` is its last statement. One file in doubt stops the whole run before connecting.
+2. The CLI exits 0 with no SQL error.
+3. The answer is exactly one row, the one this run asked for. The runner writes it as the last statement inside the
+   smoke's transaction (`bellis_smoke_v1`: smoke id, `PASS`, a value made up for the run, the transaction id), so
+   reaching it means every statement before it succeeded.
+4. That row says `PASS`.
+5. PostgreSQL reports the smoke's transaction as aborted afterwards (`txid_status`).
+
+Every run starts with the runner's self-test: a smoke with `COMMIT` and one without `ROLLBACK` have to be refused
+without being sent, and a smoke that raises an error has to fail. If any of them gets through, no smoke runs.
+
+The runner only works against staging, with the CLI already there; it never links.
+
+### Trying a migration before applying it
+
+`npm run bellis:smoke -- --with-pending 20270101000000_name.sql [more...]` runs those migrations inside each
+smoke's transaction, before the smoke, and rolls everything back. Each migration is named explicitly by its file
+name in `supabase/migrations` (no paths, no patterns), and one with transaction control of its own is refused. With
+`--release <id>`, each one also has to be listed in `releases/<id>.json` (`{ "migrations": [{ "file", "sha256" }] }`)
+with the same hash. Not wired into any other command yet.
+
+### Writing a smoke
+
+Synthetic data only, created inside the transaction (`@example.invalid` users, fixed `fNNNNNNN-0000-4000-8000-…`
+ids): never read or pick an existing user or workspace, and count against what was there before, not against an
+empty database. Raise an exception when something is wrong. Add the file to `smoke/manifest.json`.
 
 ## Exit codes
 
@@ -64,4 +104,5 @@ Always these sections, in this order; a stage with nothing to say prints `N/A`:
 
 ## Tests
 
-`tests/release-*.mjs`, with a fake CLI (`tests/fixtures/fake-supabase.mjs`). They never reach Supabase.
+`tests/release-*.mjs`, with a fake CLI (`tests/fixtures/fake-supabase.mjs`). They never reach Supabase. The SQL smokes
+are a different thing and are never run by `npm test`.

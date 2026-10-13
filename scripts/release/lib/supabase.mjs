@@ -49,8 +49,8 @@ function parseJson(stdout) {
 export function createSupabase({ cwd = process.cwd(), command, environment = process.env, timeoutMs = 120_000 } = {}) {
   const cli = command ? { command, source: "given" } : resolveCli({ root: cwd, environment });
   // Raw result of one run. Stays inside this module: callers get parsed fields, never stdout or stderr.
-  function run(args) {
-    const result = spawnSync(cli.command[0], [...cli.command.slice(1), ...args], { cwd, env: environment, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], windowsHide: true, timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024 });
+  function run(args, timeout = timeoutMs) {
+    const result = spawnSync(cli.command[0], [...cli.command.slice(1), ...args], { cwd, env: environment, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], windowsHide: true, timeout, maxBuffer: 64 * 1024 * 1024 });
     const timedOut = result.error?.code === "ETIMEDOUT";
     return { code: result.status ?? (timedOut ? 124 : 1), stdout: result.stdout ?? "", stderr: result.stderr ?? "", timedOut, spawnError: result.error && !timedOut ? result.error.code ?? "spawn failed" : null };
   }
@@ -80,6 +80,25 @@ export function createSupabase({ cwd = process.cwd(), command, environment = pro
       const parsed = parseJson(result.stdout); const list = Array.isArray(parsed) ? parsed : parsed?.projects;
       if (!Array.isArray(list)) return { ok: false, reason: "the list of projects could not be read", projects: [] };
       return { ok: true, projects: list.map((item) => ({ ref: String(item?.ref ?? item?.id ?? ""), name: String(item?.name ?? ""), status: String(item?.status ?? ""), linked: item?.linked === true })) };
+    },
+    /**
+     * Runs the SQL of a file against the linked project and returns the last result set, reduced to the columns
+     * asked for (as text, or null). Nothing else of the answer comes back. A SQL error is one redacted line with
+     * its code and its message.
+     */
+    query(file, { columns = [], timeoutMs: limit = timeoutMs } = {}) {
+      const result = run(["db", "query", "--linked", "--output-format", "json", "-f", file], limit);
+      const parsed = parseJson(result.stdout);
+      if (result.code !== 0 || !parsed || parsed._tag === "Error" || parsed.error) {
+        const message = typeof parsed?.error?.message === "string" ? parsed.error.message : "";
+        const sql = /ERROR:\s+([A-Z0-9]{5}):\s*([^\\\n"]*)/.exec(message);
+        if (sql) return { ok: false, reason: redact(`SQL error ${sql[1]}: ${sql[2]}`, 240) };
+        if (result.code === 0 && !parsed) return { ok: false, reason: "the answer could not be read" };
+        return { ok: false, reason: message && !result.spawnError && !result.timedOut ? redact(`exit ${result.code}: ${message}`, 240) : reason(result) };
+      }
+      if (!Array.isArray(parsed.rows)) return { ok: false, reason: "the answer has no rows" };
+      const text = (value) => (value === null || value === undefined ? null : typeof value === "string" ? value : JSON.stringify(value));
+      return { ok: true, rows: parsed.rows.map((row) => Object.fromEntries(columns.map((column) => [column, text(row?.[column])]))) };
     },
     /** The CLI's version. Local: no request is sent. */
     version() {

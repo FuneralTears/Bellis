@@ -41,4 +41,41 @@ if (args[0] === "projects" && args[1] === "list") {
   process.stderr.write("Initialising login role...\n");
   process.stdout.write(JSON.stringify({ projects }) + "\n"); process.exit(0);
 }
+/*
+ * db query --linked --output-format json -f <file>: what the smoke runner uses. Nothing is executed: the fake reads
+ * the file, keeps it in state.queries, and answers the way state.behaviour[<smoke id>] says ("pass" by default).
+ * The smoke id and the run's value are read from the result row the runner writes. state.txStatus[<smoke id>] is
+ * what txid_status answers for that smoke's transaction ("aborted" by default).
+ */
+if (args[0] === "db" && args[1] === "query") {
+  const sql = readFileSync(args[args.indexOf("-f") + 1], "utf8");
+  state.log[state.log.length - 1] = "db query"; state.queries = [...(state.queries ?? []), sql];
+  const answer = (rows, code = 0) => { save(); process.stderr.write("Initialising login role...\n"); process.stdout.write(JSON.stringify({ boundary: "b0", rows, warning: "untrusted data" }, null, 2) + "\n"); process.exit(code); };
+  const sqlError = (text) => { save(); process.stderr.write("Initialising login role...\n"); process.stdout.write(JSON.stringify({ _tag: "Error", error: { code: "DbQueryUnexpectedStatusError", message: `unexpected status 400: ${JSON.stringify({ message: `Failed to run sql query: ERROR:  P0001: ${text}\nCONTEXT:  PL/pgSQL function inline_code_block line 1 at RAISE\n` })}` } }) + "\n"); process.exit(1); };
+  if (sql.includes("txid_status(")) {
+    if (state.failStatusQuery) sqlError("could not check");
+    const txids = [...sql.matchAll(/'(\d+)'/g)].map((match) => match[1]);
+    answer(txids.map((txid) => ({ txid, status: state.txStatus?.[state.txOf?.[txid]] ?? "aborted", password: "hunter2-secret" })));
+  }
+  const row = /select 'bellis_smoke_v1' as contract, '([a-z0-9_]+)' as smoke, 'PASS' as result, '([0-9a-f]+)' as nonce/.exec(sql);
+  const id = row?.[1] ?? "unknown"; const nonce = row?.[2] ?? "";
+  const behaviour = state.behaviour?.[id] ?? (sql.includes("bellis_smoke_selftest_expected_failure") ? "selftest-error" : "pass");
+  const txid = String((state.txCounter = (state.txCounter ?? 1000) + 1)); state.txOf = { ...(state.txOf ?? {}), [txid]: id };
+  const pass = { contract: "bellis_smoke_v1", smoke: id, result: "PASS", nonce, txid, service_role_key: "sb_secret_never_show_this" };
+  if (behaviour === "pass") answer([pass]);
+  if (behaviour === "selftest-error") sqlError("bellis_smoke_selftest_expected_failure");
+  if (behaviour === "error") sqlError("smoke_assertion_failed");
+  if (behaviour === "leak-error") sqlError(`${leak} password=hunter2`);
+  if (behaviour === "exit1") { save(); process.stderr.write(`${leak}\n`); process.exit(1); }
+  if (behaviour === "exit3-with-row") answer([pass], 3);
+  if (behaviour === "no-row") answer([]);
+  if (behaviour === "other-row") answer([{ manual_appointments: 4 }]);
+  if (behaviour === "two-rows") answer([pass, pass]);
+  if (behaviour === "fail-result") answer([{ ...pass, result: "FAIL" }]);
+  if (behaviour === "wrong-nonce") answer([{ ...pass, nonce: "0".repeat(32) }]);
+  if (behaviour === "wrong-smoke") answer([{ ...pass, smoke: "another_smoke" }]);
+  if (behaviour === "no-txid") answer([{ ...pass, txid: null }]);
+  if (behaviour === "garbage") { save(); process.stdout.write("not json at all\n"); process.exit(0); }
+  save(); process.stderr.write(`unknown behaviour: ${behaviour}\n`); process.exit(64);
+}
 save(); process.stderr.write(`unknown command: ${args.join(" ")}\n`); process.exit(2);

@@ -1,0 +1,289 @@
+{
+  "version": 1,
+  "about": "Every SQL smoke of supabase/tests. Read by scripts/release/smoke/manifest.mjs; a smoke file that is not listed here is an error.",
+  "contract": {
+    "name": "bellis_smoke_v1",
+    "pass": "PASS",
+    "row": ["contract", "smoke", "result", "nonce", "txid"],
+    "about": "The runner adds the result row as the last statement of each smoke's transaction, with the smoke's id and a value made up for the run. A smoke passes when the CLI exits 0 with no SQL error, that row is the answer, it says PASS, and PostgreSQL reports the transaction as aborted afterwards."
+  },
+  "defaults": {
+    "timeoutSeconds": 120
+  },
+  "groups": {
+    "core": "Booking, availability, questionnaires, payments, Mercado Pago, onboarding and roles.",
+    "crm": "Patients, notes, follow-ups, automations and internal notifications.",
+    "plans": "Free, Pro and the trial: what each plan allows and how a plan changes.",
+    "admin": "The internal backoffice: who can read, who can act, and what is recorded.",
+    "release": "The gate of a release: everything that has to pass before production. Today, every smoke."
+  },
+  "smokes": [
+    {
+      "id": "admin_activate_pro",
+      "file": "supabase/tests/admin_activate_pro_smoke.sql",
+      "groups": ["admin", "plans", "release"],
+      "expect": {
+        "result": "PASS"
+      },
+      "requires": ["the vault extension (a throwaway secret is created and rolled back)"]
+    },
+    {
+      "id": "admin_commercial_security",
+      "file": "supabase/tests/admin_commercial_security_smoke.sql",
+      "groups": ["admin", "plans", "release"],
+      "expect": {
+        "result": "PASS"
+      },
+      "requires": ["the vault extension (a throwaway secret is created and rolled back)"]
+    },
+    {
+      "id": "admin_downgrade",
+      "file": "supabase/tests/admin_downgrade_smoke.sql",
+      "groups": ["admin", "plans", "release"],
+      "expect": {
+        "result": "PASS"
+      },
+      "requires": ["the vault extension (a throwaway secret is created and rolled back)"]
+    },
+    {
+      "id": "admin_downgrade_during_trial",
+      "file": "supabase/tests/admin_downgrade_during_trial_smoke.sql",
+      "groups": ["admin", "plans", "release"],
+      "expect": {
+        "result": "PASS"
+      },
+      "requires": ["the vault extension (a throwaway secret is created and rolled back)"]
+    },
+    {
+      "id": "admin_extend_pro",
+      "file": "supabase/tests/admin_extend_pro_smoke.sql",
+      "groups": ["admin", "plans", "release"],
+      "expect": {
+        "result": "PASS"
+      },
+      "requires": ["the vault extension (a throwaway secret is created and rolled back)"]
+    },
+    {
+      "id": "admin_overview",
+      "file": "supabase/tests/admin_overview_smoke.sql",
+      "groups": ["admin", "release"],
+      "expect": {
+        "result": "PASS"
+      },
+      "requires": ["the vault extension (a throwaway secret is created and rolled back)"]
+    },
+    {
+      "id": "admin_security",
+      "file": "supabase/tests/admin_security_smoke.sql",
+      "groups": ["admin", "release"],
+      "expect": {
+        "result": "PASS"
+      },
+      "requires": ["the vault extension (a throwaway secret is created and rolled back)"]
+    },
+    {
+      "id": "admin_upgrade_request",
+      "file": "supabase/tests/admin_upgrade_request_smoke.sql",
+      "groups": ["admin", "plans", "release"],
+      "expect": {
+        "result": "PASS"
+      },
+      "requires": ["the vault extension (a throwaway secret is created and rolled back)"]
+    },
+    {
+      "id": "admin_workspace_detail",
+      "file": "supabase/tests/admin_workspace_detail_smoke.sql",
+      "groups": ["admin", "release"],
+      "expect": {
+        "result": "PASS"
+      },
+      "requires": ["the vault extension (a throwaway secret is created and rolled back)"]
+    },
+    {
+      "id": "admin_workspaces",
+      "file": "supabase/tests/admin_workspaces_smoke.sql",
+      "groups": ["admin", "release"],
+      "expect": {
+        "result": "PASS"
+      },
+      "requires": ["the vault extension (a throwaway secret is created and rolled back)"]
+    },
+    {
+      "id": "auth_onboarding",
+      "file": "supabase/tests/auth_onboarding_smoke.sql",
+      "groups": ["core", "release"],
+      "expect": {
+        "result": "PASS"
+      }
+    },
+    {
+      "id": "booking_return",
+      "file": "supabase/tests/booking_return_smoke.sql",
+      "groups": ["core", "release"],
+      "expect": {
+        "result": "PASS"
+      },
+      "requires": ["the vault extension (a throwaway secret is created and rolled back)"]
+    },
+    {
+      "id": "crm_phase4",
+      "file": "supabase/tests/crm_phase4_smoke.sql",
+      "groups": ["crm", "release"],
+      "expect": {
+        "result": "PASS"
+      },
+      "requires": ["runs the automation queue of every workspace inside the transaction; all of it is rolled back"]
+    },
+    {
+      "id": "crm_phase5",
+      "file": "supabase/tests/crm_phase5_smoke.sql",
+      "groups": ["crm", "release"],
+      "expect": {
+        "result": "PASS"
+      }
+    },
+    {
+      "id": "dynamic_conditions",
+      "file": "supabase/tests/dynamic_conditions_smoke.sql",
+      "groups": ["core", "release"],
+      "expect": {
+        "result": "PASS"
+      }
+    },
+    {
+      "id": "entitlements",
+      "file": "supabase/tests/entitlements_smoke.sql",
+      "groups": ["plans", "release"],
+      "expect": {
+        "result": "PASS"
+      },
+      "requires": ["the vault extension (a throwaway secret is created and rolled back)"]
+    },
+    {
+      "id": "live_booking",
+      "file": "supabase/tests/live_booking_smoke.sql",
+      "groups": ["core", "release"],
+      "expect": {
+        "result": "PASS"
+      }
+    },
+    {
+      "id": "manual_booking",
+      "file": "supabase/tests/manual_booking_smoke.sql",
+      "groups": ["core", "release"],
+      "expect": {
+        "result": "PASS"
+      }
+    },
+    {
+      "id": "manual_cancellation",
+      "file": "supabase/tests/manual_cancellation_smoke.sql",
+      "groups": ["core", "release"],
+      "expect": {
+        "result": "PASS"
+      }
+    },
+    {
+      "id": "manual_downgrade_no_expiration",
+      "file": "supabase/tests/manual_downgrade_no_expiration_smoke.sql",
+      "groups": ["admin", "plans", "release"],
+      "expect": {
+        "result": "PASS"
+      },
+      "requires": ["the vault extension (a throwaway secret is created and rolled back)", "the pg_cron job bellis-plan-expirations has to exist"]
+    },
+    {
+      "id": "manual_patient",
+      "file": "supabase/tests/manual_patient_smoke.sql",
+      "groups": ["crm", "release"],
+      "expect": {
+        "result": "PASS"
+      }
+    },
+    {
+      "id": "manual_pending_payment",
+      "file": "supabase/tests/manual_pending_payment_smoke.sql",
+      "groups": ["crm", "release"],
+      "expect": {
+        "result": "PASS"
+      }
+    },
+    {
+      "id": "mercado_pago",
+      "file": "supabase/tests/mercado_pago_smoke.sql",
+      "groups": ["core", "release"],
+      "expect": {
+        "result": "PASS"
+      },
+      "requires": ["the vault extension (a throwaway secret is created and rolled back)"]
+    },
+    {
+      "id": "mercado_pago_oauth",
+      "file": "supabase/tests/mercado_pago_oauth_smoke.sql",
+      "groups": ["core", "release"],
+      "expect": {
+        "result": "PASS"
+      },
+      "requires": ["the vault extension: reads vault.secrets and vault.decrypted_secrets for its own synthetic rows"]
+    },
+    {
+      "id": "patient_crm_phase2",
+      "file": "supabase/tests/patient_crm_phase2_smoke.sql",
+      "groups": ["crm", "release"],
+      "expect": {
+        "result": "PASS"
+      }
+    },
+    {
+      "id": "patient_crm_phase3",
+      "file": "supabase/tests/patient_crm_phase3_smoke.sql",
+      "groups": ["crm", "release"],
+      "expect": {
+        "result": "PASS"
+      },
+      "checks": ["workspace-clock"],
+      "requires": ["takes 'today' from the workspace's time zone, never from the server's (UTC) day"]
+    },
+    {
+      "id": "patient_notes",
+      "file": "supabase/tests/patient_notes_smoke.sql",
+      "groups": ["crm", "release"],
+      "expect": {
+        "result": "PASS"
+      }
+    },
+    {
+      "id": "payment_hardening",
+      "file": "supabase/tests/payment_hardening_smoke.sql",
+      "groups": ["core", "release"],
+      "expect": {
+        "result": "PASS"
+      }
+    },
+    {
+      "id": "phase6_roles",
+      "file": "supabase/tests/phase6_roles_smoke.sql",
+      "groups": ["core", "crm", "release"],
+      "expect": {
+        "result": "PASS"
+      }
+    },
+    {
+      "id": "product_events",
+      "file": "supabase/tests/product_events_smoke.sql",
+      "groups": ["admin", "release"],
+      "expect": {
+        "result": "PASS"
+      },
+      "requires": ["the vault extension (a throwaway secret is created and rolled back)"]
+    },
+    {
+      "id": "smart_availability",
+      "file": "supabase/tests/smart_availability_smoke.sql",
+      "groups": ["core", "release"],
+      "expect": {
+        "result": "PASS"
+      }
+    }
+  ]
+}

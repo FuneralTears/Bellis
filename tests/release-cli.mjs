@@ -24,11 +24,12 @@ async function invoke(t, argv, { cli = fakeCli(t), repo = gitRepo(t), root = rep
 const headings = (output) => output.split("\n").filter((line) => line.startsWith("## "));
 const sectionOf = (output, name) => output.split(/^## /m).find((part) => part.startsWith(`${name}\n`)) ?? "";
 
-test("only the two read-only commands exist; the ones that write are not available yet", () => {
-  assert.deepEqual([...available], ["status", "check-core"]); assert.deepEqual([...planned], ["check", "staging", "prod-precheck", "prod-release"]);
+test("status, check-core and smoke exist; the commands that write for good are not available yet", () => {
+  assert.deepEqual([...available], ["status", "check-core", "smoke"]); assert.deepEqual([...planned], ["check", "staging", "prod-precheck", "prod-release"]);
   const scripts = JSON.parse(readFileSync(join(repository, "package.json"), "utf8")).scripts;
   assert.equal(scripts["bellis:status"], "node scripts/release/cli.mjs status"); assert.equal(scripts["bellis:check-core"], "node scripts/release/cli.mjs check-core");
-  assert.deepEqual(Object.keys(scripts).filter((name) => name.startsWith("bellis:")).sort(), ["bellis:check-core", "bellis:status"]);
+  assert.equal(scripts["bellis:smoke"], "node scripts/release/cli.mjs smoke");
+  assert.deepEqual(Object.keys(scripts).filter((name) => name.startsWith("bellis:")).sort(), ["bellis:check-core", "bellis:smoke", "bellis:status"]);
   assert.equal(scripts.test, "node scripts/run-tests.mjs");
 });
 
@@ -105,7 +106,7 @@ test("usage: no command, an unknown one, an unknown flag and every planned comma
     assert.equal(code, EXIT.PRECONDITION_OR_USAGE, argv.join(" ")); assert.deepEqual(cli.calls(), []); assert.equal(cli.linkedFile(), refs.staging);
     if (!argv.includes("--json")) { assert.match(output, /## RESULT\nFAIL\n- exit 2 \(PRECONDITION_OR_USAGE\)/); assert.equal(headings(output).length, reportSections.length + 1); }
   }
-  const { output } = await invoke(t, ["prod-release"]); assert.match(output, /"prod-release" is not available yet\. Available: status, check-core\./);
+  const { output } = await invoke(t, ["prod-release"]); assert.match(output, /"prod-release" is not available yet\. Available: status, check-core, smoke\./);
 });
 
 test("an unexpected error inside a command is a failed check with a redacted message, never a pass", async (t) => {

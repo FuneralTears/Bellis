@@ -1,5 +1,8 @@
 -- Run only on the development project or a local database. Synthetic records are rolled back.
 begin;
+-- Los secretos de Mercado Pago que ya había antes de este smoke (los de cuentas reales conectadas): se cuentan
+-- aparte, para medir solo lo que el smoke crea y borra. No se leen ni se tocan.
+create temp table mp_oauth_baseline as select count(*) n from vault.secrets where description='Bellis Mercado Pago';
 insert into public.workspaces(id,name,slug) values
   ('f4000000-0000-4000-8000-00000000000a','OAuth A','oauth-smoke-a'),
   ('f4000000-0000-4000-8000-00000000000b','OAuth B','oauth-smoke-b');
@@ -128,7 +131,7 @@ begin
 end $$;
 reset role;
 do $$ begin
-  if (select count(*) from vault.secrets where description='Bellis Mercado Pago') <> 3 then raise exception 'vault_entries_leaked'; end if;
+  if (select count(*) from vault.secrets where description='Bellis Mercado Pago') <> (select n from mp_oauth_baseline)+3 then raise exception 'vault_entries_leaked'; end if;
 end $$;
 update private.mercado_pago_accounts set token_expires_at=now()-interval '1 minute'
   where workspace_id='f4000000-0000-4000-8000-00000000000b';
@@ -254,7 +257,7 @@ end $$;
 reset role;
 do $$ begin
   -- Disconnecting removed A's tokens from Vault and left B's alone.
-  if (select count(*) from vault.secrets where description='Bellis Mercado Pago') <> 1 then raise exception 'tokens_not_deleted'; end if;
+  if (select count(*) from vault.secrets where description='Bellis Mercado Pago') <> (select n from mp_oauth_baseline)+1 then raise exception 'tokens_not_deleted'; end if;
   if exists(select 1 from public.mercado_pago_credentials('f4000000-0000-4000-8000-00000000000a'))
     or not exists(select 1 from public.mercado_pago_credentials('f4000000-0000-4000-8000-00000000000b'))
     then raise exception 'disconnect_crossed_workspaces'; end if;

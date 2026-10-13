@@ -6,10 +6,20 @@
  *   node scripts/release/cli.mjs status        where things are: repository, linked project, migrations. Reads only.
  *   node scripts/release/cli.mjs check-core    the tooling's own guardrails, including a rehearsal of the target
  *                                              guard against a simulated CLI. Reads only; no request is sent.
+ *   node scripts/release/cli.mjs smoke         the SQL smokes of supabase/tests, against staging. Each one is a
+ *                                              transaction that is rolled back; nothing is left behind.
  *     --remote   (status) also asks the Supabase account which project is linked. One read-only request.
  *     --json     print the report as JSON instead of text.
+ *     --group <name...>   (smoke) only the smokes of these groups: core, crm, plans, admin, release.
+ *     --only <id...>      (smoke) only these smokes.
+ *     --all               (smoke) every smoke, each one once. The default when nothing is chosen.
+ *     --list              (smoke) show which smokes would run, and run nothing.
+ *     --with-pending <file...>   (smoke) run these migrations of supabase/migrations first, inside each smoke's
+ *                                transaction, to try a migration before it is applied. Nothing is kept.
+ *     --release <id>      (smoke) with --with-pending: the migrations have to match releases/<id>.json.
+ *     --ndjson            (smoke) one JSON event per line instead of text.
  *
- * Neither command links the CLI, applies a migration, moves a branch or writes outside the release state folder.
+ * No command links the CLI, applies a migration, moves a branch or writes outside the release state folder.
  * The commands that do (staging, prod-precheck, prod-release) are not available yet and answer with exit 2.
  */
 import { existsSync, readFileSync, readdirSync } from "node:fs";
@@ -20,16 +30,29 @@ import { EXIT, PreconditionError, ReleaseError, createReport, exitCodeFor, exitN
 import { createState } from "./lib/state.mjs";
 import { createSupabase } from "./lib/supabase.mjs";
 import { CleanupFailed, environmentOf, environments, inspectTarget, withTarget } from "./lib/target.mjs";
+import { loadManifest, selectSmokes } from "./smoke/manifest.mjs";
+import { humanLine, resolvePending, runSmokes } from "./smoke/runner.mjs";
 
 const repository = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-export const available = Object.freeze(["status", "check-core"]);
+export const available = Object.freeze(["status", "check-core", "smoke"]);
 export const planned = Object.freeze(["check", "staging", "prod-precheck", "prod-release"]);
-const usage = `Usage: node scripts/release/cli.mjs <${available.join("|")}> [--remote] [--json]`;
+const usage = `Usage: node scripts/release/cli.mjs <${available.join("|")}> [options] (see the top of scripts/release/cli.mjs)`;
+/** The options each command takes: `true` for a switch, "list" for one that is followed by one or more values. */
+const optionsOf = Object.freeze({
+  status: { "--remote": true, "--json": true },
+  "check-core": { "--json": true },
+  smoke: { "--all": true, "--list": true, "--ndjson": true, "--json": true, "--group": "list", "--only": "list", "--with-pending": "list", "--release": "list" },
+});
 
 function parse(argv) {
-  const [command, ...rest] = argv; const flags = new Set(rest.filter((item) => item.startsWith("--")));
-  const unknown = [...flags].filter((flag) => !["--remote", "--json"].includes(flag)).concat(rest.filter((item) => !item.startsWith("--")));
-  return { command, remote: flags.has("--remote"), json: flags.has("--json"), unknown };
+  const [command, ...rest] = argv; const known = optionsOf[command] ?? {}; const flags = new Set(); const lists = {}; const unknown = [];
+  let open = null;
+  for (const item of rest) {
+    if (item.startsWith("--")) { open = null; if (!Object.hasOwn(known, item)) { unknown.push(item); continue; } flags.add(item); if (known[item] === "list") { open = item; lists[item] ??= []; } }
+    else if (open) lists[open].push(item); else unknown.push(item);
+  }
+  for (const [name, values] of Object.entries(lists)) if (!values.length) unknown.push(`${name} (it needs a value)`);
+  return { command, flags, lists, remote: flags.has("--remote"), json: flags.has("--json"), unknown };
 }
 const line = (check) => `${check.ok ? "ok" : "FAIL"} · ${check.name}: ${check.detail}`;
 const section = (checks) => (checks.every((item) => item.ok) ? "PASS" : "FAIL");
@@ -114,6 +137,41 @@ async function checkCore({ report, root, supabase, git, environment, home }) {
   report.set("SMOKES", section([...guardrails, ...rehearsal]), ["tooling self-test (no SQL smoke is run by this command)", ...guardrails.map(line), ...rehearsal.map(line)]);
 }
 
+/**
+ * The SQL smokes. Only against staging for now: the CLI has to be there already, and it is not moved.
+ * Progress is printed as it happens (text, or one JSON event per line), and the report closes it.
+ */
+function smoke({ report, root, supabase, git, environment, options, write }) {
+  const manifest = loadManifest(root);
+  const chosen = selectSmokes(manifest, { groups: options.lists["--group"] ?? [], only: options.lists["--only"] ?? [], all: options.flags.has("--all") });
+  const release = options.lists["--release"]; if (release && release.length !== 1) throw new PreconditionError("--release takes one release id.");
+  const pending = resolvePending(root, options.lists["--with-pending"] ?? [], { release: release?.[0] });
+  const ndjson = options.flags.has("--ndjson");
+  const emit = (event) => { if (ndjson) write(JSON.stringify(event) + "\n"); else { const text = humanLine(event); if (text) write(text + "\n"); } };
+  const groups = Object.keys(manifest.groups).map((group) => `${group}: ${manifest.smokes.filter((item) => item.groups.includes(group)).length}`).join(", ");
+  report.set("MIGRATIONS", pending.length ? "INFO" : "N/A", pending.map((item) => `pending, inside each smoke's transaction: ${item.file} (sha256 ${item.sha256.slice(0, 12)}${item.verified ? ", matches the release" : ""})`));
+  if (options.flags.has("--list")) {
+    for (const item of chosen) emit(ndjson ? { type: "listed", id: item.id, file: item.file, groups: item.groups } : { type: "smoke", status: "LISTED", id: item.id, reason: item.groups.join(", ") });
+    report.set("SMOKES", "INFO", [`${chosen.length} of ${manifest.smokes.length} smoke(s) selected; nothing was run`, `groups: ${groups}`]);
+    if (!ndjson) write("\n");
+    return;
+  }
+  const seen = checkGit(git, { requireClean: false });
+  report.set("GIT", "INFO", [`branch ${seen.state.branch ?? "(detached)"} at ${short(seen.state.commit)}`, seen.state.clean ? "working tree clean" : `working tree has ${seen.state.changes.length} change(s): the smokes run are the files on disk`]);
+  let outcome;
+  try { outcome = runSmokes({ root, supabase, manifest, smokes: chosen, pending, environment, emit }); }
+  finally { const ref = supabase.linkedRef(); const env = environmentOf(ref); report.set("CLI FINAL TARGET", env === "staging" ? "PASS" : "FAIL", [env ? environments[env].label : "OTHER"]); if (!ndjson) write("\n"); }
+  report.set("TARGET", outcome.targetConfirmed ? "PASS" : "N/A", outcome.targetConfirmed ? [`${environments.staging.label} (${environments.staging.ref}), confirmed with the account's list of projects`, "the CLI was not linked or moved by this command"] : ["nothing was sent: the run stopped before connecting"]);
+  const failed = outcome.results.filter((item) => item.status !== "PASS");
+  report.set("SMOKES", outcome.ok ? "PASS" : "FAIL", [
+    `${outcome.counts.passed}/${outcome.counts.total} PASS${outcome.counts.rejected ? `, ${outcome.counts.rejected} refused before running` : ""}${outcome.counts.notRun ? `, ${outcome.counts.notRun} not run` : ""}`,
+    outcome.stopped ? `stopped: ${outcome.stopped}` : null,
+    outcome.selfTests.length ? `self-test: ${outcome.selfTests.filter((item) => item.ok).length}/${outcome.selfTests.length} (${outcome.selfTests.map((item) => `${item.id} ${item.ok ? "ok" : "FAIL"}`).join(", ")})` : "self-test: not reached",
+    outcome.rollbackVerified ? `rollback verified with PostgreSQL for ${outcome.counts.passed} transaction(s)` : null,
+    ...failed.slice(0, 15).map((item) => `${item.status} · ${item.id}: ${item.reason ?? ""}`),
+  ]);
+}
+
 /** Runs one command and returns its exit code. Everything it needs can be replaced, which is how it is tested. */
 export async function main(argv = process.argv.slice(2), { root = repository, environment = process.env, write = (text) => process.stdout.write(text), home, supabase, git } = {}) {
   const options = parse(argv); const report = createReport(options.command ?? "(none)");
@@ -121,10 +179,11 @@ export async function main(argv = process.argv.slice(2), { root = repository, en
     if (!options.command || options.unknown.length) throw new PreconditionError(options.command ? `Unknown argument: ${options.unknown.join(" ")}. ${usage}` : usage);
     if (planned.includes(options.command)) throw new PreconditionError(`"${options.command}" is not available yet. Available: ${available.join(", ")}.`);
     if (!available.includes(options.command)) throw new PreconditionError(`Unknown command: ${options.command}. ${usage}`);
-    const context = { report, root, environment, home, remote: options.remote, supabase: supabase ?? createSupabase({ cwd: root, environment }), git: git ?? createGit({ cwd: root }) };
-    if (options.command === "status") status(context); else await checkCore(context);
+    const context = { report, root, environment, home, options, write, remote: options.remote, supabase: supabase ?? createSupabase({ cwd: root, environment }), git: git ?? createGit({ cwd: root }) };
+    if (options.command === "status") status(context); else if (options.command === "smoke") smoke(context); else await checkCore(context);
   } catch (error) { report.fail(error, error?.stage ?? options.command ?? "arguments"); }
-  write(options.json ? JSON.stringify(report.toJSON(), null, 2) + "\n" : report.render());
+  if (options.flags.has("--ndjson")) write(JSON.stringify({ type: "report", ...report.toJSON() }) + "\n");
+  else write(options.json ? JSON.stringify(report.toJSON(), null, 2) + "\n" : report.render());
   return report.exitCode();
 }
 
