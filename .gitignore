@@ -45,3 +45,6 @@ next-env.d.ts
 /.codex/
 /outputs/
 /work/
+
+# Supabase CLI link state (which project the CLI points to). Local to each checkout; never commit it.
+supabase/.temp/

@@ -1,0 +1,8 @@
+{
+  "note": "Tests known to fail on one platform. They are reported apart by scripts/run-tests.mjs and do not fail `npm test`; one that starts passing fails the run until it is removed from here. These three build a path as C:\\C:\\... on Windows (the test, not the product): debt, to be fixed in the test itself.",
+  "failures": [
+    { "platform": "win32", "file": "tests/patient-notes-privacy.mjs", "test": "las funciones públicas (reserva, pago, webhook) no leen ni devuelven notas" },
+    { "platform": "win32", "file": "tests/patient-notes-privacy.mjs", "test": "las páginas públicas del profesional y el retorno de pago no consultan notas" },
+    { "platform": "win32", "file": "tests/patient-notes-privacy.mjs", "test": "solo la ficha del paciente consulta la tabla de notas" }
+  ]
+}
