@@ -43,8 +43,11 @@ select w1,i1,pr1,p1,now()-interval '70 days',now()-interval '70 days'+interval '
 from crm_phase3_fixture;
 insert into public.payments(workspace_id,booking_intent_id,provider,amount_minor,status)
 select w1,i2,'external_link',1000000,'pending' from crm_phase3_fixture;
+-- Vencido ayer, en el día del consultorio. La regla compara la fecha del seguimiento con "hoy" en la zona horaria
+-- del workspace (Argentina), no con el día de UTC: entre las 21:00 y las 24:00 de Argentina UTC ya está en el día
+-- siguiente, y "ayer de UTC" es todavía hoy para el consultorio. Con la fecha del workspace vale a cualquier hora.
 insert into public.patient_follow_ups(id,workspace_id,patient_id,professional_id,title,due_date,created_by)
-select f1,w1,p1,pr1,'Control sintético',current_date-1,u1 from crm_phase3_fixture;
+select f1,w1,p1,pr1,'Control sintético',(now() at time zone (select w.timezone from public.workspaces w where w.id=w1))::date-1,u1 from crm_phase3_fixture;
 select set_config('request.jwt.claim.sub',u1::text,true) from crm_phase3_fixture;
 set local role authenticated;
 do $$

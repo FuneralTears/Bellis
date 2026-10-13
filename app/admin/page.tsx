@@ -1,10 +1,36 @@
 "use client";
-import BellisLogo from "@/components/brand/BellisLogo";
+
 import Link from "next/link";
-import { useState } from "react";
-import { ArrowLeft, Search, Users, CalendarDays, CreditCard, TrendingUp, type LucideIcon } from "lucide-react";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import "./admin.css";
-const professionals=[{name:"Dra. Ana López",email:"ana@ejemplo.com",rubric:"Psicología",joined:"12/09/2026",plan:"Trial",status:"Activo",days:18},{name:"Dr. Mateo Silva",email:"mateo@ejemplo.com",rubric:"Odontología",joined:"10/09/2026",plan:"Trial",status:"Activo",days:16},{name:"Lic. Paula Ríos",email:"paula@ejemplo.com",rubric:"Nutrición",joined:"08/09/2026",plan:"Profesional",status:"Activo",days:0},{name:"Centro Álamo",email:"hola@ejemplo.com",rubric:"Kinesiología",joined:"02/09/2026",plan:"Consultorio",status:"Activo",days:0}];
-const metrics: [LucideIcon,string,string][] = [[Users,"Profesionales","248"],[TrendingUp,"Activos","192"],[CalendarDays,"Turnos realizados","1,842"],[CreditCard,"Ingresos procesados","$48.290.000 ARS"]];
-export default function Admin(){const[search,setSearch]=useState("");return <main className="admin-shell"><header><Link className="brand" href="/"><BellisLogo /></Link><span>Administración de la plataforma</span><a href="/demo"><ArrowLeft size={16}/> Volver al demo</a></header><div className="admin-wrap"><div className="admin-alert">Vista de demostración con información ficticia. El acceso de Super Admin deberá protegerse en el servidor.</div><div className="admin-title"><span>PANEL INTERNO</span><h1>Resumen de la plataforma</h1><p>Una vista de ejemplo de los indicadores y profesionales registrados.</p></div><div className="admin-metrics">{metrics.map(([Icon,label,value])=><div key={label}><span><Icon size={20}/>{label}</span><strong>{value}</strong></div>)}</div><div className="admin-secondary"><span>Nuevos registros <b>24</b></span><span>Pacientes registrados <b>3,461</b></span><span>Conversión trial a pago <b>18%</b></span></div><section className="admin-table"><div><h2>Profesionales</h2><label><Search size={16}/><input placeholder="Buscar profesional" aria-label="Buscar profesional" value={search} onChange={e=>setSearch(e.target.value)}/></label></div><div className="admin-scroll"><Table><TableHeader><TableRow><TableHead>Nombre</TableHead><TableHead>Email</TableHead><TableHead>Rubro</TableHead><TableHead>Registro</TableHead><TableHead>Plan</TableHead><TableHead>Estado</TableHead><TableHead>Trial restante</TableHead></TableRow></TableHeader><TableBody>{professionals.filter(p=>p.name.toLowerCase().includes(search.toLowerCase())).map(p=><TableRow key={p.name}><TableCell className="font-semibold">{p.name}</TableCell><TableCell>{p.email}</TableCell><TableCell>{p.rubric}</TableCell><TableCell>{p.joined}</TableCell><TableCell>{p.plan}</TableCell><TableCell><span className="admin-status">{p.status}</span></TableCell><TableCell>{p.days?p.days+" días":"—"}</TableCell></TableRow>)}</TableBody></Table></div></section></div></main>}
+import { notFound } from "next/navigation";
+import { AdminFrame, AdminHeader, AdminState, EventList, OverviewCards, TrialsEnding } from "@/components/admin/AdminUi";
+import { adminDateTime, defaultWorkspaceFilters, workspaceQuery, type AdminEvent, type AdminOverview, type AdminWorkspacePage } from "@/lib/admin";
+import { adminRpc, useAdminData, useAdminRole } from "./AdminGate";
+
+const open = { href: (id: string) => `/admin/workspaces/${id}` };
+
+/** Resumen: the numbers of the product, what happened lately and the trials closest to their end. */
+export default function AdminOverviewPage() {
+  const role = useAdminRole();
+  const { data, error, denied } = useAdminData(async () => {
+    const [overview, events, trials] = await Promise.all([
+      adminRpc<AdminOverview>("admin_overview"),
+      adminRpc<AdminEvent[]>("admin_recent_activity", { p_limit: 20 }),
+      adminRpc<AdminWorkspacePage>("admin_workspaces", workspaceQuery({ ...defaultWorkspaceFilters, tier: "pro_trial", sort: "trial_ending" }, 0, 8)),
+    ]);
+    return { overview, events, trials: trials.rows };
+  }, "overview");
+  if (denied) notFound();
+  return <AdminFrame active="Resumen" role={role} openRequests={data?.overview.upgrade_requests_open}>
+    <AdminHeader title="Resumen" description="Cómo está Bellis hoy: registros, uso y planes." aside={data && <>Actualizado {adminDateTime(data.overview.generated_at)}</>} />
+    {error && <AdminState tone="error">{error}</AdminState>}
+    {!data && !error && <AdminState>Cargando el resumen…</AdminState>}
+    {data && <>
+      <OverviewCards overview={data.overview} />
+      <div className="bo-columns">
+        <section className="bo-panel" aria-labelledby="bo-recent"><h2 id="bo-recent">Actividad reciente</h2><EventList events={data.events} open={open} /></section>
+        <section className="bo-panel" aria-labelledby="bo-trials"><h2 id="bo-trials">Pruebas próximas a vencer</h2><TrialsEnding rows={data.trials} open={open} />
+          <p className="bo-panel-foot"><Link className="bo-link" href="/admin/workspaces">Ver todos los consultorios</Link></p></section>
+      </div>
+    </>}
+  </AdminFrame>;
+}
