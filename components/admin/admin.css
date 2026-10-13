@@ -164,6 +164,43 @@
 .bo-when { margin-bottom: 14px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
 .bo-fact dd small { display: block; margin-top: 2px; font-size: 12px; font-weight: 400; color: var(--muted-foreground); }
 
+/* Commercial actions: buttons, the notice after a change, request filters and dialogs. */
+.bo-button { min-height: 40px; padding: 0 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--primary); font: inherit; font-weight: 600; cursor: pointer; }
+.bo-button:hover:not(:disabled) { background: var(--surface-muted); }
+.bo-button:disabled { opacity: .55; cursor: default; }
+.bo-button:focus-visible, .bo-tabs button:focus-visible, .bo-shortcuts button:focus-visible, .bo-dialog-close:focus-visible, .bo-field input:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.bo-button-primary { border-color: var(--primary); background: var(--primary); color: var(--primary-foreground); }
+.bo-button-primary:hover:not(:disabled) { background: var(--primary-hover); }
+.bo-button-danger { border-color: var(--danger); background: var(--danger); color: #fff; }
+.bo-button-danger:hover:not(:disabled) { background: #9c1d2f; }
+.bo-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.bo-notice { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--sage-soft); border-radius: var(--radius-sm); background: var(--sage-subtle); color: var(--success); font-weight: 600; }
+.bo-subhead { margin: 18px 0 6px; font-size: 13px; font-weight: 600; color: var(--muted-foreground); }
+.bo-event small { font-size: 12px; }
+.bo-actor { overflow-wrap: anywhere; }
+.bo-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.bo-tabs button { min-height: 40px; padding: 0 14px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--foreground); font: inherit; font-weight: 500; cursor: pointer; }
+.bo-tabs button.active { border-color: var(--primary); background: var(--primary); color: var(--primary-foreground); font-weight: 600; }
+.bo-overlay { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 16px; background: rgb(15 23 42 / 45%); overflow-y: auto; }
+.bo-dialog { width: min(480px, 100%); padding: 20px; border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-popover); display: flex; flex-direction: column; gap: 12px; }
+.bo-dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.bo-dialog h2 { margin: 0; font-size: 19px; line-height: 1.25; color: var(--primary); text-transform: none; letter-spacing: 0; }
+.bo-dialog p { margin: 0; }
+.bo-dialog-close { display: inline-grid; place-items: center; width: 40px; height: 40px; margin: -8px -8px 0 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--muted-foreground); cursor: pointer; }
+.bo-dialog-close:hover { background: var(--surface-muted); }
+.bo-dialog-who { font-weight: 600; overflow-wrap: anywhere; }
+.bo-dialog-note { padding: 8px 10px; border-radius: var(--radius-sm); background: var(--surface-muted); color: var(--muted-foreground); font-size: 13px; }
+.bo-dialog-error { color: var(--danger); font-weight: 500; }
+.bo-shortcuts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.bo-shortcuts button { min-height: 40px; padding: 0 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--foreground); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+.bo-shortcuts button.active { border-color: var(--sage); background: var(--sage-subtle); color: var(--success); font-weight: 600; }
+.bo-field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 600; color: var(--muted-foreground); }
+.bo-field input { min-height: 44px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--foreground); font: inherit; font-size: 15px; font-weight: 400; }
+.bo-dialog-dates { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.bo-dialog-dates dt { font-size: 12px; color: var(--muted-foreground); }
+.bo-dialog-dates dd { margin: 2px 0 0; font-size: 17px; font-weight: 600; color: var(--primary); font-variant-numeric: tabular-nums; }
+.bo-dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+
 @media (max-width: 1100px) {
   .bo-columns, .bo-detail { grid-template-columns: minmax(0, 1fr); }
   /* Seven columns do not fit next to the sidebar below this width: each workspace becomes a card, with the column name above its value. */
@@ -196,6 +233,9 @@
   .bo-trials-when { text-align: left; }
 }
 @media (max-width: 400px) {
+  .bo-shortcuts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .bo-dialog-actions .bo-button, .bo-actions .bo-button { flex: 1 1 100%; }
+  .bo-dialog { padding: 16px; }
   .bo-main { padding: 14px 12px 36px; }
   .bo-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .bo-stat strong { font-size: 22px; }
@@ -203,3 +243,10 @@
   /* Three sections fit in one row without their icons. */
   .bo-nav svg { display: none; }
 }
+
+/* Demo only: the banner carries the "ver como" switch. */
+.bo-banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+.bo-demo-role { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.bo-demo-role button { min-height: 36px; padding: 0 12px; border: 1px solid #e6c98e; border-radius: 999px; background: transparent; color: var(--warning); font: inherit; font-weight: 600; cursor: pointer; }
+.bo-demo-role button.active { background: var(--warning); border-color: var(--warning); color: #fff; }
+.bo-demo-role button:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }

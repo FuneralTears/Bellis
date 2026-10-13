@@ -27,14 +27,14 @@ export type AdminSection = (typeof adminSections)[number]["key"];
  * so its invented dates read the same whenever it is opened.
  */
 export const AdminClock = createContext<Date | null>(null);
-function useClock(): Date {
+export function useClock(): Date {
   const fixed = useContext(AdminClock);
   return fixed ?? new Date();
 }
 
 /** How a workspace is opened: a link in the real backoffice, a state change in the demo. */
 export type OpenWorkspace = { href?: (id: string) => string; onOpen?: (id: string) => void };
-function WorkspaceLink({ id, open, children, className }: { id: string; open: OpenWorkspace; children: ReactNode; className?: string }) {
+export function WorkspaceLink({ id, open, children, className }: { id: string; open: OpenWorkspace; children: ReactNode; className?: string }) {
   if (open.href) return <Link className={className} href={open.href(id)}>{children}</Link>;
   return <button type="button" className={className} onClick={() => open.onOpen?.(id)}>{children}</button>;
 }
@@ -173,12 +173,15 @@ export function Pager({ page, total, pageSize, onPage }: { page: number; total: 
   </div>;
 }
 
-function Fact({ label, children }: { label: string; children: ReactNode }) {
+export function Fact({ label, children }: { label: string; children: ReactNode }) {
   return <div className="bo-fact"><dt>{label}</dt><dd>{children}</dd></div>;
 }
 const yesNo = (value: boolean) => value ? "Sí" : "No";
-/** One workspace, in sections: account, plan, usage, payments and what happened lately. */
-export function WorkspaceDetailView({ detail }: { detail: AdminWorkspaceDetail }) {
+/**
+ * One workspace, in sections: account, what its plan includes, usage, payments, the commercial plan (given by the
+ * caller, with its actions) and what happened lately.
+ */
+export function WorkspaceDetailView({ detail, commercial }: { detail: AdminWorkspaceDetail; commercial?: ReactNode }) {
   const d = detail; const remaining = daysRemainingLabel(d.days_remaining); const clock = useClock();
   return <div className="bo-detail">
     <section className="bo-card" aria-labelledby="bo-account"><h2 id="bo-account">Cuenta</h2><dl className="bo-facts">
@@ -189,14 +192,9 @@ export function WorkspaceDetailView({ detail }: { detail: AdminWorkspaceDetail }
       <Fact label="Onboarding">{d.onboarding_completed ? `Completo el ${adminDate(d.onboarding_completed_at)}` : "Sin terminar"}</Fact>
       <Fact label="Estado">{d.status === "suspended" ? "Suspendida" : "Activa"}</Fact>
     </dl></section>
-    <section className="bo-card" aria-labelledby="bo-plan"><h2 id="bo-plan">Plan</h2>
+    <section className="bo-card" aria-labelledby="bo-plan"><h2 id="bo-plan">Lo que incluye hoy</h2>
       <p className="bo-plan-now"><TierChip tier={d.effective_tier} suspended={d.status === "suspended"} /><b>{planLine(d)}</b>{remaining && <span>{remaining}</span>}
         {d.upgrade_request_open && <span className="bo-chip bo-chip-ask">Pidió Pro el {adminDate(d.upgrade_requested_at)}</span>}</p>
-      <dl className="bo-facts">
-        <Fact label="Plan guardado">{d.plan_code === "pro" ? "Pro" : "Free"}</Fact>
-        <Fact label="Prueba">{d.trial_started_at ? `${adminDate(d.trial_started_at)} → ${lastValidDay(d.trial_ends_at)}` : "Todavía no empezó"}</Fact>
-        <Fact label="Pro">{d.pro_started_at ? `${adminDate(d.pro_started_at)} → ${d.pro_ends_at ? lastValidDay(d.pro_ends_at) : "sin vencimiento"}` : "Nunca tuvo"}</Fact>
-      </dl>
       <div className="bo-caps" aria-label="Lo que incluye hoy">{shownCapabilities(d.capabilities).map((name) => <span key={name}>{name}</span>)}</div>
     </section>
     <section className="bo-card" aria-labelledby="bo-usage"><h2 id="bo-usage">Uso</h2>
@@ -216,29 +214,9 @@ export function WorkspaceDetailView({ detail }: { detail: AdminWorkspaceDetail }
       <Fact label="Mercado Pago conectado">{yesNo(d.mercado_pago_connected)}</Fact>
       <Fact label="Reservas online"><span className={d.booking_available ? "bo-ok" : d.booking_paused ? "bo-warn" : "bo-muted"}>{bookingLine(d)}</span></Fact>
     </dl></section>
+    {commercial}
     <section className="bo-card bo-card-wide" aria-labelledby="bo-timeline"><h2 id="bo-timeline">Últimos eventos</h2>
       <p className="bo-note">Qué pasó y cuándo. Nunca el contenido: ni nombres de pacientes, ni notas, ni respuestas de formularios.</p>
       <EventList events={d.timeline} empty="Este consultorio todavía no tiene eventos." /></section>
   </div>;
-}
-
-/** Who asked for Bellis Pro and is waiting for an answer, oldest first: that is the commercial priority. */
-export function UpgradeRequestList({ rows, open }: { rows: AdminWorkspaceRow[]; open: OpenWorkspace }) {
-  const clock = useClock();
-  if (!rows.length) return <AdminState>No hay solicitudes abiertas.</AdminState>;
-  const ordered = [...rows].sort((a, b) => (a.upgrade_requested_at ?? "").localeCompare(b.upgrade_requested_at ?? ""));
-  return <ul className="bo-requests">{ordered.map((row) => <li key={row.workspace_id} className="bo-card">
-    <div className="bo-request-head"><div><WorkspaceLink id={row.workspace_id} open={open} className="bo-link bo-name">{row.workspace_name}</WorkspaceLink>
-      <small>{row.owner_email ?? "Sin email"} · {row.profession ?? "Sin profesión"}</small></div>
-      <TierChip tier={row.effective_tier} suspended={row.status === "suspended"} /></div>
-    <dl className="bo-facts">
-      <Fact label="Pidió">Bellis Pro</Fact>
-      <Fact label="Cuándo">{adminDateTime(row.upgrade_requested_at)} ({daysAgo(row.upgrade_requested_at, clock)})</Fact>
-      <Fact label="Plan actual">{planLine(row)}</Fact>
-      <Fact label="Uso">{usageLine(row)}</Fact>
-      <Fact label="Último acceso del equipo">{row.last_sign_in_at ? daysAgo(row.last_sign_in_at, clock) : "Sin ingresos todavía"}</Fact>
-      <Fact label="Última actividad">{daysAgo(row.last_activity_at, clock)}</Fact>
-      <Fact label="Estado">Abierta</Fact>
-    </dl>
-  </li>)}</ul>;
 }

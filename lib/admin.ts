@@ -151,7 +151,7 @@ export function planLine(row: Pick<AdminWorkspaceRow, "effective_tier" | "trial_
   if (row.status === "suspended") return "Suspendida";
   if (row.effective_tier === "pro_trial") return `Prueba hasta el ${lastValidDay(row.trial_ends_at)}`;
   if (row.effective_tier === "pro") return row.pro_ends_at ? `Pro hasta el ${lastValidDay(row.pro_ends_at)}` : "Pro sin vencimiento";
-  return row.trial_ends_at ? `Prueba vencida el ${lastValidDay(row.trial_ends_at)}` : "Sin prueba todavía";
+  return row.trial_ends_at ? `Prueba terminada el ${lastValidDay(row.trial_ends_at)}` : "Sin prueba todavía";
 }
 /** "Último día", "Queda 1 día", "Quedan 12 días". Null when the plan has no end. */
 export function daysRemainingLabel(days: number | null | undefined): string | null {

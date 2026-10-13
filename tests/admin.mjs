@@ -76,7 +76,8 @@ test("último acceso y última actividad son dos fechas distintas", () => {
   const ui = read("components/admin/AdminUi.tsx");
   assert.match(ui, /<th>Último acceso del equipo<\/th><th>Última actividad<\/th>/);
   assert.match(ui, /Inicio de sesión más reciente de una persona de este espacio\./);
-  assert.equal(ui.split("Último acceso del equipo").length - 1, 4, "lista (encabezado y tarjeta), detalle y solicitudes Pro");
+  assert.equal(ui.split("Último acceso del equipo").length - 1, 3, "lista (encabezado y tarjeta) y detalle");
+  assert.equal(read("components/admin/AdminPlans.tsx").split("Último acceso del equipo").length - 1, 1, "solicitudes Pro");
   assert.doesNotMatch(ui, /Último acceso(?! del equipo)/);
 });
 
@@ -84,7 +85,7 @@ test("plan en una línea y días que quedan", () => {
   assert.equal(planLine({ effective_tier: "pro_trial", trial_ends_at: "2026-11-12T03:00:00+00:00", pro_ends_at: null, status: "active" }), "Prueba hasta el 11/11/2026");
   assert.equal(planLine({ effective_tier: "pro", trial_ends_at: null, pro_ends_at: "2026-12-01T03:00:00+00:00", status: "active" }), "Pro hasta el 30/11/2026");
   assert.equal(planLine({ effective_tier: "pro", trial_ends_at: null, pro_ends_at: null, status: "active" }), "Pro sin vencimiento");
-  assert.equal(planLine({ effective_tier: "free", trial_ends_at: "2026-09-01T03:00:00+00:00", pro_ends_at: null, status: "active" }), "Prueba vencida el 31/08/2026");
+  assert.equal(planLine({ effective_tier: "free", trial_ends_at: "2026-09-01T03:00:00+00:00", pro_ends_at: null, status: "active" }), "Prueba terminada el 31/08/2026");
   assert.equal(planLine({ effective_tier: "free", trial_ends_at: null, pro_ends_at: null, status: "active" }), "Sin prueba todavía");
   assert.equal(planLine({ effective_tier: "pro", trial_ends_at: null, pro_ends_at: null, status: "suspended" }), "Suspendida");
   assert.equal(daysRemainingLabel(0), "Último día"); assert.equal(daysRemainingLabel(1), "Queda 1 día");
@@ -201,10 +202,10 @@ test("el backoffice no lee contenido clínico", () => {
   // De los seguimientos solo se cuentan filas y se guarda de dónde vinieron.
   assert.doesNotMatch(adminCode, /new\.(title|description|content|first_name|last_name|email|phone)/);
   // Ninguna pantalla del backoffice consulta tablas: solo llama a las funciones admin.
-  const screens = ["app/admin/AdminGate.tsx", "app/admin/page.tsx", "app/admin/workspaces/page.tsx", "app/admin/workspaces/[id]/page.tsx", "app/admin/upgrades/page.tsx", "components/admin/AdminUi.tsx", "lib/admin.ts"];
+  const screens = ["app/admin/AdminGate.tsx", "app/admin/page.tsx", "app/admin/workspaces/page.tsx", "app/admin/workspaces/[id]/page.tsx", "app/admin/upgrades/page.tsx", "components/admin/AdminUi.tsx", "components/admin/AdminPlans.tsx", "lib/admin.ts", "lib/admin-plans.ts"];
   for (const file of screens) assert.doesNotMatch(read(file), /\.from\(/, `${file} consulta una tabla`);
-  assert.deepEqual([...new Set(screens.flatMap((file) => [...read(file).matchAll(/(?:adminRpc<[^(]*|\.rpc)\("([a-z_]+)"/g)].map((match) => match[1])))].sort(),
-    ["admin_overview", "admin_recent_activity", "admin_workspace_detail", "admin_workspaces", "bellis_admin_session"]);
+  assert.deepEqual([...new Set(screens.flatMap((file) => [...read(file).matchAll(/(?:adminRpc(?:<[^(]*)?|\.rpc)\("([a-z_]+)"/g)].map((match) => match[1])))].sort(),
+    ["admin_overview", "admin_plan_changes", "admin_recent_activity", "admin_resolve_upgrade_request", "admin_set_workspace_plan", "admin_upgrade_requests", "admin_workspace_detail", "admin_workspaces", "bellis_admin_session"]);
 });
 
 test("toda función del backoffice valida a quien llama, y nadie queda cargado como admin en git", () => {
@@ -215,7 +216,7 @@ test("toda función del backoffice valida a quien llama, y nadie queda cargado c
   }
   assert.doesNotMatch(adminCode, /insert into private\.bellis_admins/);
   assert.doesNotMatch(adminCode, /grant[^;]*bellis_admins[^;]*to/);
-  // Todavía no hay acciones comerciales: el backoffice no cambia planes.
+  // Las migraciones de lectura (H2.8A) no cambian planes: las acciones comerciales viven en su propia migración.
   assert.doesNotMatch(adminCode, /admin_set_workspace_plan/);
   assert.doesNotMatch(adminCode, /update public\.workspaces|update public\.plan_upgrade_requests/);
 });

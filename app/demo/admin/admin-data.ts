@@ -1,4 +1,5 @@
 import type { AdminEvent, AdminEventName, AdminOverview, AdminWorkspaceDetail, AdminWorkspaceFilters, AdminWorkspaceRow } from "@/lib/admin";
+import type { AdminPlanChange, AdminUpgradeRequest, PlanChangeAction, PlanDialogMode, RequestAction } from "@/lib/admin-plans";
 
 /** Mock data for /demo/admin. Invented consultorios and addresses: nothing here comes from Supabase. */
 const day = 86_400_000;
@@ -77,8 +78,8 @@ export const demoEvents: AdminEvent[] = [
   event("patient_created", lucia, ago(15), { source: "manual" }), event("trial_expired", paula, ago(28)), event("pro_activated", mateo, ago(41)),
 ].sort((a, b) => b.created_at.localeCompare(a.created_at));
 
-export function demoDetail(id: string): AdminWorkspaceDetail | null {
-  const found = demoWorkspaces.find((item) => item.workspace_id === id);
+export function demoDetail(id: string, rows: AdminWorkspaceRow[] = demoWorkspaces): AdminWorkspaceDetail | null {
+  const found = rows.find((item) => item.workspace_id === id);
   if (!found) return null;
   const end = found.effective_tier === "pro_trial" ? found.trial_ends_at : found.effective_tier === "pro" ? found.pro_ends_at : null;
   const own = demoEvents.filter((item) => item.workspace_id === id);
@@ -88,9 +89,9 @@ export function demoDetail(id: string): AdminWorkspaceDetail | null {
 }
 
 /** The same filters and orders the server applies, over the mock rows. */
-export function demoFilter(filters: AdminWorkspaceFilters): AdminWorkspaceRow[] {
+export function demoFilter(filters: AdminWorkspaceFilters, source: AdminWorkspaceRow[] = demoWorkspaces): AdminWorkspaceRow[] {
   const search = filters.search.trim().toLowerCase();
-  const rows = demoWorkspaces.filter((item) =>
+  const rows = source.filter((item) =>
     (!search || [item.workspace_name, item.owner_email ?? "", item.profession ?? ""].some((value) => value.toLowerCase().includes(search)))
     && (filters.onboarding === "all" || item.onboarding_completed === (filters.onboarding === "complete"))
     && (filters.tier === "all" || item.effective_tier === filters.tier)
@@ -103,4 +104,69 @@ export function demoFilter(filters: AdminWorkspaceFilters): AdminWorkspaceRow[] 
     most_active: (a, b) => b.events_30d - a.events_30d,
   };
   return [...rows].sort(by[filters.sort]);
+}
+
+// ===== Commercial actions, simulated =====
+// The same outcomes the server produces, applied to the mock rows in memory. Nothing is sent anywhere.
+
+/** The requests of the mock workspaces: the open ones, plus two that were closed before. */
+export const demoRequests: AdminUpgradeRequest[] = [
+  ...demoWorkspaces.filter((item) => item.upgrade_request_open).map((item, index): AdminUpgradeRequest => ({ request_id: `demo-request-${index + 1}`, workspace_id: item.workspace_id,
+    workspace_name: item.workspace_name, owner_email: item.owner_email, profession: item.profession, requested_plan: "pro", status: "open", requested_at: item.upgrade_requested_at!, resolved_at: null,
+    resolution: null, effective_tier: item.effective_tier, plan_code: item.plan_code, workspace_status: item.status, trial_ends_at: item.trial_ends_at, pro_ends_at: item.pro_ends_at,
+    last_sign_in_at: item.last_sign_in_at, last_activity_at: item.last_activity_at, patient_count: item.patient_count, appointment_count: item.appointment_count, public_booking_count: item.public_booking_count })),
+  { request_id: "demo-request-8", workspace_id: "demo-2", workspace_name: "Mateo Silva Odontología", owner_email: "mateo@ejemplo.com", profession: "Odontología", requested_plan: "pro", status: "resolved",
+    requested_at: ago(43), resolved_at: ago(41), resolution: "pro_activated", effective_tier: "pro", plan_code: "pro", workspace_status: "active", trial_ends_at: ago(44), pro_ends_at: ahead(19),
+    last_sign_in_at: ago(0, 6), last_activity_at: ago(1, 2), patient_count: 118, appointment_count: 203, public_booking_count: 87 },
+  { request_id: "demo-request-9", workspace_id: "demo-6", workspace_name: "Espacio Raíz", owner_email: "contacto@ejemplo.com", profession: "Psicopedagogía", requested_plan: "pro", status: "dismissed",
+    requested_at: ago(70), resolved_at: ago(66), resolution: "upgrade_request_dismissed", effective_tier: "free", plan_code: "free", workspace_status: "active", trial_ends_at: ago(65), pro_ends_at: null,
+    last_sign_in_at: ago(47), last_activity_at: ago(47), patient_count: 9, appointment_count: 11, public_booking_count: 4 },
+];
+export const demoPlanChanges: Record<string, AdminPlanChange[]> = {
+  "demo-2": [{ id: 1, action: "pro_activated", previous_effective_tier: "free", new_effective_tier: "pro", previous_plan_code: "free", new_plan_code: "pro", previous_pro_ends_at: null, new_pro_ends_at: ahead(19),
+    previous_trial_ends_at: ago(44), new_trial_ends_at: ago(44), by_me: false, actor_label: "equipo@ejemplo.com", created_at: ago(41) }],
+};
+
+export type DemoCommercialState = { workspaces: AdminWorkspaceRow[]; requests: AdminUpgradeRequest[]; changes: Record<string, AdminPlanChange[]> };
+export const demoCommercialStart: DemoCommercialState = { workspaces: demoWorkspaces, requests: demoRequests, changes: demoPlanChanges };
+
+let changeId = 100;
+const trialRunning = (row: AdminWorkspaceRow) => !!row.trial_ends_at && new Date(row.trial_ends_at).getTime() > now;
+function withChange(state: DemoCommercialState, before: AdminWorkspaceRow, after: AdminWorkspaceRow, action: PlanChangeAction): Record<string, AdminPlanChange[]> {
+  const change: AdminPlanChange = { id: ++changeId, action, previous_effective_tier: before.effective_tier, new_effective_tier: after.effective_tier, previous_plan_code: before.plan_code,
+    new_plan_code: after.plan_code, previous_pro_ends_at: before.pro_ends_at, new_pro_ends_at: after.pro_ends_at, previous_trial_ends_at: before.trial_ends_at, new_trial_ends_at: after.trial_ends_at,
+    by_me: true, actor_label: "Vos", created_at: new Date(now).toISOString() };
+  return { ...state.changes, [after.workspace_id]: [change, ...(state.changes[after.workspace_id] ?? [])] };
+}
+const syncRequests = (requests: AdminUpgradeRequest[], row: AdminWorkspaceRow) => requests.map((item) => item.workspace_id === row.workspace_id
+  ? { ...item, effective_tier: row.effective_tier, plan_code: row.plan_code, pro_ends_at: row.pro_ends_at, trial_ends_at: row.trial_ends_at } : item);
+
+/** Activate, extend or remove Bellis Pro on a mock workspace. Activating also resolves its open request, as the server does. */
+export function demoChangePlan(state: DemoCommercialState, workspaceId: string, mode: PlanDialogMode, proEndsAt: string | null): DemoCommercialState {
+  const before = state.workspaces.find((item) => item.workspace_id === workspaceId); if (!before) return state;
+  const after: AdminWorkspaceRow = mode === "downgrade"
+    ? { ...before, plan_code: "free", effective_tier: "free", pro_ends_at: before.effective_tier === "pro" ? new Date(now).toISOString() : before.pro_ends_at,
+      trial_ends_at: trialRunning(before) ? new Date(now).toISOString() : before.trial_ends_at,
+      booking_available: before.payment_provider === "external_link" && before.external_link_configured, booking_paused: before.onboarding_completed && !(before.payment_provider === "external_link" && before.external_link_configured) }
+    : { ...before, plan_code: "pro", effective_tier: "pro", pro_started_at: mode === "extend" && before.effective_tier === "pro" ? before.pro_started_at : new Date(now).toISOString(), pro_ends_at: proEndsAt,
+      upgrade_request_open: false, upgrade_requested_at: null, booking_available: before.booking_available || before.mercado_pago_connected, booking_paused: before.booking_paused && !before.mercado_pago_connected };
+  let next: DemoCommercialState = { ...state, workspaces: state.workspaces.map((item) => item.workspace_id === workspaceId ? after : item) };
+  next = { ...next, changes: withChange(next, before, after, mode === "downgrade" ? "downgraded_to_free" : mode === "extend" ? "pro_extended" : "pro_activated") };
+  let requests = syncRequests(state.requests, after);
+  if (mode !== "downgrade" && state.requests.some((item) => item.workspace_id === workspaceId && item.status === "open")) {
+    requests = requests.map((item) => item.workspace_id === workspaceId && item.status === "open" ? { ...item, status: "resolved" as const, resolved_at: new Date(now).toISOString(), resolution: "pro_activated" as const } : item);
+    next = { ...next, changes: withChange(next, before, after, "upgrade_request_resolved") };
+  }
+  return { ...next, requests };
+}
+/** Close a mock request: activating Pro, resolving it by hand or dismissing it. */
+export function demoResolveRequest(state: DemoCommercialState, requestId: string, action: RequestAction, proEndsAt: string | null): DemoCommercialState {
+  const request = state.requests.find((item) => item.request_id === requestId); if (!request || request.status !== "open") return state;
+  if (action === "activate") return demoChangePlan(state, request.workspace_id, request.effective_tier === "pro" ? "extend" : "activate", proEndsAt);
+  const row = state.workspaces.find((item) => item.workspace_id === request.workspace_id)!;
+  const after = { ...row, upgrade_request_open: false, upgrade_requested_at: null };
+  return { workspaces: state.workspaces.map((item) => item.workspace_id === row.workspace_id ? after : item),
+    requests: state.requests.map((item) => item.request_id === requestId ? { ...item, status: action === "resolve" ? "resolved" as const : "dismissed" as const, resolved_at: new Date(now).toISOString(),
+      resolution: action === "resolve" ? "upgrade_request_resolved" as const : "upgrade_request_dismissed" as const } : item),
+    changes: withChange(state, row, after, action === "resolve" ? "upgrade_request_resolved" : "upgrade_request_dismissed") };
 }

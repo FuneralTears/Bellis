@@ -6,7 +6,8 @@ admin de un consultorio no da ningún acceso.
 ## Cómo funciona
 
 - La lista del equipo está en `private.bellis_admins`. Nadie la lee ni la escribe desde el navegador.
-- Hay dos roles: `admin` y `support`. Hoy los dos ven lo mismo; los cambios de plan, cuando existan, serán solo de `admin`.
+- Hay dos roles: `admin` y `support`. Los dos ven lo mismo. Solo `admin` cambia planes (activar, extender o quitar Bellis Pro)
+  y cierra solicitudes de Pro; `support` lee. El servidor rechaza a quien no corresponde, se muestren o no los botones.
 - Cada función del backoffice (`admin_overview`, `admin_workspaces`, `admin_workspace_detail`,
   `admin_recent_activity`) valida en el servidor a quien llama. A quien no es del equipo le responde `not_found`.
 - El frontend muestra la página de "no encontrado" a cualquiera que no sea del equipo. Eso es solo presentación:
