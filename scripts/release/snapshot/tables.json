@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "about": "What a data snapshot covers. Read by scripts/release/snapshot/build-sql.mjs. Every table is named with its schema and, to be fingerprinted, with the key that identifies a row. A column is left out of a fingerprint only with a reason. A table of the schemas below that is neither listed nor ignored shows up as a warning in every snapshot.",
+  "schemas": ["public", "private"],
+  "tables": [
+    { "table": "public.workspaces", "mode": "fingerprint", "key": ["id"] },
+    { "table": "public.workspace_members", "mode": "fingerprint", "key": ["workspace_id", "user_id"] },
+    { "table": "public.patients", "mode": "fingerprint", "key": ["id"] },
+    { "table": "public.appointments", "mode": "fingerprint", "key": ["id"] },
+    { "table": "public.payments", "mode": "fingerprint", "key": ["id"] },
+    { "table": "public.patient_notes", "mode": "fingerprint", "key": ["id"] },
+    { "table": "public.patient_activities", "mode": "fingerprint", "key": ["id"] },
+    { "table": "public.patient_follow_ups", "mode": "fingerprint", "key": ["id"] },
+    { "table": "public.automation_rules", "mode": "fingerprint", "key": ["id"] },
+    { "table": "public.automation_runs", "mode": "fingerprint", "key": ["id"] },
+    { "table": "public.internal_notifications", "mode": "fingerprint", "key": ["id"] },
+    { "table": "public.plan_upgrade_requests", "mode": "fingerprint", "key": ["id"] },
+    { "table": "public.product_events", "mode": "fingerprint", "key": ["id"] },
+    { "table": "public.audit_events", "mode": "fingerprint", "key": ["id"] },
+    { "table": "private.bellis_admins", "mode": "fingerprint", "key": ["user_id"] },
+    {
+      "table": "private.mercado_pago_accounts", "mode": "fingerprint", "key": ["workspace_id"],
+      "exclude": [
+        { "column": "token_expires_at", "reason": "rewritten every time the access token is refreshed, which happens on its own" },
+        { "column": "refresh_locked_until", "reason": "a 30-second lock taken and released by each token refresh" },
+        { "column": "updated_at", "reason": "touched by each token refresh; connecting and disconnecting still show in status, active, connected_at and disconnected_at" }
+      ]
+    },
+    { "table": "auth.users", "mode": "count", "why": "count only: no row of auth is read, hashed or fingerprinted" },
+
+    { "table": "public.plan_change_audit", "mode": "fingerprint", "key": ["id"], "why": "the record of every plan change made from the backoffice: a release must not add to it or alter it" },
+    { "table": "public.professionals", "mode": "fingerprint", "key": ["id"], "why": "every smoke creates professionals; one left behind would show here" },
+    { "table": "public.services", "mode": "fingerprint", "key": ["id"], "why": "created by the booking and payment smokes" },
+    { "table": "public.booking_intents", "mode": "fingerprint", "key": ["id"], "why": "the parent of appointments and payments; the booking smokes write here first" },
+    { "table": "public.availability_rules", "mode": "fingerprint", "key": ["id"], "why": "written by onboarding and by the availability smokes" },
+    { "table": "public.availability_blocks", "mode": "fingerprint", "key": ["id"], "why": "written by the availability smokes" },
+    { "table": "public.forms", "mode": "fingerprint", "key": ["id"], "why": "written by onboarding and the booking smokes" },
+    { "table": "public.form_questions", "mode": "fingerprint", "key": ["id"], "why": "written by onboarding and the booking smokes" },
+    { "table": "public.form_answers", "mode": "fingerprint", "key": ["id"], "why": "patients' answers: a release must not touch them" },
+    { "table": "public.questionnaires", "mode": "fingerprint", "key": ["id"], "why": "written by onboarding and the questionnaire smokes" },
+    { "table": "public.questionnaire_sections", "mode": "fingerprint", "key": ["id"], "why": "written by onboarding and the questionnaire smokes" },
+    { "table": "public.questionnaire_questions", "mode": "fingerprint", "key": ["id"], "why": "written by onboarding and the questionnaire smokes" },
+    { "table": "public.questionnaire_conditions", "mode": "fingerprint", "key": ["id"], "why": "written by the conditions smoke" },
+    { "table": "public.questionnaire_answers", "mode": "fingerprint", "key": ["id"], "why": "patients' answers: a release must not touch them" },
+    { "table": "public.notification_outbox", "mode": "fingerprint", "key": ["id"], "why": "what is waiting to be sent to patients: a smoke that leaked here would send something real" }
+  ],
+  "ignored": [
+    { "table": "public.public_request_limits", "reason": "rate-limit counters of the public booking page: written by any visitor at any moment, and pruned on their own" },
+    { "table": "private.mercado_pago_oauth_states", "reason": "one short-lived row per attempt to connect Mercado Pago; they expire and are consumed on their own" }
+  ]
+}

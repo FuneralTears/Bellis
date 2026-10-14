@@ -17,13 +17,19 @@
  *     --with-pending <file...>   (smoke) run these migrations of supabase/migrations first, inside each smoke's
  *                                transaction, to try a migration before it is applied. Nothing is kept.
  *     --release <id>      (smoke) with --with-pending: the migrations have to match releases/<id>.json.
- *     --ndjson            (smoke) one JSON event per line instead of text.
+ *     --ndjson            (smoke, snapshot) one JSON event per line instead of text.
+ *   node scripts/release/cli.mjs snapshot      counts and fingerprints of the data: never a row. Read-only.
+ *     --release <id> --label <pre|post|...>    take one and keep it in the release's folder, outside the repository.
+ *     --env <staging|production>   which project (staging by default). The CLI has to be there already.
+ *     --replace           take it again under a label that already exists.
+ *     --output <file>     also write the snapshot to this file (outside the repository).
+ *     --compare <a> <b>   compare two snapshots: two labels of --release, or two files. Any difference fails.
  *
  * No command links the CLI, applies a migration, moves a branch or writes outside the release state folder.
  * The commands that do (staging, prod-precheck, prod-release) are not available yet and answer with exit 2.
  */
-import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createGit, checkGit, short } from "./lib/git.mjs";
 import { EXIT, PreconditionError, ReleaseError, createReport, exitCodeFor, exitName, redact, reportSections } from "./lib/report.mjs";
@@ -32,9 +38,12 @@ import { createSupabase } from "./lib/supabase.mjs";
 import { CleanupFailed, environmentOf, environments, inspectTarget, withTarget } from "./lib/target.mjs";
 import { loadManifest, selectSmokes } from "./smoke/manifest.mjs";
 import { humanLine, resolvePending, runSmokes } from "./smoke/runner.mjs";
+import { loadConfig } from "./snapshot/build-sql.mjs";
+import { captureSnapshot } from "./snapshot/capture.mjs";
+import { acceptSnapshot, compareSnapshots, differenceLine, readSnapshotFile } from "./snapshot/compare.mjs";
 
 const repository = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-export const available = Object.freeze(["status", "check-core", "smoke"]);
+export const available = Object.freeze(["status", "check-core", "smoke", "snapshot"]);
 export const planned = Object.freeze(["check", "staging", "prod-precheck", "prod-release"]);
 const usage = `Usage: node scripts/release/cli.mjs <${available.join("|")}> [options] (see the top of scripts/release/cli.mjs)`;
 /** The options each command takes: `true` for a switch, "list" for one that is followed by one or more values. */
@@ -42,6 +51,7 @@ const optionsOf = Object.freeze({
   status: { "--remote": true, "--json": true },
   "check-core": { "--json": true },
   smoke: { "--all": true, "--list": true, "--ndjson": true, "--json": true, "--group": "list", "--only": "list", "--with-pending": "list", "--release": "list" },
+  snapshot: { "--ndjson": true, "--json": true, "--replace": true, "--release": "list", "--label": "list", "--env": "list", "--output": "list", "--compare": "list" },
 });
 
 function parse(argv) {
@@ -172,6 +182,59 @@ function smoke({ report, root, supabase, git, environment, options, write }) {
   ]);
 }
 
+const one = (options, name) => { const values = options.lists[name]; if (values && values.length !== 1) throw new PreconditionError(`${name} takes one value.`); return values?.[0]; };
+const insideRepository = (root, path) => { const inside = relative(resolve(root), resolve(path)); return inside === "" || (!inside.startsWith("..") && !isAbsolute(inside)); };
+
+/**
+ * Data snapshots: take one (counts and fingerprints, kept in the release's folder) or compare two.
+ * Taking one reads the database in a read-only transaction and never links the CLI.
+ */
+function snapshot({ report, root, supabase, git, environment, home, options, write }) {
+  const ndjson = options.flags.has("--ndjson"); const emit = (event, text) => { if (ndjson) write(JSON.stringify(event) + "\n"); else if (text) write(text + "\n"); };
+  const release = one(options, "--release"); const state = createState({ repository: root, environment, home });
+  if (options.lists["--compare"]) {
+    const names = options.lists["--compare"];
+    if (names.length !== 2 || options.lists["--label"] || options.lists["--env"] || options.lists["--output"] || options.flags.has("--replace")) throw new PreconditionError("--compare takes two snapshots (two labels of --release, or two files) and no other option.");
+    const read = (name, which) => {
+      if (release && /^[a-z0-9][a-z0-9-]{0,30}$/.test(name)) { const saved = state.load(release, `snapshot-${name}`); if (!saved) throw new PreconditionError(`Release ${release} has no snapshot labelled ${name}.`); return acceptSnapshot(saved.data, which); }
+      return readSnapshotFile(resolve(name), which);
+    };
+    const before = read(names[0], "first"), after = read(names[1], "second");
+    const seen = compareSnapshots(before, after);
+    for (const row of seen.rows) emit({ type: "table", table: row.table, countBefore: row.countBefore, countAfter: row.countAfter, countEqual: row.countEqual, fingerprintEqual: row.fingerprintEqual, status: row.status }, row.status === "same" ? null : `DIFFERENT  ${differenceLine(row)}`);
+    emit({ type: "compare", ok: seen.ok, comparable: seen.comparable, tables: seen.rows.length, different: seen.different.length, problems: seen.problems }, null);
+    const describe = (item) => `${item.meta.label} (${item.meta.environment}, ${item.meta.databaseTime})`;
+    report.set("SNAPSHOT", seen.ok ? "PASS" : "FAIL", [seen.ok ? `IDENTICAL: ${seen.rows.length} table(s), same counts and same fingerprints` : seen.comparable ? `DIFFERENT: ${seen.different.length} of ${seen.rows.length} table(s)` : "NOT COMPARABLE",
+      `first: ${describe(before)}`, `second: ${describe(after)}`, ...seen.problems, ...seen.different.slice(0, 20).map(differenceLine)]);
+    if (!ndjson && seen.different.length) write("\n");
+    return;
+  }
+  const label = one(options, "--label"); const target = one(options, "--env") ?? "staging"; const output = one(options, "--output");
+  if (!release || !label) throw new PreconditionError("A snapshot needs --release <id> and --label <name> (for example --release h2-8c --label pre).");
+  if (!Object.hasOwn(environments, target)) throw new PreconditionError("--env is staging or production.");
+  if (!/^[a-z0-9][a-z0-9-]{0,30}$/.test(label)) throw new PreconditionError("A label uses lowercase letters, digits and dashes.");
+  if (output && insideRepository(root, output)) throw new PreconditionError("--output cannot be inside the repository: snapshots are never kept there.");
+  state.releaseDir(release);
+  if (state.load(release, `snapshot-${label}`) && !options.flags.has("--replace")) throw new PreconditionError(`Release ${release} already has a snapshot labelled ${label}. Use another label, or --replace.`);
+  const config = loadConfig(root);
+  const seen = checkGit(git, { requireClean: false });
+  report.set("GIT", "INFO", [`branch ${seen.state.branch ?? "(detached)"} at ${short(seen.state.commit)}`]);
+  let taken;
+  try { taken = captureSnapshot({ supabase, config, target, release, label, commit: seen.state.commit, environment }); }
+  finally { const env = environmentOf(supabase.linkedRef()); report.set("CLI FINAL TARGET", env === "staging" ? "PASS" : env === target ? "INFO" : "FAIL", [`${env ? environments[env].label : "OTHER"}${env === "production" ? " (left as it was found)" : ""}`]); }
+  report.set("TARGET", "PASS", [`${environments[target].label} (${environments[target].ref}), confirmed with the account's list of projects`, "read-only transaction; the CLI was not linked or moved by this command"]);
+  const file = state.save(release, `snapshot-${label}`, taken);
+  if (output) { try { writeFileSync(resolve(output), JSON.stringify(taken, null, 2) + "\n", { encoding: "utf8", flag: "w" }); } catch (error) { throw new PreconditionError(`--output could not be written (${error.code ?? "error"}).`); } }
+  for (const entry of taken.tables) emit({ type: "table", table: entry.table, mode: entry.mode, count: entry.count }, `${String(entry.count).padStart(8)}  ${entry.table}${entry.mode === "count" ? "  (count only)" : ""}`);
+  for (const warning of taken.warnings) emit({ type: "warning", ...warning }, `warning   ${warning.table}: ${warning.code.replace(/_/g, " ")}`);
+  emit({ type: "snapshot", release, label, environment: target, tables: taken.tables.length, warnings: taken.warnings.length, file }, null);
+  const excluded = taken.tables.flatMap((entry) => (entry.excluded ?? []).map((column) => `${entry.table}.${column}`));
+  report.set("SNAPSHOT", "PASS", [`${label}: ${taken.tables.length} table(s), ${taken.tables.filter((entry) => entry.mode === "fingerprint").length} fingerprinted, ${taken.tables.filter((entry) => entry.mode === "count").length} counted only`,
+    `rows counted: ${taken.tables.reduce((sum, entry) => sum + entry.count, 0)}`, `columns left out of fingerprints: ${excluded.length ? excluded.join(", ") : "none"}`, `tables left out on purpose: ${taken.ignored.length ? taken.ignored.join(", ") : "none"}`,
+    ...taken.warnings.map((warning) => `warning: ${warning.table}: ${warning.code.replace(/_/g, " ")}`), `saved to ${file}`, output ? `also written to ${resolve(output)}` : null]);
+  if (!ndjson) write("\n");
+}
+
 /** Runs one command and returns its exit code. Everything it needs can be replaced, which is how it is tested. */
 export async function main(argv = process.argv.slice(2), { root = repository, environment = process.env, write = (text) => process.stdout.write(text), home, supabase, git } = {}) {
   const options = parse(argv); const report = createReport(options.command ?? "(none)");
@@ -180,7 +243,7 @@ export async function main(argv = process.argv.slice(2), { root = repository, en
     if (planned.includes(options.command)) throw new PreconditionError(`"${options.command}" is not available yet. Available: ${available.join(", ")}.`);
     if (!available.includes(options.command)) throw new PreconditionError(`Unknown command: ${options.command}. ${usage}`);
     const context = { report, root, environment, home, options, write, remote: options.remote, supabase: supabase ?? createSupabase({ cwd: root, environment }), git: git ?? createGit({ cwd: root }) };
-    if (options.command === "status") status(context); else if (options.command === "smoke") smoke(context); else await checkCore(context);
+    if (options.command === "status") status(context); else if (options.command === "smoke") smoke(context); else if (options.command === "snapshot") snapshot(context); else await checkCore(context);
   } catch (error) { report.fail(error, error?.stage ?? options.command ?? "arguments"); }
   if (options.flags.has("--ndjson")) write(JSON.stringify({ type: "report", ...report.toJSON() }) + "\n");
   else write(options.json ? JSON.stringify(report.toJSON(), null, 2) + "\n" : report.render());

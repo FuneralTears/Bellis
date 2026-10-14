@@ -57,6 +57,32 @@ if (args[0] === "db" && args[1] === "query") {
     const txids = [...sql.matchAll(/'(\d+)'/g)].map((match) => match[1]);
     answer(txids.map((txid) => ({ txid, status: state.txStatus?.[state.txOf?.[txid]] ?? "aborted", password: "hunter2-secret" })));
   }
+  /*
+   * A data snapshot. The fake's database is state.db: { "<schema.table>": { columns, primaryKey, rows } }, and it
+   * answers for the tables of state.snapshotConfig with the model fingerprint of those rows. state.snapshot makes
+   * it misbehave: "pii" adds a row to the answer, "null-fingerprint", "self-test-broken", "garbage".
+   */
+  if (sql.includes("Bellis data snapshot")) {
+    const { fingerprintRows } = await import("../../scripts/release/snapshot/build-sql.mjs");
+    const config = state.snapshotConfig; const db = state.db ?? {}; const mode = state.snapshot ?? "ok";
+    if (mode === "garbage") { save(); process.stdout.write("not json at all\n"); process.exit(0); }
+    if (mode === "leak-error") sqlError(`${leak} password=hunter2`);
+    const tables = [];
+    for (const entry of config.tables) {
+      const table = db[entry.table];
+      if (!table) { save(); process.stderr.write("Initialising login role...\n"); process.stdout.write(JSON.stringify({ _tag: "Error", error: { code: "DbQueryUnexpectedStatusError", message: `unexpected status 400: ${JSON.stringify({ message: `Failed to run sql query: ERROR:  42P01: relation "${entry.table}" does not exist\nLINE 9: from ${entry.table}\n` })}` } }) + "\n"); process.exit(1); }
+      if (entry.mode === "count") { tables.push({ table: entry.table, count: table.rows.length }); continue; }
+      const keys = table.rows.map((item) => JSON.stringify(entry.key.map((column) => item[column] ?? null)));
+      tables.push({ table: entry.table, count: table.rows.length, fingerprint: mode === "null-fingerprint" ? null : fingerprintRows(table.rows, { exclude: (entry.exclude ?? []).map((item) => item.column) }),
+        key_nulls: table.rows.filter((item) => entry.key.some((column) => item[column] === null || item[column] === undefined)).length, key_distinct: new Set(keys).size,
+        columns: table.columns, primary_key: table.primaryKey ?? [], ...(mode === "pii" ? { sample: table.rows[0] ?? { email: "ana@example.com" } } : {}) });
+    }
+    const listed = [...config.tables.map((entry) => entry.table), ...(config.ignored ?? []).map((item) => item.table)];
+    const base = fingerprintRows([{ id: 1, label: "a", seen: "x" }, { id: 2, label: "b", seen: "y" }], { exclude: ["seen"] });
+    const answerRow = { database_time: "2026-10-13T12:00:00Z", tables, uncovered: Object.keys(db).filter((name) => !listed.includes(name) && config.schemas.includes(name.split(".")[0])).sort(),
+      self_test: { base, reordered: mode === "self-test-broken" ? "0".repeat(64) : base, changed: fingerprintRows([{ id: 1, label: "a" }, { id: 2, label: "B" }]), excluded_changed: base } };
+    answer([{ snapshot: answerRow, service_role_key: "sb_secret_never_show_this" }]);
+  }
   const row = /select 'bellis_smoke_v1' as contract, '([a-z0-9_]+)' as smoke, 'PASS' as result, '([0-9a-f]+)' as nonce/.exec(sql);
   const id = row?.[1] ?? "unknown"; const nonce = row?.[2] ?? "";
   const behaviour = state.behaviour?.[id] ?? (sql.includes("bellis_smoke_selftest_expected_failure") ? "selftest-error" : "pass");

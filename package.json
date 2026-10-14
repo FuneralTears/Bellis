@@ -21,6 +21,7 @@
     "bellis:status": "node scripts/release/cli.mjs status",
     "bellis:check-core": "node scripts/release/cli.mjs check-core",
     "bellis:smoke": "node scripts/release/cli.mjs smoke",
+    "bellis:snapshot": "node scripts/release/cli.mjs snapshot",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
