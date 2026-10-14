@@ -83,6 +83,19 @@ if (args[0] === "db" && args[1] === "query") {
       self_test: { base, reordered: mode === "self-test-broken" ? "0".repeat(64) : base, changed: fingerprintRows([{ id: 1, label: "a" }, { id: 2, label: "B" }]), excluded_changed: base } };
     answer([{ snapshot: answerRow, service_role_key: "sb_secret_never_show_this" }]);
   }
+  /*
+   * A schema capture. state.schema is what the catalogs say (the answer of scripts/release/drift/schema.sql);
+   * state.schemaRehearsed is what they say inside a rehearsal, after the pending migrations; state.schemaLater, if
+   * set, is what every capture after a rehearsal sees (a rehearsal that left something behind).
+   * state.schemaMode: "garbage", "leak-error".
+   */
+  if (sql.includes("Bellis schema capture")) {
+    if (state.schemaMode === "garbage") { save(); process.stdout.write("not json at all\n"); process.exit(0); }
+    if (state.schemaMode === "leak-error") sqlError(`${leak} password=hunter2`);
+    const rehearsal = sql.includes("-- pending migration:");
+    if (rehearsal) { const txid = String((state.txCounter = (state.txCounter ?? 1000) + 1)); state.txOf = { ...(state.txOf ?? {}), [txid]: "rehearsal" }; state.rehearsed = true; answer([{ schema: state.schemaRehearsed ?? state.schema, txid, db_password: "hunter2-secret" }]); }
+    answer([{ schema: state.rehearsed && state.schemaLater ? state.schemaLater : state.schema, db_password: "hunter2-secret" }]);
+  }
   const row = /select 'bellis_smoke_v1' as contract, '([a-z0-9_]+)' as smoke, 'PASS' as result, '([0-9a-f]+)' as nonce/.exec(sql);
   const id = row?.[1] ?? "unknown"; const nonce = row?.[2] ?? "";
   const behaviour = state.behaviour?.[id] ?? (sql.includes("bellis_smoke_selftest_expected_failure") ? "selftest-error" : "pass");

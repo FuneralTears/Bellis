@@ -24,6 +24,14 @@
  *     --replace           take it again under a label that already exists.
  *     --output <file>     also write the snapshot to this file (outside the repository).
  *     --compare <a> <b>   compare two snapshots: two labels of --release, or two files. Any difference fails.
+ *   node scripts/release/cli.mjs drift         the schema, read from PostgreSQL's catalogs. Read-only except --rehearse.
+ *     --capture --release <id> --env <staging|production>   capture it (label: the environment, or --label).
+ *     --compare <a> <b>   compare two captures exactly: labels of --release, or files. Any difference fails.
+ *     --verbose           (with --compare) also show each side of what differs, with credentials removed.
+ *     --rehearse --release <id>   on staging only, before the release's migrations are applied there: run them in
+ *                                 one transaction, capture the schema, roll back. Keeps `base` and `expected`.
+ *     --expected --release <id>   is the difference between staging and production exactly the release? Compares the
+ *                                 captures base, expected, staging and production. Runs nothing.
  *
  * No command links the CLI, applies a migration, moves a branch or writes outside the release state folder.
  * The commands that do (staging, prod-precheck, prod-release) are not available yet and answer with exit 2.
@@ -32,18 +40,21 @@ import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createGit, checkGit, short } from "./lib/git.mjs";
-import { EXIT, PreconditionError, ReleaseError, createReport, exitCodeFor, exitName, redact, reportSections } from "./lib/report.mjs";
+import { EXIT, HumanActionRequired, PreconditionError, ReleaseError, createReport, exitCodeFor, exitName, redact, reportSections } from "./lib/report.mjs";
 import { createState } from "./lib/state.mjs";
 import { createSupabase } from "./lib/supabase.mjs";
 import { CleanupFailed, environmentOf, environments, inspectTarget, withTarget } from "./lib/target.mjs";
 import { loadManifest, selectSmokes } from "./smoke/manifest.mjs";
 import { humanLine, resolvePending, runSmokes } from "./smoke/runner.mjs";
+import { captureSchema } from "./drift/capture.mjs";
+import { acceptCapture, compareSchemas, differenceDetail, differenceLine as driftLine, readCaptureFile } from "./drift/compare.mjs";
+import { explainExpected, rehearse, releaseMigrations } from "./drift/migration-diff.mjs";
 import { loadConfig } from "./snapshot/build-sql.mjs";
 import { captureSnapshot } from "./snapshot/capture.mjs";
 import { acceptSnapshot, compareSnapshots, differenceLine, readSnapshotFile } from "./snapshot/compare.mjs";
 
 const repository = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-export const available = Object.freeze(["status", "check-core", "smoke", "snapshot"]);
+export const available = Object.freeze(["status", "check-core", "smoke", "snapshot", "drift"]);
 export const planned = Object.freeze(["check", "staging", "prod-precheck", "prod-release"]);
 const usage = `Usage: node scripts/release/cli.mjs <${available.join("|")}> [options] (see the top of scripts/release/cli.mjs)`;
 /** The options each command takes: `true` for a switch, "list" for one that is followed by one or more values. */
@@ -51,6 +62,7 @@ const optionsOf = Object.freeze({
   status: { "--remote": true, "--json": true },
   "check-core": { "--json": true },
   smoke: { "--all": true, "--list": true, "--ndjson": true, "--json": true, "--group": "list", "--only": "list", "--with-pending": "list", "--release": "list" },
+  drift: { "--ndjson": true, "--json": true, "--capture": true, "--rehearse": true, "--expected": true, "--replace": true, "--verbose": true, "--release": "list", "--label": "list", "--env": "list", "--compare": "list" },
   snapshot: { "--ndjson": true, "--json": true, "--replace": true, "--release": "list", "--label": "list", "--env": "list", "--output": "list", "--compare": "list" },
 });
 
@@ -235,6 +247,88 @@ function snapshot({ report, root, supabase, git, environment, home, options, wri
   if (!ndjson) write("\n");
 }
 
+/**
+ * Schema drift: capture a schema, compare two exactly, rehearse a release's migrations on staging, or check that
+ * the difference between staging and production is exactly the release. Nothing here links the CLI or writes to
+ * production; the rehearsal is a transaction on staging that is rolled back.
+ */
+function drift({ report, root, supabase, git, environment, home, options, write }) {
+  const ndjson = options.flags.has("--ndjson"); const emit = (event, text) => { if (ndjson) write(JSON.stringify(event) + "\n"); else if (text) write(text + "\n"); };
+  const modes = ["--capture", "--rehearse", "--expected"].filter((name) => options.flags.has(name)).concat(options.lists["--compare"] ? ["--compare"] : []);
+  if (modes.length !== 1) throw new PreconditionError("drift takes one of --capture, --compare, --rehearse or --expected.");
+  const release = one(options, "--release"); const state = createState({ repository: root, environment, home }); const labelPattern = /^[a-z0-9][a-z0-9-]{0,30}$/;
+  const stored = (label, which = label) => { const saved = state.load(release, `schema-${label}`); return saved ? acceptCapture(saved.data, which) : null; };
+  const finalTarget = (target) => { const env = environmentOf(supabase.linkedRef()); report.set("CLI FINAL TARGET", env === "staging" ? "PASS" : env === target ? "INFO" : "FAIL", [`${env ? environments[env].label : "OTHER"}${env === "production" ? " (left as it was found)" : ""}`]); };
+  const countsLine = (capture) => Object.entries(capture.counts).map(([category, count]) => `${category} ${count}`).join(", ");
+  const show = (differences, names, tag = "") => { for (const item of differences) emit({ type: "difference", ...(tag ? { group: tag } : {}), category: item.category, object: redact(item.id, 200), change: item.change, parts: item.parts }, `${tag ? `${tag.padEnd(11)}  ` : ""}${driftLine(item, names)}`); };
+  if (modes[0] !== "--compare" && !release) throw new PreconditionError("drift needs --release <id>: captures are kept in the release's folder.");
+  if (release) state.releaseDir(release);
+
+  if (modes[0] === "--capture") {
+    const target = one(options, "--env"); const label = one(options, "--label") ?? target;
+    if (!target || !Object.hasOwn(environments, target)) throw new PreconditionError("--capture needs --env staging or --env production.");
+    if (!labelPattern.test(label)) throw new PreconditionError("A label uses lowercase letters, digits and dashes.");
+    if (["base", "expected"].includes(label)) throw new PreconditionError("The labels base and expected belong to --rehearse.");
+    if (state.load(release, `schema-${label}`) && !options.flags.has("--replace")) throw new PreconditionError(`Release ${release} already has a schema capture labelled ${label}. Use another label, or --replace.`);
+    const commit = checkGit(git, { requireClean: false }).state.commit;
+    let taken; try { taken = captureSchema({ supabase, target, release, label, gitCommit: commit, environment }); } finally { finalTarget(target); }
+    report.set("TARGET", "PASS", [`${environments[target].label} (${environments[target].ref}), confirmed with the account's list of projects`, "read-only transaction; the CLI was not linked or moved by this command"]);
+    const file = state.save(release, `schema-${label}`, taken);
+    for (const [category, count] of Object.entries(taken.counts)) emit({ type: "category", category, objects: count }, `${String(count).padStart(6)}  ${category}`);
+    for (const warning of taken.warnings) emit({ type: "warning", ...warning }, `warning  ${warning.code.replace(/_/g, " ")}: ${redact(warning.object, 80)}`);
+    emit({ type: "capture", release, label, environment: target, objects: Object.values(taken.counts).reduce((sum, count) => sum + count, 0), migrations: taken.appliedMigrations.length, file }, null);
+    report.set("MIGRATIONS", "INFO", [`${taken.appliedMigrations.length} applied on ${target}`, taken.appliedMigrations.length ? `latest: ${taken.appliedMigrations.at(-1)}` : null]);
+    report.set("DRIFT", "INFO", [`${label}: schema of ${target} captured, ${Object.values(taken.counts).reduce((sum, count) => sum + count, 0)} object(s)`, countsLine(taken), ...taken.warnings.map((warning) => `warning: ${warning.code.replace(/_/g, " ")}: ${redact(warning.object, 80)}`), `saved to ${file}`]);
+    if (!ndjson) write("\n");
+    return;
+  }
+
+  if (modes[0] === "--compare") {
+    const names = options.lists["--compare"]; if (names.length !== 2) throw new PreconditionError("--compare takes two captures: two labels of --release, or two files.");
+    const read = (name, which) => { if (release && labelPattern.test(name)) { const found = stored(name, which); if (!found) throw new PreconditionError(`Release ${release} has no schema capture labelled ${name}.`); return found; } return readCaptureFile(resolve(name), which); };
+    const first = read(names[0], "first"), second = read(names[1], "second"); const labels = [first.meta.label, second.meta.label]; const shown = labels[0] === labels[1] ? ["first", "second"] : labels;
+    const seen = compareSchemas(first, second);
+    show(seen.differences, shown);
+    if (options.flags.has("--verbose") && !ndjson) for (const item of seen.differences) { const lines = differenceDetail(item, first, second, shown); if (lines.length) write(`${driftLine(item, shown)}\n${lines.join("\n")}\n`); }
+    emit({ type: "compare", ok: seen.ok, differences: seen.differences.length, counts: seen.counts }, null);
+    const describe = (capture) => `${capture.meta.label} (${capture.meta.environment}, ${capture.meta.databaseTime}, ${capture.appliedMigrations.length} migrations)`;
+    report.set("MIGRATIONS", first.appliedMigrations.join() === second.appliedMigrations.join() ? "INFO" : "FAIL", [first.appliedMigrations.join() === second.appliedMigrations.join() ? `the same ${first.appliedMigrations.length} migrations are applied on both` : "the two do not have the same migrations applied"]);
+    report.set("DRIFT", seen.ok ? "PASS" : "FAIL", [seen.ok ? `EXACT MATCH: ${Object.values(seen.counts).reduce((sum, item) => sum + item.first, 0)} object(s), no difference` : `DRIFT: ${seen.differences.length} difference(s)`,
+      `first: ${describe(first)}`, `second: ${describe(second)}`, ...seen.differences.slice(0, 25).map((item) => driftLine(item, shown)), seen.differences.length > 25 ? `… and ${seen.differences.length - 25} more` : null]);
+    if (!ndjson && seen.differences.length) write("\n");
+    return;
+  }
+
+  const pending = releaseMigrations(root, release);
+  report.set("MIGRATIONS", "INFO", pending.map((item) => `of the release: ${item.file} (sha256 ${item.sha256.slice(0, 12)}, matches the manifest)`));
+
+  if (modes[0] === "--rehearse") {
+    if ((state.load(release, "schema-base") || state.load(release, "schema-expected")) && !options.flags.has("--replace")) throw new PreconditionError(`Release ${release} was already rehearsed. Use --replace to rehearse it again.`);
+    const commit = checkGit(git, { requireClean: false }).state.commit;
+    let outcome; try { outcome = rehearse({ supabase, pending, release, gitCommit: commit, environment }); } finally { finalTarget("staging"); }
+    report.set("TARGET", "PASS", [`${environments.staging.label} (${environments.staging.ref}), confirmed with the account's list of projects`, "one transaction, rolled back; PostgreSQL reports it as aborted and the schema is what it was"]);
+    state.save(release, "schema-base", outcome.base); const file = state.save(release, "schema-expected", outcome.expected);
+    show(outcome.changes.differences, ["before", "after the release"]);
+    emit({ type: "rehearsal", release, migrations: pending.map((item) => item.file), changes: outcome.changes.differences.length }, null);
+    report.set("DRIFT", "INFO", [`rehearsed on staging: the release changes ${outcome.changes.differences.length} object(s)`, ...outcome.changes.differences.slice(0, 25).map((item) => driftLine(item, ["before", "after the release"])), `kept as base and expected next to ${file}`]);
+    if (!ndjson) write("\n");
+    return;
+  }
+
+  // --expected: four captures, compared. Nothing is run.
+  const base = stored("base"), expected = stored("expected");
+  if (!base || !expected) throw new HumanActionRequired(`Release ${release} was not rehearsed. What its migrations change has to be measured on staging before they are applied there (drift --rehearse --release ${release}).`, { stage: "expected diff" });
+  const staging = stored("staging"), production = stored("production");
+  if (!staging || !production) throw new PreconditionError(`Capture both schemas first: drift --capture --release ${release} --env staging, and --env production.`);
+  const seen = explainExpected({ base, expected, staging, production, pending });
+  show(seen.explained, ["production", "staging"], "EXPLAINED"); show(seen.drift, ["rehearsed base", "production"], "DRIFT"); show(seen.unexplained, ["expected", "staging"], "UNEXPLAINED");
+  emit({ type: "expected", ok: seen.ok, explained: seen.explained.length, drift: seen.drift.length, unexplained: seen.unexplained.length, problems: seen.problems }, null);
+  report.set("DRIFT", seen.ok ? "PASS" : "FAIL", [seen.ok ? `EXPLAINED: the ${seen.explained.length} difference(s) between staging and production are exactly what the release's migrations do` : "NOT EXPLAINED BY THE RELEASE",
+    ...seen.problems, `changed by the migrations: ${seen.explained.length}`, `drift in production (differs from what the release was rehearsed on): ${seen.drift.length}`, `in staging and not explained by the migrations: ${seen.unexplained.length}`,
+    ...seen.drift.slice(0, 15).map((item) => `DRIFT ${driftLine(item, ["rehearsed base", "production"])}`), ...seen.unexplained.slice(0, 15).map((item) => `UNEXPLAINED ${driftLine(item, ["expected", "staging"])}`)]);
+  if (!ndjson) write("\n");
+}
+
 /** Runs one command and returns its exit code. Everything it needs can be replaced, which is how it is tested. */
 export async function main(argv = process.argv.slice(2), { root = repository, environment = process.env, write = (text) => process.stdout.write(text), home, supabase, git } = {}) {
   const options = parse(argv); const report = createReport(options.command ?? "(none)");
@@ -243,7 +337,7 @@ export async function main(argv = process.argv.slice(2), { root = repository, en
     if (planned.includes(options.command)) throw new PreconditionError(`"${options.command}" is not available yet. Available: ${available.join(", ")}.`);
     if (!available.includes(options.command)) throw new PreconditionError(`Unknown command: ${options.command}. ${usage}`);
     const context = { report, root, environment, home, options, write, remote: options.remote, supabase: supabase ?? createSupabase({ cwd: root, environment }), git: git ?? createGit({ cwd: root }) };
-    if (options.command === "status") status(context); else if (options.command === "smoke") smoke(context); else if (options.command === "snapshot") snapshot(context); else await checkCore(context);
+    if (options.command === "status") status(context); else if (options.command === "smoke") smoke(context); else if (options.command === "snapshot") snapshot(context); else if (options.command === "drift") drift(context); else await checkCore(context);
   } catch (error) { report.fail(error, error?.stage ?? options.command ?? "arguments"); }
   if (options.flags.has("--ndjson")) write(JSON.stringify({ type: "report", ...report.toJSON() }) + "\n");
   else write(options.json ? JSON.stringify(report.toJSON(), null, 2) + "\n" : report.render());

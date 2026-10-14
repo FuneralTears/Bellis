@@ -50,15 +50,18 @@ export function exitCodeFor(error) {
  * strings, JWTs, Supabase keys, bearer tokens and key=value pairs with a telling name. Tool output is never
  * printed raw; what is printed goes through here first, and is cut short.
  */
-export function redact(text, max = 300) {
-  const value = String(text ?? "")
+export function scrub(text) {
+  return String(text ?? "")
     .replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s/@:]+:[^\s/@]+@[^\s'"]+/gi, "[connection string]")
     .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}/g, "[jwt]")
     .replace(/\bsb_(secret|publishable)_[A-Za-z0-9_-]+/g, "[supabase key]")
     .replace(/\b(sbp|sbs|ghp|gho|github_pat)_[A-Za-z0-9_]{12,}/g, "[token]")
     .replace(/\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{12,}/gi, "$1 [credential]")
     .replace(/\b([A-Za-z0-9_]*(password|passwd|secret|token|apikey|api_key|service_role|authorization|cookie)[A-Za-z0-9_]*)(\s*[=:]\s*)("[^"]*"|'[^']*'|[^\s,;&]+)/gi, "$1$3[redacted]");
-  const oneLine = value.replace(/\s+/g, " ").trim();
+}
+/** The same, on one line and cut short: what goes into a report. `scrub` keeps the text's lines and its length. */
+export function redact(text, max = 300) {
+  const oneLine = scrub(text).replace(/\s+/g, " ").trim();
   return oneLine.length > max ? `${oneLine.slice(0, max)}…` : oneLine;
 }
 

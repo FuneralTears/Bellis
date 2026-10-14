@@ -15,6 +15,10 @@ whether to go on.
 | `npm run bellis:smoke -- --list` | Which smokes would run. | Nothing. |
 | `npm run bellis:snapshot -- --release <id> --label pre` | Takes a data snapshot: counts and fingerprints, never a row. | One read-only transaction. Writes a file in the release's folder, outside the repository. |
 | `npm run bellis:snapshot -- --release <id> --compare pre post` | Compares two snapshots. Any difference fails. | Nothing. Reads two files. |
+| `npm run bellis:drift -- --capture --release <id> --env staging` | Captures the schema (also `--env production`). | One read-only transaction on the catalogs. Writes a file in the release's folder. |
+| `npm run bellis:drift -- --release <id> --compare staging production` | Compares two captures exactly. Any difference fails. | Nothing. Reads two files. |
+| `npm run bellis:drift -- --rehearse --release <id>` | Measures what the release's migrations change, on staging, before they are applied there. | Staging, one transaction that is rolled back and verified. |
+| `npm run bellis:drift -- --expected --release <id>` | Is the difference between staging and production exactly the release? | Nothing. Reads four captures. |
 | `npm test` | Every unit test of the repository (`scripts/run-tests.mjs`). | Nothing. The SQL smokes are not run from here. |
 
 Add `-- --json` to get the report as JSON. `bellis:smoke` also takes `--only <id...>`, `--all` and `--ndjson` (one JSON
@@ -97,6 +101,46 @@ row. There is no list of expected differences yet.
 Background jobs keep running while a release does: the hourly automations (minute 5), the expiry of stale booking
 requests (every 15 minutes) and the hourly plan expirations (minute 20) can change data between two snapshots for
 reasons that have nothing to do with the release. A difference in those tables is still a failure, to be looked at.
+
+## Schema drift (`drift/`)
+
+`drift/schema.sql` reads PostgreSQL's catalogs in a read-only transaction with an empty search path (so every name
+comes out in full) and returns, for `public` and `private`: schemas and their grants, tables (columns in order, type,
+nullability, default, identity, generated, collation, column grants, row-level security, owner, grants), constraints,
+indexes, policies, functions (arguments, result, language, volatility, security, leakproof, parallel, strictness,
+settings such as search_path, owner, body, grants), views (definition, options such as security_invoker, owner,
+grants), triggers, enums, domains and composite types, sequences, default privileges; the triggers on `auth`'s
+tables that call a function of ours; the extensions the migrations install (`btree_gist`, `pg_cron`; their version is
+kept as information and not compared, since the platform updates it); the pg_cron jobs named `bellis-*`; and the
+list of applied migrations. Objects that belong to an extension are left out. No row of a table of the product is
+read, and `auth.users` is never read. Owners are compared because a `security definer` function or a view runs with
+its owner's rights.
+
+Each object is kept with a SHA-256 of its normalized definition, whole and attribute by attribute, computed from
+what the database said; the definition itself is kept with anything that looks like a credential removed, only to
+be shown. What is normalized is written at the top of `drift/capture.mjs`: line endings; whitespace in the code of
+function bodies, views and cron commands (never inside strings, quoted names, dollar-quoted text or comments); the
+order of lists that have none (grants, policy roles, function settings, options). The order of columns and of enum
+values, letter case and comments are not normalized.
+
+**Exact** (`--compare`): after the same migrations, staging and production must be identical. Each difference is
+shown as `ADDED`, `REMOVED` or `CHANGED` with the category, the object and, for a change, which attributes differ.
+`--verbose` shows both sides of each attribute, redacted and cut short.
+
+**Expected** (before production): what the migrations change is measured, not guessed from their text.
+
+1. `--rehearse` (staging, before the migrations are applied there): captures `base`, runs the release's migrations
+   (from `releases/<id>.json`, by name, hash and order) in one transaction that captures `expected` and is rolled
+   back, checks with PostgreSQL that it was aborted, and captures again to check the schema is still `base`. It
+   refuses a migration that cannot be rehearsed safely (CONCURRENTLY, VACUUM, extensions, ALTER SYSTEM, COPY,
+   `setval`, `dblink`, outside requests, session locks, transaction control), with exit 4, before sending anything.
+2. Apply the migrations to staging, then `--capture` staging and production.
+3. `--expected`: production must equal `base` (otherwise it is drift), staging must equal `expected` (otherwise
+   staging has something the migrations do not explain), the migration files must be the ones rehearsed, and the
+   versions staging has and production lacks must be exactly those of the release. Without a rehearsal it is exit 4.
+
+Captures are kept in the release's folder as `schema-<label>.json`. Nothing here links the CLI or writes to
+production, and the rehearsal refuses anything but staging.
 
 ## Exit codes
 
