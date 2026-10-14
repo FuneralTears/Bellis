@@ -1,13 +1,13 @@
 {
   "releaseId": "h2-8c",
-  "sourceCommit": "e44ff17a8f7af3ff0dba04f1a2e385b57790a1ca",
+  "sourceCommit": "6eed3ee93b5ba912d7e3184f080ae55d562cf398",
   "expectedMainBase": "8e8c3958b903c6734d861a0f72e7c6f26667b616",
   "migrations": [],
   "smokeGroups": [
     "release"
   ],
   "previewRequired": false,
-  "createdAt": "2026-10-14T19:24:45Z",
+  "createdAt": "2026-10-14T20:05:51Z",
   "branch": "feat/h2-8c-release-automation",
-  "notes": "Release automation tooling (H2.8C, phases 1-7). No migrations and no frontend change."
+  "notes": "Release automation tooling (H2.8C, phases 1-8) and /api/version. No migrations and no visual change."
 }
