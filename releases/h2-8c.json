@@ -1,0 +1,13 @@
+{
+  "releaseId": "h2-8c",
+  "sourceCommit": "c96f20f9afcfe30a79a21ffbd6904af94601f3a7",
+  "expectedMainBase": "8e8c3958b903c6734d861a0f72e7c6f26667b616",
+  "migrations": [],
+  "smokeGroups": [
+    "release"
+  ],
+  "previewRequired": false,
+  "createdAt": "2026-10-14T04:19:50Z",
+  "branch": "feat/h2-8c-release-automation",
+  "notes": "Release automation tooling (H2.8C). No migrations and no frontend change."
+}
