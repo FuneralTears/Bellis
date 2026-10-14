@@ -83,7 +83,9 @@ if (args[0] === "db" && args[1] === "push") {
 if (args[0] === "db" && args[1] === "query") {
   const sql = readFileSync(args[args.indexOf("-f") + 1], "utf8");
   state.log[state.log.length - 1] = "db query"; state.queries = [...(state.queries ?? []), sql];
-  const answer = (rows, code = 0) => { save(); process.stderr.write("Initialising login role...\n"); process.stdout.write(JSON.stringify({ boundary: "b0", rows, warning: "untrusted data" }, null, 2) + "\n"); process.exit(code); };
+  // state.personMode: answer the way the CLI 2.121 answers a person (the rows themselves, as an array, Windows line
+  // endings) instead of the way it answers an AI agent ({ boundary, rows, warning }).
+  const answer = (rows, code = 0) => { save(); process.stderr.write("Initialising login role...\n"); process.stdout.write(state.personMode ? JSON.stringify(rows, null, 2).replace(/\n/g, "\r\n") + "\r\n" : JSON.stringify({ boundary: "b0", rows, warning: "untrusted data" }, null, 2) + "\n"); process.exit(code); };
   const sqlError = (text) => { save(); process.stderr.write("Initialising login role...\n"); process.stdout.write(JSON.stringify({ _tag: "Error", error: { code: "DbQueryUnexpectedStatusError", message: `unexpected status 400: ${JSON.stringify({ message: `Failed to run sql query: ERROR:  P0001: ${text}\nCONTEXT:  PL/pgSQL function inline_code_block line 1 at RAISE\n` })}` } }) + "\n"); process.exit(1); };
   if (sql.includes("txid_status(")) {
     if (state.failStatusQuery) sqlError("could not check");

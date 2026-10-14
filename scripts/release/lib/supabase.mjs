@@ -121,9 +121,12 @@ export function createSupabase({ cwd = process.cwd(), command, environment = pro
         if (result.code === 0 && !parsed) return { ok: false, reason: "the answer could not be read" };
         return { ok: false, reason: message && !result.spawnError && !result.timedOut ? redact(`exit ${result.code}: ${message}`, 240) : reason(result) };
       }
-      if (!Array.isArray(parsed.rows)) return { ok: false, reason: "the answer has no rows" };
+      // Two shapes, depending on who the CLI thinks is calling: an AI agent gets { boundary, rows, warning }, a
+      // person the rows themselves, as an array. Both are the last result set. Anything else is not an answer.
+      const rows = Array.isArray(parsed) ? parsed : Array.isArray(parsed.rows) ? parsed.rows : null;
+      if (!rows) return { ok: false, reason: "the answer has no rows" };
       const text = (value) => (value === null || value === undefined ? null : typeof value === "string" ? value : JSON.stringify(value));
-      return { ok: true, rows: parsed.rows.map((row) => Object.fromEntries(columns.map((column) => [column, text(row?.[column])]))) };
+      return { ok: true, rows: rows.map((row) => Object.fromEntries(columns.map((column) => [column, text(row?.[column])]))) };
     },
     /**
      * `db push` to the linked project: { ok, migrations: [file names], seeds, roles, upToDate } or { ok: false,

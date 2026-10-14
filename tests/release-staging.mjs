@@ -139,6 +139,13 @@ test("staging: a release with a migration goes through every step, and writes on
   assertSafeEnd(made, out);
 });
 
+test("staging and every query in it work when the CLI answers the way it answers a person", async (t) => {
+  const made = releaseProject(t); const cli = releaseCli(t, { personMode: true });
+  const out = await invoke(t, ["staging", "--release", "h2-9"], { made, cli });
+  assert.equal(out.code, EXIT.PASS, out.output); assert.equal(statusOf(out.output, "STATE"), "STAGING_COMPLETE"); assert.equal(statusOf(out.output, "EXPECTED DRIFT"), "PASS");
+  assertSafeEnd(made, out);
+});
+
 test("staging: a release without migrations rehearses nothing, applies nothing and needs an exact match", async (t) => {
   const made = releaseProject(t, { migrations: [] }); const cli = releaseCli(t, { pending: [], schemaAfterPush: undefined });
   const out = await invoke(t, ["staging", "--release", "h2-9"], { made, cli });

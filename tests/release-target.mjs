@@ -4,7 +4,7 @@
  */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -224,6 +224,23 @@ test("projects list: a table in doubt is never used", () => {
     ["a ref that is not one", realTable.replace("hbvmcvemrkfovzhlpgys", "hbvmcvemrkfovzhlpgy")], ["an empty name", realTable.replace("Bellis Staging", "              ")], ["nothing", ""],
   ];
   for (const [name, text] of broken) assert.equal(parseProjectsTable(text), null, name);
+});
+
+test("db query: both shapes the CLI 2.121 answers with, and nothing else", (t) => {
+  const dir = scratch(t); const sql = join(dir, "q.sql");
+  const answering = (stdout, code = 0) => { const program = join(dir, `fake-${Math.random().toString(36).slice(2)}.mjs`); writeFileSync(program, `process.stdout.write(${JSON.stringify(stdout)}); process.exit(${code});`); return createSupabase({ cwd: dir, command: [process.execPath, program], environment: {} }); };
+  writeFileSync(sql, "begin transaction read only;\nselect 1;\nrollback;\n");
+  // To a person: the rows themselves (this is what made the precheck read "no rows").
+  const person = "[\r\n  {\r\n    \"schema\": {\"tables\": []},\r\n    \"service_role_key\": \"sb_secret_never_show_this\"\r\n  }\r\n]\r\n";
+  assert.deepEqual(answering(person).query(sql, { columns: ["schema"] }), { ok: true, rows: [{ schema: "{\"tables\":[]}" }] });
+  // To an AI agent: the same rows inside { boundary, rows, warning }.
+  assert.deepEqual(answering(JSON.stringify({ boundary: "b", rows: [{ schema: { tables: [] } }], warning: "w" })).query(sql, { columns: ["schema"] }), { ok: true, rows: [{ schema: "{\"tables\":[]}" }] });
+  assert.deepEqual(answering("[]\r\n").query(sql, { columns: ["schema"] }), { ok: true, rows: [] }, "an empty answer is no rows: every caller refuses it");
+  assert.equal(answering("┌───┐\n│ a │\n└───┘\n").query(sql, { columns: ["a"] }).ok, false, "a table is not an answer");
+  assert.equal(answering("[ { \"a\": 1 ").query(sql, { columns: ["a"] }).ok, false, "malformed JSON");
+  assert.equal(answering(JSON.stringify({ boundary: "b", warning: "w" })).query(sql, { columns: ["a"] }).reason, "the answer has no rows");
+  const failed = answering(JSON.stringify({ _tag: "Error", error: { code: "DbQueryUnexpectedStatusError", message: "unexpected status 400: {\"message\":\"Failed to run sql query: ERROR:  P0001: boom\\npostgres://postgres:hunter2-secret@db.x/postgres\"}" } }), 1).query(sql, { columns: ["a"] });
+  assert.deepEqual(failed, { ok: false, reason: "SQL error P0001: boom" }); for (const secret of forbidden) assert.ok(!JSON.stringify(failed).includes(secret));
 });
 
 test("a CLI that cannot be started is a failed call, not a crash", (t) => {
