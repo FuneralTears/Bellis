@@ -129,8 +129,10 @@ function transactionStatuses(supabase, dir, txids) {
  * is what the human output and the NDJSON output are both made of.
  * Order: read and check every file; confirm the CLI is on staging; self-tests; smokes; rollback check.
  */
-export function runSmokes({ root, supabase, manifest, smokes, pending = [], environment = process.env, emit = () => {}, makeNonce = () => randomBytes(16).toString("hex"), temporary = tmpdir() }) {
-  const target = "staging";
+export function runSmokes({ root, supabase, manifest, smokes, pending = [], environment = process.env, emit = () => {}, makeNonce = () => randomBytes(16).toString("hex"), temporary = tmpdir(), target = "staging", transactionalTestsOnProduction = false }) {
+  // Production only as prod-release's regression: each smoke is a transaction that is rolled back (checked before
+  // it is sent, and with PostgreSQL afterwards), and never with pending migrations.
+  if (target !== "staging" && !(target === "production" && transactionalTestsOnProduction === true && !pending.length)) throw new PreconditionError("Smokes run on staging; on production only as prod-release's regression, without pending migrations.");
   const defaults = Number(manifest.defaults.timeoutSeconds);
   const plan = smokes.map((smoke) => {
     let text = null; try { text = readFileSync(join(root, smoke.file), "utf8"); } catch { /* reported below */ }
@@ -158,7 +160,7 @@ export function runSmokes({ root, supabase, manifest, smokes, pending = [], envi
     if (!tests.every((test) => test.ok)) { counts.notRun = plan.length; return finish(false, { targetConfirmed: true, selfTests: tests, results: plan.map((item) => ({ id: item.id, status: "NOT RUN", reason: "the runner failed its own self-test", txid: null, ms: 0 })), stopped: "the runner failed its own self-test" }); }
     const results = [];
     for (const item of plan) {
-      const result = onTarget() ? runOne(item, { ...context, pending }) : { id: item.id, status: "FAIL", reason: "the CLI is no longer on staging", txid: null, ms: 0 };
+      const result = onTarget() ? runOne(item, { ...context, pending }) : { id: item.id, status: "FAIL", reason: `the CLI is no longer on ${target}`, txid: null, ms: 0 };
       results.push(result); emit({ type: "smoke", ...result, reason: result.reason ? redact(result.reason, 300) : null });
     }
     // The last word on each rollback is PostgreSQL's, not the file's.

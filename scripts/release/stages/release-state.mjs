@@ -4,6 +4,8 @@
  * at yet.
  *
  *   CHECKED → REHEARSED → STAGING_APPLIED → STAGING_VERIFIED → PREVIEW_PENDING → STAGING_COMPLETE
+ *   → PROD_PRECHECK_COMPLETE → PROD_APPLIED → PROD_VERIFIED → MAIN_ADVANCED → DEPLOY_PROD_VERIFIED → RELEASE_COMPLETE
+ * (a release without migrations also skips PROD_APPLIED)
  *
  * A release without migrations skips REHEARSED and STAGING_APPLIED (there is nothing to rehearse or apply), and one
  * that does not need its Preview looked at goes from STAGING_VERIFIED to STAGING_COMPLETE. Nothing else can be
@@ -18,7 +20,7 @@ const rank = (name) => releaseStates.indexOf(name);
 
 /** The states a release has to go through, given its manifest. */
 export function requiredStates(manifest) {
-  return releaseStates.filter((name) => (manifest.migrations.length || !["REHEARSED", "STAGING_APPLIED"].includes(name)) && (manifest.previewRequired || name !== "PREVIEW_PENDING"));
+  return releaseStates.filter((name) => (manifest.migrations.length || !["REHEARSED", "STAGING_APPLIED", "PROD_APPLIED"].includes(name)) && (manifest.previewRequired || name !== "PREVIEW_PENDING"));
 }
 
 /**

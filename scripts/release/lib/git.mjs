@@ -52,6 +52,23 @@ export function createGit({ cwd = process.cwd(), run } = {}) {
       const merges = (out(["rev-list", "--merges", `${from}..${to}`]) ?? "").split(/\r?\n/).filter(Boolean).length;
       return { ok: true, reason: merges ? "contains merge commits" : "straight line", commits, merges };
     },
+    /*
+     * Remote operations. Only prod-release uses them, to move main forward to a commit that descends from it. There is
+     * no force anywhere: the server itself refuses a push that is not a fast-forward.
+     */
+    /** Fetches origin's main. Returns { ok, reason }. */
+    fetchMain() { const result = exec(["fetch", "--quiet", "--no-tags", "origin", "main"]); return result.code === 0 ? { ok: true } : { ok: false, reason: redact(result.stderr || `exit ${result.code}`, 200) }; },
+    /** Where origin's main is right now (asked to the remote, not to the local copy), or null. */
+    remoteMain() { const line = out(["ls-remote", "origin", "refs/heads/main"]); const sha = line?.split(/\s+/)[0]; return /^[0-9a-f]{40}$/.test(sha ?? "") ? sha : null; },
+    /** Pushes `sha` to origin's main as a fast-forward. Returns { ok, reason }. */
+    pushMain(sha) {
+      if (!/^[0-9a-f]{40}$/.test(String(sha))) return { ok: false, reason: "not a commit" };
+      const args = ["push", "--porcelain", "origin", `${sha}:refs/heads/main`];
+      if (args.some((arg) => /^(-f|--force.*|\+.*)$/.test(arg) || arg.startsWith("+"))) return { ok: false, reason: "a forced push is never made" };
+      const result = exec(args); return result.code === 0 ? { ok: true } : { ok: false, reason: redact(result.stderr || result.stdout || `exit ${result.code}`, 200) };
+    },
+    /** Moves the local main from `from` to `to`, only if it is still at `from`. */
+    updateLocalMain(to, from) { return exec(["update-ref", "refs/heads/main", to, from]).code === 0; },
     /** Everything the reports show about the repository, in one read. */
     state() {
       if (!git.isRepository()) throw new PreconditionError("This is not a git repository.");

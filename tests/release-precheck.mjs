@@ -9,39 +9,15 @@ import { join } from "node:path";
 import test from "node:test";
 import { main } from "../scripts/release/cli.mjs";
 import { archiveEntries, expectedEntries, parseBackupName, parseToc, validateBackup } from "../scripts/release/backup/validate.mjs";
-import { buildCapture } from "../scripts/release/drift/capture.mjs";
 import { isReadOnlySql, readOnly, WriteRefused } from "../scripts/release/lib/guard.mjs";
 import { EXIT } from "../scripts/release/lib/report.mjs";
 import { historySql } from "../scripts/release/stages/database.mjs";
 import { releaseCli, releaseMigration, releaseProject, schemaAnswer } from "./fixtures/release-project.mjs";
 import { forbidden, refs, scratch } from "./fixtures/release-harness.mjs";
+import { backups, base, capture, toc } from "./fixtures/release-backups.mjs";
+const withRelease = () => capture(schemaAnswer({ migrated: true, extraTable: true }));
 
 const quiet = { on() {}, off() {} };
-const capture = (raw) => buildCapture(raw, { environment: "staging", label: "base", capturedAt: "2026-10-14T00:00:00Z" });
-const base = () => capture(schemaAnswer()); const withRelease = () => capture(schemaAnswer({ migrated: true, extraTable: true }));
-const pad = (value) => String(value).padStart(2, "0");
-const local = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
-const stamp = (date) => `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}`;
-const types = ["MATERIALIZED VIEW", "FK CONSTRAINT", "ROW SECURITY", "TABLE DATA", "CONSTRAINT", "SEQUENCE", "FUNCTION", "PROCEDURE", "AGGREGATE", "TRIGGER", "POLICY", "DOMAIN", "TABLE", "INDEX", "VIEW", "TYPE"];
-/** A table of contents like pg_restore --list prints, holding `keys` of `schema`. */
-function toc(schema, keys, { created = new Date(Date.now() - 10 * 60_000), format = "CUSTOM", extraLines = [], dbname = "postgres" } = {}) {
-  const lines = [";", `; Archive created at ${local(created)}`, `;     dbname: ${dbname}`, ";     TOC Entries: 99", ";     Compression: gzip", ";     Dump Version: 1.16-0", `;     Format: ${format}`, ";     Dumped from database version: 17.6", ";     Dumped by pg_dump version: 18.6", ";", "; Selected TOC Entries:", ";", `13; 2615 2200 SCHEMA - ${schema} postgres`];
-  let n = 100;
-  for (const key of keys) { const type = types.find((name) => key.startsWith(`${name} `)); const rest = key.slice(type.length + 1); lines.push(`${n++}; 1259 ${n} ${type} ${schema} ${["FUNCTION", "PROCEDURE", "AGGREGATE"].includes(type) ? `${rest}()` : rest} postgres`); }
-  return [...lines, ...extraLines].join("\n") + "\n";
-}
-/** A backups folder with a dump per schema, and the fake pg_restore that reads it. */
-function backups(t, { dir = scratch(t, "bellis-backups-"), release = "h2-9", captureOf = base, created = new Date(Date.now() - 10 * 60_000), change = {}, size = 4000 } = {}) {
-  const tocs = new Map(); const files = {};
-  for (const schema of ["public", "private"]) {
-    const name = change[schema]?.name ?? `bellis-prod-${schema}-${stamp(created)}-pre-${release}.dump`;
-    const keys = [...expectedEntries(captureOf(), schema)].filter((key) => !(change[schema]?.drop ?? []).includes(key)).concat(change[schema]?.add ?? []);
-    writeFileSync(join(dir, name), Buffer.alloc(change[schema]?.size ?? size, 7)); files[schema] = join(dir, name);
-    tocs.set(name, change[schema]?.toc ?? toc(schema, keys, { created: change[schema]?.created ?? created, ...(change[schema]?.options ?? {}) }));
-  }
-  const listToc = (file) => { const name = file.split(/[\\/]/).pop(); if (change.corrupt === name) return { code: 1, stdout: "" }; return tocs.has(name) ? { code: 0, stdout: tocs.get(name) } : { code: 1, stdout: "" }; };
-  return { dir, files, listToc, tocs };
-}
 const check = (t, schema, options = {}, extra = {}) => { const made = backups(t, options); return validateBackup({ schema, release: "h2-9", file: made.files[schema], base: base(), expected: extra.expected ?? null, listToc: made.listToc, ...extra }); };
 const assertClean = (text) => { for (const secret of forbidden) assert.ok(!text.includes(secret), `leaked: ${secret}`); };
 

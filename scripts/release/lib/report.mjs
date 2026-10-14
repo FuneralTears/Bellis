@@ -75,13 +75,15 @@ export const precheckSections = Object.freeze(["RELEASE", "STAGING STATE", "BACK
 export const deploySections = Object.freeze(["DEPLOYMENT", "HTTP", "COMMIT", "ENVIRONMENT", "SUPABASE REF", "ALIAS", "PREVIEW PROTECTION", "VERIFICATION MODE", "STATE"]);
 /** Records kept next to a release's state when a deployment is verified. They are not steps of the release. */
 export const deployStates = Object.freeze(["DEPLOY_PREVIEW_VERIFIED", "DEPLOY_PROD_VERIFIED"]);
-export const releaseStates = Object.freeze(["CHECKED", "REHEARSED", "STAGING_APPLIED", "STAGING_VERIFIED", "PREVIEW_PENDING", "STAGING_COMPLETE", "PROD_PRECHECK_COMPLETE"]);
+export const releaseStates = Object.freeze(["CHECKED", "REHEARSED", "STAGING_APPLIED", "STAGING_VERIFIED", "PREVIEW_PENDING", "STAGING_COMPLETE", "PROD_PRECHECK_COMPLETE",
+  "PROD_APPLIED", "PROD_VERIFIED", "MAIN_ADVANCED", "DEPLOY_PROD_VERIFIED", "RELEASE_COMPLETE"]);
+export const prodReleaseSections = Object.freeze(["RELEASE", "HUMAN APPROVAL", "PRECHECK", "PROD TARGET", "PROD MIGRATIONS", "PROD APPLY", "PROD SCHEMA", "PROD SMOKES", "PROD SNAPSHOT", "MAIN", "DEPLOYMENT", "PROD VERSION", "PROD ALIAS", "TECH QA", "CLI FINAL TARGET", "STATE"]);
 /**
  * What each status word means for the exit code: "ok" does not stop anything, "fail" is a failed check, "human" is
  * waiting for a person. A section can only be given one of these words.
  */
 const statuses = Object.freeze({ PASS: "ok", INFO: "ok", "N/A": "ok", "NOT NEEDED": "ok", IDENTICAL: "ok", NONE: "ok", STAGING: "ok",
-  MATCH: "ok", YES: "ok", NO: "ok", AUTOMATIC: "ok", "HUMAN CONFIRMED": "ok", HUMAN_ACTION_REQUIRED: "human", ...Object.fromEntries(deployStates.map((name) => [name, "ok"])),
+  MATCH: "ok", YES: "ok", NO: "ok", VALID: "ok", READY: "ok", EXPIRED: "human", "HUMAN QA REQUIRED": "human", AUTOMATIC: "ok", "HUMAN CONFIRMED": "ok", HUMAN_ACTION_REQUIRED: "human", ...Object.fromEntries(deployStates.map((name) => [name, "ok"])),
   FAIL: "fail", DIFFERENT: "fail", FOUND: "fail", OTHER: "fail", DRIFT: "fail", HUMAN: "human", "HUMAN VERIFICATION REQUIRED": "human", REQUIRED: "human", ...Object.fromEntries(releaseStates.map((name) => [name, "ok"])) });
 
 export function createReport(command, { now = () => new Date(), sections: names = reportSections } = {}) {

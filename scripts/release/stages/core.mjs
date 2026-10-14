@@ -6,7 +6,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { EXIT, exitCodeFor, exitName, redact, reportSections } from "../lib/report.mjs";
 import { createState } from "../lib/state.mjs";
-import { CleanupFailed, environmentOf, environments, withTarget, writableEnvironments } from "../lib/target.mjs";
+import { isGranted } from "../lib/guard.mjs";
+import { CleanupFailed, assertWritable, environmentOf, environments, withTarget, writableEnvironments } from "../lib/target.mjs";
 
 /**
  * A CLI that only exists in memory, with the two real refs. It lets the target guard be rehearsed (wrong project,
@@ -54,6 +55,9 @@ export async function toolingSelfTest({ root, supabase, environment, home, comma
   const version = supabase.version();
   add("Supabase CLI", version.ok, version.ok ? `version ${version.version}, from ${supabase.source}` : `could not be run (${version.reason})`);
   add("redaction", !/hunter2|eyJhbGciOi/.test(redact("postgres://user:hunter2@db.example/postgres token=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.abcdefgh")), "credentials are removed from anything shown");
-  add("nothing writes to production", writableEnvironments.join() === "staging" && !commands.includes("prod-release"), `writable: ${writableEnvironments.join(", ")}; commands: ${commands.join(", ")}`);
+  // Production is written only with prod-release's grant: without one, the write guard refuses it.
+  const onProduction = { linkedRef: () => environments.production.ref };
+  let refusedWithoutGrant = false; try { assertWritable(onProduction, "production", { environment: {}, operation: "applying migrations" }); } catch { refusedWithoutGrant = true; }
+  add("production writes need prod-release's grant", writableEnvironments.join() === "staging" && refusedWithoutGrant && !isGranted({ operations: ["applying migrations"] }, "applying migrations"), `writable on its own: ${writableEnvironments.join(", ")}; commands: ${commands.join(", ")}`);
   return [...checks, ...(await rehearseTargetGuard())];
 }

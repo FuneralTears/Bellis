@@ -55,14 +55,18 @@
  *     --expected-commit <sha> --expected-ref <ref> --alias <url>   (the alias defaults to the production one)
  *     --confirm-human <id> --url <url>   a person confirms a Preview this tool cannot read (behind Vercel's login).
  *
- * Only staging writes to a database, and only staging's. Nothing here moves a branch. The command that would write to
+ *   node scripts/release/cli.mjs prod-release --release <id>   the release to production: the only command that writes
+ *                                              there. Needs CONFIRM_PROD_RELEASE=<id>@<short commit>, a valid precheck
+ *                                              and the release id typed in a terminal (see stages/prod-release.mjs).
+ *
+ * Only staging, and production through prod-release, are written to. Nothing here moves a branch. The command that would write to
  * production (prod-release) is not available yet and answers with exit 2.
  */
 import { existsSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createGit, checkGit, short } from "./lib/git.mjs";
-import { EXIT, HumanActionRequired, PreconditionError, ReleaseError, backupSections, checkSections, createReport, deploySections, precheckSections, redact, releaseSections } from "./lib/report.mjs";
+import { EXIT, HumanActionRequired, PreconditionError, ReleaseError, backupSections, checkSections, createReport, deploySections, precheckSections, prodReleaseSections, redact, releaseSections } from "./lib/report.mjs";
 import { createState } from "./lib/state.mjs";
 import { createSupabase } from "./lib/supabase.mjs";
 import { environmentOf, environments, inspectTarget } from "./lib/target.mjs";
@@ -73,6 +77,7 @@ import { confirmPreview, runStaging } from "./stages/staging.mjs";
 import { runBackupCheck, runPrecheck } from "./stages/prod-precheck.mjs";
 import { defaultListToc } from "./backup/validate.mjs";
 import { runDeployCheck } from "./stages/deploy-check.mjs";
+import { runProdRelease } from "./stages/prod-release.mjs";
 import { loadManifest, selectSmokes } from "./smoke/manifest.mjs";
 import { humanLine, resolvePending, runSmokes } from "./smoke/runner.mjs";
 import { captureSchema } from "./drift/capture.mjs";
@@ -83,8 +88,8 @@ import { captureSnapshot } from "./snapshot/capture.mjs";
 import { acceptSnapshot, compareSnapshots, differenceLine, readSnapshotFile } from "./snapshot/compare.mjs";
 
 const repository = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-export const available = Object.freeze(["status", "check-core", "smoke", "snapshot", "drift", "check", "staging", "backup-check", "prod-precheck", "deploy-check"]);
-export const planned = Object.freeze(["prod-release"]);
+export const available = Object.freeze(["status", "check-core", "smoke", "snapshot", "drift", "check", "staging", "backup-check", "prod-precheck", "deploy-check", "prod-release"]);
+export const planned = Object.freeze([]);
 const usage = `Usage: node scripts/release/cli.mjs <${available.join("|")}> [options] (see the top of scripts/release/cli.mjs)`;
 /** The options each command takes: `true` for a switch, "list" for one that is followed by one or more values. */
 const optionsOf = Object.freeze({
@@ -94,6 +99,7 @@ const optionsOf = Object.freeze({
   drift: { "--ndjson": true, "--json": true, "--capture": true, "--rehearse": true, "--expected": true, "--replace": true, "--verbose": true, "--release": "list", "--label": "list", "--env": "list", "--compare": "list" },
   check: { "--json": true, "--release": "list" },
   "backup-check": { "--json": true, "--release": "list", "--public": "list", "--private": "list", "--max-age-hours": "list" },
+  "prod-release": { "--json": true, "--release": "list" },
   "deploy-check": { "--json": true, "--release": "list", "--url": "list", "--alias": "list", "--expected-commit": "list", "--expected-env": "list", "--expected-ref": "list", "--confirm-human": "list" },
   "prod-precheck": { "--json": true, "--release": "list", "--reuse": true, "--public": "list", "--private": "list", "--max-age-hours": "list" },
   staging: { "--json": true, "--release": "list", "--confirm-preview": "list" },
@@ -363,20 +369,29 @@ async function deployCheck({ report, root, git, environment, home, options, fetc
     options: { url: one(options, "--url"), alias: one(options, "--alias"), expectedCommit: one(options, "--expected-commit"), expectedEnv: one(options, "--expected-env"), expectedRef: one(options, "--expected-ref"), confirmHuman: one(options, "--confirm-human") } });
 }
 
+/** `bellis:prod-release`: the release to production. */
+async function prodRelease({ report, root, supabase, git, environment, home, signals, fetchImpl, now, prompt, sleep, aliasUrl, timings, options }) {
+  const release = one(options, "--release"); if (!release) throw new PreconditionError("prod-release needs --release <id>.");
+  try {
+    await runProdRelease({ root, git, supabase, environment, home, release, report, state: createState({ repository: root, environment, home }), signals, fetchImpl: fetchImpl ?? fetch, now: now ?? (() => new Date()),
+      ...(prompt ? { prompt } : {}), ...(sleep ? { sleep } : {}), ...(aliasUrl ? { alias: aliasUrl } : {}), ...(timings ? { timings } : {}) });
+  } finally { const env = environmentOf(supabase.linkedRef()); report.set("CLI FINAL TARGET", env === "staging" ? "STAGING" : "OTHER", [env ? environments[env].label : "not linked"]); }
+}
+
 /** Runs one command and returns its exit code. Everything it needs can be replaced, which is how it is tested. */
-export async function main(argv = process.argv.slice(2), { root = repository, environment = process.env, write = (text) => process.stdout.write(text), home, supabase, git, runLocal, signals = process, listToc, now, fetchImpl } = {}) {
+export async function main(argv = process.argv.slice(2), { root = repository, environment = process.env, write = (text) => process.stdout.write(text), home, supabase, git, runLocal, signals = process, listToc, now, fetchImpl, prompt, sleep, aliasUrl, timings } = {}) {
   const options = parse(argv);
-  const sectionsOf = { check: checkSections, staging: releaseSections, "backup-check": backupSections, "prod-precheck": precheckSections, "deploy-check": deploySections };
+  const sectionsOf = { check: checkSections, staging: releaseSections, "backup-check": backupSections, "prod-precheck": precheckSections, "deploy-check": deploySections, "prod-release": prodReleaseSections };
   const report = createReport(options.command ?? "(none)", { sections: sectionsOf[options.command] });
   try {
     if (!options.command || options.unknown.length) throw new PreconditionError(options.command ? `Unknown argument: ${options.unknown.join(" ")}. ${usage}` : usage);
     if (planned.includes(options.command)) throw new PreconditionError(`"${options.command}" is not available yet. Available: ${available.join(", ")}.`);
     if (!available.includes(options.command)) throw new PreconditionError(`Unknown command: ${options.command}. ${usage}`);
-    const context = { report, root, environment, home, options, write, runLocal, signals, listToc, now, fetchImpl, remote: options.remote, supabase: supabase ?? createSupabase({ cwd: root, environment }), git: git ?? createGit({ cwd: root }) };
-    const commands = { status, smoke, snapshot, drift, check, staging, "check-core": checkCore, "backup-check": backupCheck, "prod-precheck": prodPrecheck, "deploy-check": deployCheck };
+    const context = { report, root, environment, home, options, write, runLocal, signals, listToc, now, fetchImpl, prompt, sleep, aliasUrl, timings, remote: options.remote, supabase: supabase ?? createSupabase({ cwd: root, environment }), git: git ?? createGit({ cwd: root }) };
+    const commands = { status, smoke, snapshot, drift, check, staging, "check-core": checkCore, "backup-check": backupCheck, "prod-precheck": prodPrecheck, "deploy-check": deployCheck, "prod-release": prodRelease };
     await commands[options.command](context);
   } catch (error) { report.fail(error, error?.stage ?? options.command ?? "arguments"); }
-  if (["check", "staging", "backup-check", "prod-precheck", "deploy-check"].includes(options.command)) persist(report, options, { root, environment, home });
+  if (["check", "staging", "backup-check", "prod-precheck", "deploy-check", "prod-release"].includes(options.command)) persist(report, options, { root, environment, home });
   if (options.flags.has("--ndjson")) write(JSON.stringify({ type: "report", ...report.toJSON() }) + "\n");
   else write(options.json ? JSON.stringify(report.toJSON(), null, 2) + "\n" : report.render());
   return report.exitCode();

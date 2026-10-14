@@ -25,13 +25,14 @@ whether to go on.
 | `npm run bellis:backup-check -- --release <id>` | Checks the two production backups a person made. | Nothing. Local files, read with `pg_restore --list`. |
 | `npm run bellis:prod-precheck -- --release <id>` | Everything about production before a release. | Production, read-only. Never written. |
 | `npm run bellis:deploy-check -- --release <id> --expected-env preview` | What a deployment serves: commit, environment, Supabase project. | Nothing. Public URLs, no credentials. |
+| `CONFIRM_PROD_RELEASE=<id>@<short commit> npm run bellis:prod-release -- --release <id>` | The release to production. Asks for the release id in the terminal. | Production (its migrations), and origin's main (a fast-forward). |
 | `npm test` | Every unit test of the repository (`scripts/run-tests.mjs`). | Nothing. The SQL smokes are not run from here. |
 
 Add `-- --json` to get the report as JSON. `bellis:smoke` also takes `--only <id...>`, `--all` and `--ndjson` (one JSON
 event per line, the report last).
 
-`prod-release` is **not available yet** and answers with exit 2. Nothing in this folder writes to
-production, deploys or moves a branch; `bellis:staging` is the only command that applies migrations, and only to
+Only `prod-release` writes to production or moves main, and only with a person's approval (below). Nothing in this
+folder deploys, promotes or changes an alias; `bellis:staging` is the only command that applies migrations, and only to
 staging (`lib/target.mjs` `assertWritable` refuses any other target before the write).
 
 ## A release (`releases/<id>.json`, `stages/`)
@@ -123,6 +124,25 @@ records it with `--confirm-human <release-id> --url <exact URL>` (Preview only).
 `DEPLOY_PREVIEW_VERIFIED` or `DEPLOY_PROD_VERIFIED` in `deploy-state.json` (URL, alias, expected and observed commit,
 environment, project, time, automatic or human); these are records next to the release's state, not steps of it.
 It never pushes, deploys, promotes, changes an alias or touches Vercel's settings, and keeps no cookie or token.
+
+## Production release (`stages/prod-release.mjs`)
+
+It cannot start by accident: it needs, at once, `CONFIRM_PROD_RELEASE=<release-id>@<short commit>` in the
+environment, a valid precheck (`PROD_PRECHECK_COMPLETE` for this commit, manifest and migrations, not expired), and
+the release id typed again in an interactive terminal. Any of them missing is exit 4, before anything is linked.
+None of them is kept. The commit is the release commit: the one verified on staging (source commit plus manifest).
+
+Before writing, it checks again that nothing moved since the precheck: the release locally (git, state, backups by
+hash), staging (still exactly `expected`) and production (history, schema exactly `base`, dry run, data exactly the
+precheck's snapshot). Then the apply, the only database write, inside `lib/guard.mjs` `withProdWriteAuthorization`
+(a grant for one listed operation that exists only while it runs; without it `assertWritable` refuses any production
+write). Then: history, schema (production = staging = expected), the manifest's smokes on production (each a
+transaction that is rolled back, self-test first), data identical to the precheck's and no residue → `PROD_VERIFIED`;
+main fast-forwarded on origin to the release commit, only if origin's main is still the manifest's base, never forced
+→ `MAIN_ADVANCED`; the deployment of that commit found through GitHub and waited for, verified with the production
+alias (which may lag for a few tries, never on another project) → `DEPLOY_PROD_VERIFIED`; and the public pages
+without a login → `RELEASE_COMPLETE`. Once production or main has been written, any failure is exit 5 and the state
+shows how far it got; a release that went further than its precheck is not started again without a person.
 
 ## SQL smokes (`smoke/`)
 

@@ -10,6 +10,21 @@ import { readFileSync } from "node:fs";
 import { ReleaseError, EXIT } from "./report.mjs";
 import { statements, validateSmokeSql } from "../smoke/sql.mjs";
 
+/**
+ * The only way to write to production. A grant exists only while `fn` runs, names the operations it allows, and is
+ * given only when a person approved this release, its precheck is valid and the CLI is confirmed on production.
+ * Outside it, `isGranted` is false for everything, so lib/target.mjs `assertWritable` refuses every production write.
+ */
+const grants = new WeakSet();
+export const productionOperations = Object.freeze(["applying migrations"]);
+export async function withProdWriteAuthorization({ approved, precheckValid, onProduction, operations }, fn) {
+  if (approved !== true || precheckValid !== true || onProduction !== true) throw new WriteRefused("Refused: production can only be written with a person's approval, a valid precheck and the CLI confirmed on production.");
+  if (!operations.length || operations.some((operation) => !productionOperations.includes(operation))) throw new WriteRefused("Refused: an operation that is not on the list of production writes.");
+  const grant = Object.freeze({ operations: Object.freeze([...operations]) }); grants.add(grant);
+  try { return await fn(grant); } finally { grants.delete(grant); }
+}
+export function isGranted(grant, operation) { return !!grant && grants.has(grant) && grant.operations.includes(operation); }
+
 export class WriteRefused extends ReleaseError {
   constructor(message) { super(message, { exitCode: EXIT.CHECK_FAILED, stage: "write guard" }); }
 }

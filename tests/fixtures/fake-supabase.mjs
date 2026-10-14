@@ -61,9 +61,14 @@ if (args[0] === "db" && args[1] === "push") {
   if (dry && state.dbAfterDryRun) state.dbByRef = { ...(state.dbByRef ?? {}), [state.linked]: state.dbAfterDryRun };
   if (dry && state.moveOnDryRun) { state.linked = state.moveOnDryRun; writeFileSync(join(state.workdir, "supabase", ".temp", "project-ref"), state.linked); }
   if (!dry) {
-    state.pushedOn = state.linked; state.pushes = (state.pushes ?? 0) + 1; state.pushed = true;
-    if (!state.pushNoHistory) state.applied = [...(state.applied ?? []), ...listed.map((file) => file.slice(0, 14))].sort();
-    state.pushable = []; if (state.dbAfterPush) state.db = state.dbAfterPush;
+    state.pushedOn = state.linked; state.pushes = (state.pushes ?? 0) + 1; state.pushed = true; state.pushLog = [...(state.pushLog ?? []), state.linked];
+    // A project with its own history (state.appliedByRef) is the one that changes; otherwise the shared one.
+    const versions = listed.map((file) => file.slice(0, 14)); const byRef = state.appliedByRef?.[state.linked];
+    if (!state.pushNoHistory) { if (byRef) state.appliedByRef = { ...state.appliedByRef, [state.linked]: [...byRef, ...versions].sort() }; else state.applied = [...(state.applied ?? []), ...versions].sort(); }
+    if (state.pushableByRef?.[state.linked]) state.pushableByRef = { ...state.pushableByRef, [state.linked]: [] };
+    if (state.schemaAfterPushByRef?.[state.linked]) state.schemaByRef = { ...(state.schemaByRef ?? {}), [state.linked]: state.schemaAfterPushByRef[state.linked] };
+    if (state.dbAfterPushByRef?.[state.linked]) state.dbByRef = { ...(state.dbByRef ?? {}), [state.linked]: state.dbAfterPushByRef[state.linked] };
+    if (!state.pushableByRef?.[state.linked]) state.pushable = []; if (state.dbAfterPush && !state.dbAfterPushByRef?.[state.linked]) state.db = state.dbAfterPush;
   }
   save(); process.stderr.write("Initialising login role...\n");
   process.stdout.write(JSON.stringify({ upToDate: listed.length === 0, dryRun: dry, migrations: listed, seeds: [], roles: [] }) + "\n"); process.exit(0);
@@ -111,7 +116,7 @@ if (args[0] === "db" && args[1] === "query") {
    * state.schemaMode: "garbage", "leak-error".
    */
   if (sql.includes("Bellis migration history")) answer([{ versions: state.appliedByRef?.[state.linked] ?? state.applied ?? [] }]);
-  if (sql.includes("Bellis residue check")) answer([{ residue: state.residue ?? { users_example_invalid: 0, users_with_smoke_ids: 0, workspaces_with_smoke_ids: 0, workspaces_with_smoke_slugs: 0 } }]);
+  if (sql.includes("Bellis residue check")) answer([{ residue: state.residueByRef?.[state.linked] ?? state.residue ?? { users_example_invalid: 0, users_with_smoke_ids: 0, workspaces_with_smoke_ids: 0, workspaces_with_smoke_slugs: 0 } }]);
   if (!state.schemaMode && sql.includes("Bellis schema capture") && !sql.includes("-- pending migration:") && state.schemaByRef?.[state.linked]) answer([{ schema: state.schemaByRef[state.linked] }]);
   if (!state.schemaMode && sql.includes("Bellis schema capture") && !sql.includes("-- pending migration:") && state.pushed && state.schemaAfterPush) answer([{ schema: state.schemaAfterPush }]);
   if (sql.includes("Bellis schema capture")) {
@@ -123,7 +128,7 @@ if (args[0] === "db" && args[1] === "query") {
   }
   const row = /select 'bellis_smoke_v1' as contract, '([a-z0-9_]+)' as smoke, 'PASS' as result, '([0-9a-f]+)' as nonce/.exec(sql);
   const id = row?.[1] ?? "unknown"; const nonce = row?.[2] ?? "";
-  const behaviour = (state.pushed ? state.behaviourAfterPush?.[id] : undefined) ?? state.behaviour?.[id] ?? (sql.includes("bellis_smoke_selftest_expected_failure") ? "selftest-error" : "pass");
+  const behaviour = state.behaviourOnRef?.[state.linked]?.[id] ?? (state.pushed ? state.behaviourAfterPush?.[id] : undefined) ?? state.behaviour?.[id] ?? (sql.includes("bellis_smoke_selftest_expected_failure") ? "selftest-error" : "pass");
   const txid = String((state.txCounter = (state.txCounter ?? 1000) + 1)); state.txOf = { ...(state.txOf ?? {}), [txid]: id };
   const pass = { contract: "bellis_smoke_v1", smoke: id, result: "PASS", nonce, txid, service_role_key: "sb_secret_never_show_this" };
   if (behaviour === "pass") answer([pass]);

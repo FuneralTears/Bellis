@@ -6,6 +6,7 @@
  * staging and that is checked too. If any of it cannot be confirmed, nothing runs.
  */
 import { projects as refs } from "../../assert-staging-env.mjs";
+import { isGranted } from "./guard.mjs";
 import { EXIT, PreconditionError, ReleaseError, TargetNotConfirmed, worstExit } from "./report.mjs";
 
 /** The two environments. The refs come from scripts/assert-staging-env.mjs: there is one list of them. */
@@ -77,8 +78,10 @@ export const writableEnvironments = Object.freeze(["staging"]);
  * Called right before anything that writes (applying migrations): throws, before the write, unless the write is
  * meant for an environment that may be written to and the CLI is there right now. Cheap: reads the CLI's own file.
  */
-export function assertWritable(supabase, target, { environment = process.env, operation = "a write" } = {}) {
-  if (!writableEnvironments.includes(target)) throw new ReleaseError(`Refused: ${operation} on ${target}. This tooling does not write to ${target}.`, { exitCode: EXIT.TARGET_NOT_CONFIRMED, stage: "write guard" });
+export function assertWritable(supabase, target, { environment = process.env, operation = "a write", grant = null } = {}) {
+  // Production only with a grant from lib/guard.mjs withProdWriteAuthorization (prod-release), for this operation.
+  const allowed = writableEnvironments.includes(target) || (target === "production" && isGranted(grant, operation));
+  if (!allowed) throw new ReleaseError(`Refused: ${operation} on ${target}. This tooling does not write to ${target}${target === "production" ? " outside prod-release's authorization" : ""}.`, { exitCode: EXIT.TARGET_NOT_CONFIRMED, stage: "write guard" });
   const ref = environments[target].ref; const override = (environment.SUPABASE_PROJECT_ID ?? "").trim();
   if (supabase.linkedRef() !== ref || (override && override !== ref)) throw new TargetNotConfirmed(`Refused: ${operation}. The CLI is not on ${target} right now.`, { stage: "write guard" });
 }
