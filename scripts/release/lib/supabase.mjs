@@ -43,6 +43,29 @@ function parseJson(stdout) {
 }
 
 /**
+ * The table `projects list` prints for a person, read strictly: the columns are found by the header (LINKED,
+ * REFERENCE ID, NAME), every row has exactly as many cells, a ref is a ref and the linked mark is ● or nothing. Lines
+ * before the header (progress) and the line of dashes are skipped; Windows line endings are fine. Anything else, or
+ * no rows at all, is null: a list in doubt is never used.
+ */
+export function parseProjectsTable(text) {
+  const lines = String(text ?? "").replace(/\r/g, "").split("\n").map((line) => line.replace(/\s+$/, "")).filter(Boolean);
+  const cells = (line) => line.split("|").map((cell) => cell.trim());
+  const headerAt = lines.findIndex((line) => line.includes("|") && cells(line).includes("REFERENCE ID"));
+  if (headerAt < 0) return null;
+  const header = cells(lines[headerAt]); const linkedAt = header.indexOf("LINKED"), refAt = header.indexOf("REFERENCE ID"), nameAt = header.indexOf("NAME");
+  if (linkedAt < 0 || nameAt < 0) return null;
+  const projects = [];
+  for (const line of lines.slice(headerAt + 1)) {
+    if (/^[\s|-]+$/.test(line)) continue;
+    const row = cells(line);
+    if (row.length !== header.length || !refPattern.test(row[refAt]) || !["", "●"].includes(row[linkedAt]) || !row[nameAt]) return null;
+    projects.push({ ref: row[refAt], name: row[nameAt], status: "", linked: row[linkedAt] === "●" });
+  }
+  return projects.length ? projects : null;
+}
+
+/**
  * A handle on the CLI for one working directory. `command` and `environment` can be replaced in tests by a fake
  * program; nothing here knows the difference.
  */
@@ -75,10 +98,12 @@ export function createSupabase({ cwd = process.cwd(), command, environment = pro
     },
     /** The projects of the account: ref, name, status and which one is linked. Any other field is dropped. */
     projects() {
-      const result = run(["projects", "list"]);
+      // The CLI picks its output by who it thinks is calling (an AI agent gets JSON, a person a table), so the
+      // format is always asked for. The table is still understood, strictly, if a CLI ever ignores the flag.
+      const result = run(["projects", "list", "--output-format", "json"]);
       if (result.code !== 0) return { ok: false, reason: reason(result), projects: [] };
       const parsed = parseJson(result.stdout); const list = Array.isArray(parsed) ? parsed : parsed?.projects;
-      if (!Array.isArray(list)) return { ok: false, reason: "the list of projects could not be read", projects: [] };
+      if (!Array.isArray(list)) { const table = parseProjectsTable(result.stdout); return table ? { ok: true, projects: table } : { ok: false, reason: "the list of projects could not be read", projects: [] }; }
       return { ok: true, projects: list.map((item) => ({ ref: String(item?.ref ?? item?.id ?? ""), name: String(item?.name ?? ""), status: String(item?.status ?? ""), linked: item?.linked === true })) };
     },
     /**
@@ -107,7 +132,8 @@ export function createSupabase({ cwd = process.cwd(), command, environment = pro
      */
     push({ dryRun = true, writeConfirmed = false, timeoutMs: limit = 600_000 } = {}) {
       if (!dryRun && writeConfirmed !== true) return { ok: false, reason: "a push that writes was not confirmed by the write guard" };
-      const result = run(["db", "push", "--linked", ...(dryRun ? ["--dry-run"] : ["--yes"])], limit);
+      // As with projects list: without the flag a person's terminal gets text, and the dry run could not be read.
+      const result = run(["db", "push", "--linked", ...(dryRun ? ["--dry-run"] : ["--yes"]), "--output-format", "json"], limit);
       if (result.code !== 0) return { ok: false, reason: reason(result) };
       const parsed = parseJson(result.stdout);
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || !Array.isArray(parsed.migrations)) return { ok: false, reason: "the answer of db push could not be read" };

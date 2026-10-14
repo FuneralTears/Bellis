@@ -4,11 +4,12 @@
  */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { EXIT, FailureAfterProdWrite, PreconditionError, TargetNotConfirmed, exitCodeFor } from "../scripts/release/lib/report.mjs";
-import { createSupabase, resolveCli } from "../scripts/release/lib/supabase.mjs";
+import { createSupabase, parseProjectsTable, resolveCli } from "../scripts/release/lib/supabase.mjs";
 import { CleanupFailed, confirmTarget, environmentOf, environments, inspectTarget, returnToStaging, withTarget } from "../scripts/release/lib/target.mjs";
 import { projects } from "../scripts/assert-staging-env.mjs";
 import { fakeCli, fakeCliPath, forbidden, refs, scratch } from "./fixtures/release-harness.mjs";
@@ -184,6 +185,45 @@ test("the CLI's output never comes back: only named fields, and reasons are reda
   assert.equal(cli.calls().length, before);
   // A link file with something else in it is not a ref either.
   const odd = fakeCli(t, { linked: "not-a-ref" }); assert.equal(odd.supabase.linkedRef(), null);
+});
+
+/** `npx.cmd supabase projects list` in a person's terminal, exactly as it printed it (CREATED AT elided as shown). */
+const realTable = [
+  "LINKED | ORG ID               | REFERENCE ID         | NAME           | REGION                    | CREATED AT (UTC)",
+  "--------|----------------------|----------------------|----------------|---------------------------|---------------------",
+  "   ●    | hlpnaohuceifooypgdll | hbvmcvemrkfovzhlpgys | Bellis Staging | East US (North Virginia)  | ...",
+  "        | hlpnaohuceifooypgdll | pinfdbvfzoratsntjgah | Bellis         | South America (São Paulo) | ...",
+].join("\n");
+
+test("projects list: the format is always asked for, so who is calling does not change it", (t) => {
+  const cli = fakeCli(t, { tableWithoutFlag: true });
+  const listed = cli.supabase.projects();
+  assert.equal(listed.ok, true); assert.deepEqual(listed.projects.map((item) => [item.ref, item.linked]), [[refs.staging, true], [refs.production, false]]);
+  assert.ok(cli.rawCalls().includes("projects list --output-format json"), "the wrapper asks for JSON");
+  cli.supabase.push({ dryRun: true }); assert.ok(cli.rawCalls().at(-1).startsWith("db push"), "and so does db push");
+  const source = readFileSync(new URL("../scripts/release/lib/supabase.mjs", import.meta.url), "utf8");
+  assert.match(source, /run\(\["projects", "list", "--output-format", "json"\]\)/); assert.match(source, /\.\.\.\(dryRun \? \["--dry-run"\] : \["--yes"\]\), "--output-format", "json"\]/);
+});
+
+test("projects list: the real table, exactly as a person's terminal prints it, is read and still guarded", (t) => {
+  for (const text of [realTable, realTable.replace(/\n/g, "\r\n"), `│\n◇  Fetching projects...\n\n  \n${realTable}\r\n`]) {
+    assert.deepEqual(parseProjectsTable(text), [{ ref: refs.staging, name: "Bellis Staging", status: "", linked: true }, { ref: refs.production, name: "Bellis", status: "", linked: false }]);
+  }
+  // Through the wrapper and the guard, with a CLI that answers with the table whatever it is asked.
+  const cli = fakeCli(t, { projectsTable: realTable.replace(/\n/g, "\r\n") });
+  assert.deepEqual(inspectTarget(cli.supabase, "staging", { environment: cli.environment }), { ok: true, env: "staging", ref: refs.staging, problems: [] });
+  assert.equal(inspectTarget(cli.supabase, "production", { environment: cli.environment }).ok, false, "the table says staging is linked");
+  const both = realTable.replace("        | hlpnaohuceifooypgdll | pinfdbvfzoratsntjgah", "   ●    | hlpnaohuceifooypgdll | pinfdbvfzoratsntjgah");
+  assert.match(inspectTarget(fakeCli(t, { projectsTable: both }).supabase, "staging", { environment: {} }).problems.join(), /more than one project is marked as linked/);
+});
+
+test("projects list: a table in doubt is never used", () => {
+  const broken = [
+    ["no header", realTable.split("\n").slice(1).join("\n")], ["a header without the reference", realTable.replace("REFERENCE ID", "REF")], ["no rows", realTable.split("\n").slice(0, 2).join("\n")],
+    ["another mark", realTable.replace("●", "*")], ["a cell too many", realTable.replace("Bellis Staging", "Bellis | Staging")], ["a cell missing", realTable.replace("| Bellis         ", "")],
+    ["a ref that is not one", realTable.replace("hbvmcvemrkfovzhlpgys", "hbvmcvemrkfovzhlpgy")], ["an empty name", realTable.replace("Bellis Staging", "              ")], ["nothing", ""],
+  ];
+  for (const [name, text] of broken) assert.equal(parseProjectsTable(text), null, name);
 });
 
 test("a CLI that cannot be started is a failed call, not a crash", (t) => {

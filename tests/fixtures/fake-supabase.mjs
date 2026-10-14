@@ -35,6 +35,13 @@ if (args[0] === "projects" && args[1] === "list") {
   if (state.failProjects) { process.stderr.write(`${leak}\n`); process.exit(1); }
   if (state.noJson) { process.stdout.write("LINKED | ORG | REFERENCE ID | NAME\n"); process.exit(0); }
   const marks = state.marks ?? "linked";
+  // A person's terminal without --output-format json (or a CLI that ignores it): the real table, byte for byte.
+  if (state.projectsTable !== undefined || (!args.includes("--output-format") && state.tableWithoutFlag)) {
+    const isLinked = (item) => (marks === "both" ? true : marks === "none" ? false : marks === "linked" ? item.ref === state.linked : item.ref === marks);
+    const rows = (state.projects ?? []).map((item) => `   ${isLinked(item) ? "●" : " "}    | hlpnaohuceifooypgdll | ${item.ref} | ${item.name.padEnd(14)} | ${item.region ?? "East US (North Virginia)"}  | 2026-10-04 04:12:54`);
+    process.stdout.write(state.projectsTable ?? ["", "  ", "LINKED | ORG ID               | REFERENCE ID         | NAME           | REGION                    | CREATED AT (UTC)", "--------|----------------------|----------------------|----------------|---------------------------|---------------------", ...rows, ""].join("\r\n"));
+    process.exit(0);
+  }
   const projects = (state.projects ?? []).map((item) => ({ id: item.ref, ref: item.ref, name: item.name, status: "ACTIVE_HEALTHY", organization_id: "org",
     linked: marks === "both" ? true : marks === "none" ? false : marks === "linked" ? item.ref === state.linked : item.ref === marks,
     database: { host: "db.example.supabase.co", password: "hunter2-secret" }, service_role_key: "sb_secret_never_show_this" }));

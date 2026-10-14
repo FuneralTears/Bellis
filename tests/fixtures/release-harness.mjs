@@ -40,7 +40,9 @@ export function fakeCli(t, { linked = refs.staging, ...behaviour } = {}) {
     /** What the CLI's own file says right now. */
     linkedFile() { try { return readFileSync(join(workdir, "supabase", ".temp", "project-ref"), "utf8").trim(); } catch { return null; } },
     /** The commands the fake received, in order, as "link staging" / "link production" / "projects list". */
-    calls() { return read().log.map((entry) => entry.replace(/^link --project-ref (\S+)$/, (_, ref) => `link ${ref === refs.staging ? "staging" : ref === refs.production ? "production" : ref}`)); } };
+    calls() { return read().log.map((entry) => entry.replace(/ --output-format json$/, "").replace(/^link --project-ref (\S+)$/, (_, ref) => `link ${ref === refs.staging ? "staging" : ref === refs.production ? "production" : ref}`)); },
+    /** The commands exactly as the fake received them, flags included. */
+    rawCalls() { return read().log; } };
 }
 
 /** A complete release manifest (releases/<id>.json), with placeholder commits unless given. */
