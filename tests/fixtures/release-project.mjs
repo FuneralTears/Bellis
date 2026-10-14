@@ -19,8 +19,15 @@ export function schemaAnswer({ migrated = false, extraTable = false, applied } =
   const column = (name, type) => ({ name, type, not_null: true, default: null, identity: "", generated: "", collation: null, grants: [] });
   const tables = [{ id: "public.patients", owner: "postgres", kind: "r", rls: true, rls_forced: false, options: [], grants: ["authenticated:SELECT"], columns: [column("id", "uuid"), ...(migrated ? [column("flagged", "boolean")] : [])] }];
   if (extraTable) tables.push({ ...tables[0], id: "public.scratch", columns: [column("id", "uuid")] });
+  tables.push({ id: "private.bellis_admins", owner: "postgres", kind: "r", rls: true, rls_forced: false, options: [], grants: [], columns: [column("user_id", "uuid")] });
+  const fn = (id, kind = "f") => ({ id, kind, arguments: "", result: "boolean", language: "sql", volatility: "s", security_definer: true, leakproof: false, parallel: "u", strict: false, config: [], owner: "postgres", body: "select true", sql_body: null, grants: [] });
   return { database_time: "2026-10-14T00:00:00Z", server_version: "170011", applied_migrations: applied ?? (migrated ? ["20261017090000", "20261020090000"] : ["20261017090000"]), other_cron_jobs: 0,
-    schemas: [{ id: "public", owner: "pg_database_owner", unknown: false, grants: ["anon:USAGE"] }], tables, constraints: [], indexes: [], policies: [], functions: [], views: [], triggers: [], types: [], sequences: [], default_privileges: [], extensions: [], cron: [] };
+    schemas: [{ id: "public", owner: "pg_database_owner", unknown: false, grants: ["anon:USAGE"] }, { id: "private", owner: "postgres", unknown: false, grants: [] }], tables,
+    constraints: [{ id: "public.patients.patients_pkey", table: "public.patients", type: "p", definition: "PRIMARY KEY (id)", validated: true, deferrable: false, deferred: false },
+      { id: "private.bellis_admins.bellis_admins_pkey", table: "private.bellis_admins", type: "p", definition: "PRIMARY KEY (user_id)", validated: true, deferrable: false, deferred: false }],
+    indexes: [{ id: "public.patients_pkey", table: "public.patients", definition: "CREATE UNIQUE INDEX patients_pkey ON public.patients USING btree (id)", unique: true, primary: true, valid: true, predicate: null, expressions: null }],
+    policies: [{ id: "public.patients.patients_read", table: "public.patients", command: "r", permissive: true, roles: ["authenticated"], using: "true", check: null }],
+    functions: [fn("private.is_bellis_admin(p_user uuid)"), fn("public.admin_overview()")], views: [], triggers: [], types: [], sequences: [], default_privileges: [], extensions: [], cron: [] };
 }
 export const snapshotConfig = { version: 1, schemas: ["public"], tables: [{ table: "public.patients", mode: "fingerprint", key: ["id"] }, { table: "auth.users", mode: "count" }], ignored: [] };
 export const database = () => ({ "public.patients": { columns: ["id", "first_name"], primaryKey: ["id"], rows: [{ id: "p1", first_name: "Ana" }, { id: "p2", first_name: "Zulema" }] }, "auth.users": { columns: ["id"], primaryKey: ["id"], rows: [{ id: "u1" }] } });

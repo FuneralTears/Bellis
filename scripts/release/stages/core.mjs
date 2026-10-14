@@ -54,6 +54,6 @@ export async function toolingSelfTest({ root, supabase, environment, home, comma
   const version = supabase.version();
   add("Supabase CLI", version.ok, version.ok ? `version ${version.version}, from ${supabase.source}` : `could not be run (${version.reason})`);
   add("redaction", !/hunter2|eyJhbGciOi/.test(redact("postgres://user:hunter2@db.example/postgres token=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.abcdefgh")), "credentials are removed from anything shown");
-  add("nothing writes to production", writableEnvironments.join() === "staging" && !commands.some((name) => name.startsWith("prod")), `writable: ${writableEnvironments.join(", ")}; commands: ${commands.join(", ")}`);
+  add("nothing writes to production", writableEnvironments.join() === "staging" && !commands.includes("prod-release"), `writable: ${writableEnvironments.join(", ")}; commands: ${commands.join(", ")}`);
   return [...checks, ...(await rehearseTargetGuard())];
 }

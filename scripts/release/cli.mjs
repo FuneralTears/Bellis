@@ -40,14 +40,22 @@
  *                                              only to staging; production is only read.
  *     --confirm-preview <id>   a person confirms they looked at the Preview. Writes nothing but the release's state.
  *
- * Only staging writes to a database, and only staging's. Nothing here moves a branch. The commands that would touch
- * production (prod-precheck, prod-release) are not available yet and answer with exit 2.
+ *   node scripts/release/cli.mjs backup-check --release <id>   the two production backups (public, private) a person
+ *                                              made: local files only, read with pg_restore --list.
+ *     --public <file> --private <file>   check these files instead of the newest ones in the backups folder.
+ *     --max-age-hours <n>                how old a backup may be (24 by default).
+ *   node scripts/release/cli.mjs prod-precheck --release <id>  everything about production before a release, read-only
+ *                                              (see stages/prod-precheck.mjs). Writes nothing to any database.
+ *     --reuse             reuse a precheck of this commit and manifest that has not expired (2 hours).
+ *
+ * Only staging writes to a database, and only staging's. Nothing here moves a branch. The command that would write to
+ * production (prod-release) is not available yet and answers with exit 2.
  */
 import { existsSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createGit, checkGit, short } from "./lib/git.mjs";
-import { EXIT, HumanActionRequired, PreconditionError, ReleaseError, checkSections, createReport, redact, releaseSections } from "./lib/report.mjs";
+import { EXIT, HumanActionRequired, PreconditionError, ReleaseError, backupSections, checkSections, createReport, precheckSections, redact, releaseSections } from "./lib/report.mjs";
 import { createState } from "./lib/state.mjs";
 import { createSupabase } from "./lib/supabase.mjs";
 import { environmentOf, environments, inspectTarget } from "./lib/target.mjs";
@@ -55,6 +63,8 @@ import { defaultRunLocal, runCheck } from "./stages/check.mjs";
 import { toolingSelfTest } from "./stages/core.mjs";
 import { openReleaseState, stateName } from "./stages/release-state.mjs";
 import { confirmPreview, runStaging } from "./stages/staging.mjs";
+import { runBackupCheck, runPrecheck } from "./stages/prod-precheck.mjs";
+import { defaultListToc } from "./backup/validate.mjs";
 import { loadManifest, selectSmokes } from "./smoke/manifest.mjs";
 import { humanLine, resolvePending, runSmokes } from "./smoke/runner.mjs";
 import { captureSchema } from "./drift/capture.mjs";
@@ -65,8 +75,8 @@ import { captureSnapshot } from "./snapshot/capture.mjs";
 import { acceptSnapshot, compareSnapshots, differenceLine, readSnapshotFile } from "./snapshot/compare.mjs";
 
 const repository = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-export const available = Object.freeze(["status", "check-core", "smoke", "snapshot", "drift", "check", "staging"]);
-export const planned = Object.freeze(["prod-precheck", "prod-release"]);
+export const available = Object.freeze(["status", "check-core", "smoke", "snapshot", "drift", "check", "staging", "backup-check", "prod-precheck"]);
+export const planned = Object.freeze(["prod-release"]);
 const usage = `Usage: node scripts/release/cli.mjs <${available.join("|")}> [options] (see the top of scripts/release/cli.mjs)`;
 /** The options each command takes: `true` for a switch, "list" for one that is followed by one or more values. */
 const optionsOf = Object.freeze({
@@ -75,6 +85,8 @@ const optionsOf = Object.freeze({
   smoke: { "--all": true, "--list": true, "--ndjson": true, "--json": true, "--group": "list", "--only": "list", "--with-pending": "list", "--release": "list" },
   drift: { "--ndjson": true, "--json": true, "--capture": true, "--rehearse": true, "--expected": true, "--replace": true, "--verbose": true, "--release": "list", "--label": "list", "--env": "list", "--compare": "list" },
   check: { "--json": true, "--release": "list" },
+  "backup-check": { "--json": true, "--release": "list", "--public": "list", "--private": "list", "--max-age-hours": "list" },
+  "prod-precheck": { "--json": true, "--release": "list", "--reuse": true, "--public": "list", "--private": "list", "--max-age-hours": "list" },
   staging: { "--json": true, "--release": "list", "--confirm-preview": "list" },
   snapshot: { "--ndjson": true, "--json": true, "--replace": true, "--release": "list", "--label": "list", "--env": "list", "--output": "list", "--compare": "list" },
 });
@@ -316,19 +328,39 @@ async function staging({ report, root, supabase, git, environment, home, options
   finally { const env = environmentOf(supabase.linkedRef()); report.set("CLI FINAL TARGET", env === "staging" ? "STAGING" : "OTHER", [env ? environments[env].label : "not linked"]); }
 }
 
+const backupOptions = (options) => {
+  const hours = one(options, "--max-age-hours"); if (hours !== undefined && !(Number(hours) > 0 && Number(hours) <= 168)) throw new PreconditionError("--max-age-hours is a number of hours between 1 and 168.");
+  return { paths: { public: one(options, "--public"), private: one(options, "--private") }, maxAgeHours: hours === undefined ? undefined : Number(hours) };
+};
+/** `bellis:backup-check`: the two backups of a release, local files only. */
+function backupCheck({ report, root, environment, home, options, listToc, now }) {
+  const release = one(options, "--release"); if (!release) throw new PreconditionError("backup-check needs --release <id>.");
+  runBackupCheck({ root, release, report, state: createState({ repository: root, environment, home }), environment, home, listToc: listToc ?? defaultListToc(environment), now: now ?? (() => new Date()), ...backupOptions(options) });
+}
+/** `bellis:prod-precheck`: production, read-only. */
+async function prodPrecheck({ report, root, supabase, git, environment, home, options, listToc, now, signals }) {
+  const release = one(options, "--release"); if (!release) throw new PreconditionError("prod-precheck needs --release <id>.");
+  try { await runPrecheck({ root, git, supabase, environment, home, release, report, state: createState({ repository: root, environment, home }), listToc: listToc ?? defaultListToc(environment), signals, reuse: options.flags.has("--reuse"), now: now ?? (() => new Date()), ...backupOptions(options) }); }
+  finally {
+    const env = environmentOf(supabase.linkedRef()); report.set("CLI FINAL TARGET", env === "staging" ? "STAGING" : "OTHER", [env ? environments[env].label : "not linked"]);
+    if (report.get("SAFE TO APPLY PROD?").status !== "YES") report.set("SAFE TO APPLY PROD?", "NO", ["the precheck did not pass"]);
+  }
+}
+
 /** Runs one command and returns its exit code. Everything it needs can be replaced, which is how it is tested. */
-export async function main(argv = process.argv.slice(2), { root = repository, environment = process.env, write = (text) => process.stdout.write(text), home, supabase, git, runLocal, signals = process } = {}) {
+export async function main(argv = process.argv.slice(2), { root = repository, environment = process.env, write = (text) => process.stdout.write(text), home, supabase, git, runLocal, signals = process, listToc, now } = {}) {
   const options = parse(argv);
-  const report = createReport(options.command ?? "(none)", { sections: options.command === "check" ? checkSections : options.command === "staging" ? releaseSections : undefined });
+  const sectionsOf = { check: checkSections, staging: releaseSections, "backup-check": backupSections, "prod-precheck": precheckSections };
+  const report = createReport(options.command ?? "(none)", { sections: sectionsOf[options.command] });
   try {
     if (!options.command || options.unknown.length) throw new PreconditionError(options.command ? `Unknown argument: ${options.unknown.join(" ")}. ${usage}` : usage);
     if (planned.includes(options.command)) throw new PreconditionError(`"${options.command}" is not available yet. Available: ${available.join(", ")}.`);
     if (!available.includes(options.command)) throw new PreconditionError(`Unknown command: ${options.command}. ${usage}`);
-    const context = { report, root, environment, home, options, write, runLocal, signals, remote: options.remote, supabase: supabase ?? createSupabase({ cwd: root, environment }), git: git ?? createGit({ cwd: root }) };
-    const commands = { status, smoke, snapshot, drift, check, staging, "check-core": checkCore };
+    const context = { report, root, environment, home, options, write, runLocal, signals, listToc, now, remote: options.remote, supabase: supabase ?? createSupabase({ cwd: root, environment }), git: git ?? createGit({ cwd: root }) };
+    const commands = { status, smoke, snapshot, drift, check, staging, "check-core": checkCore, "backup-check": backupCheck, "prod-precheck": prodPrecheck };
     await commands[options.command](context);
   } catch (error) { report.fail(error, error?.stage ?? options.command ?? "arguments"); }
-  if (["check", "staging"].includes(options.command)) persist(report, options, { root, environment, home });
+  if (["check", "staging", "backup-check", "prod-precheck"].includes(options.command)) persist(report, options, { root, environment, home });
   if (options.flags.has("--ndjson")) write(JSON.stringify({ type: "report", ...report.toJSON() }) + "\n");
   else write(options.json ? JSON.stringify(report.toJSON(), null, 2) + "\n" : report.render());
   return report.exitCode();

@@ -25,6 +25,8 @@
     "bellis:drift": "node scripts/release/cli.mjs drift",
     "bellis:check": "node scripts/release/cli.mjs check",
     "bellis:staging": "node scripts/release/cli.mjs staging",
+    "bellis:backup-check": "node scripts/release/cli.mjs backup-check",
+    "bellis:prod-precheck": "node scripts/release/cli.mjs prod-precheck",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {

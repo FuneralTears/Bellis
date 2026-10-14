@@ -65,8 +65,8 @@ test("manifest: a valid one, and every way of getting it wrong", () => {
 test("state machine: no skipping, re-runs are written down, and a state of another manifest is refused", (t) => {
   const state = createState({ repository: scratch(t), environment: {}, home: scratch(t) });
   const manifest = releaseManifest({ migrations: [{ file: "20261020090000_a.sql", sha256: "a".repeat(64) }], previewRequired: true });
-  assert.deepEqual(requiredStates(manifest), ["CHECKED", "REHEARSED", "STAGING_APPLIED", "STAGING_VERIFIED", "PREVIEW_PENDING", "STAGING_COMPLETE"]);
-  assert.deepEqual(requiredStates(releaseManifest()), ["CHECKED", "STAGING_VERIFIED", "STAGING_COMPLETE"]);
+  assert.deepEqual(requiredStates(manifest), ["CHECKED", "REHEARSED", "STAGING_APPLIED", "STAGING_VERIFIED", "PREVIEW_PENDING", "STAGING_COMPLETE", "PROD_PRECHECK_COMPLETE"]);
+  assert.deepEqual(requiredStates(releaseManifest()), ["CHECKED", "STAGING_VERIFIED", "STAGING_COMPLETE", "PROD_PRECHECK_COMPLETE"]);
   const progress = openReleaseState(state, "h2-9", { manifest, manifestHash: "h1" });
   assert.throws(() => progress.advance("REHEARSED"), /CHECKED comes first/);
   progress.advance("CHECKED", { commit: "c1" }); assert.throws(() => progress.advance("STAGING_APPLIED"), /REHEARSED comes first/);

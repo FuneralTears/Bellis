@@ -22,12 +22,14 @@ whether to go on.
 | `npm run bellis:check -- --release <id>` | Everything about a release that can be checked on this machine. | Nothing. Never touches Supabase. |
 | `npm run bellis:staging -- --release <id>` | Takes the release to staging: rehearsal, smokes, dry run, apply, verification. | Staging only (applies the release's migrations). Production is read, never written. |
 | `npm run bellis:staging -- --release <id> --confirm-preview <id>` | A person confirms they looked at the Preview. | The release's state, nothing else. |
+| `npm run bellis:backup-check -- --release <id>` | Checks the two production backups a person made. | Nothing. Local files, read with `pg_restore --list`. |
+| `npm run bellis:prod-precheck -- --release <id>` | Everything about production before a release. | Production, read-only. Never written. |
 | `npm test` | Every unit test of the repository (`scripts/run-tests.mjs`). | Nothing. The SQL smokes are not run from here. |
 
 Add `-- --json` to get the report as JSON. `bellis:smoke` also takes `--only <id...>`, `--all` and `--ndjson` (one JSON
 event per line, the report last).
 
-`prod-precheck` and `prod-release` are **not available yet** and answer with exit 2. Nothing in this folder writes to
+`prod-release` is **not available yet** and answers with exit 2. Nothing in this folder writes to
 production, deploys or moves a branch; `bellis:staging` is the only command that applies migrations, and only to
 staging (`lib/target.mjs` `assertWritable` refuses any other target before the write).
 
@@ -73,6 +75,32 @@ environment and result; nothing can be skipped, and a state written for another 
 Run again before the apply, it starts over; after the apply, it does not apply again and goes on verifying, but only if
 this release was rehearsed; with part of the release applied, it stops. The Preview is never checked automatically: a
 person confirms it with `--confirm-preview <id>`, at the commit that was verified.
+
+## Backups (`backup/validate.mjs`)
+
+Before production, a person makes two backups in `C:\Users\<user>\Bellis-Backups\` (or `BELLIS_BACKUPS_DIR`), with
+`pg_dump --format=custom --no-privileges --schema=<public|private>`, named
+`bellis-prod-<public|private>-YYYYMMDD-HHMM-pre-<release>.dump`. The tooling never makes them and never asks for a
+password. `auth` and `vault` are not in them: known debt.
+
+A backup passes when it exists, is not empty, `pg_restore --list` reads it, it is a custom archive, it is at most 24
+hours old (`--max-age-hours`), its name matches the release, the schema and the time inside the archive, it holds
+only its schema and the data of every table, and it holds exactly the objects production has in that schema. Those
+objects are not listed by hand: they come from the release's schema captures (`schema-base`, and `schema-expected` for
+what only the release's migrations create, which must not be there). Its size is compared with the previous backup of
+the same schema: below 80% or above 250% it is a question for a person (exit 4), never a pass on size alone.
+
+## Production precheck (`stages/prod-precheck.mjs`)
+
+Needs the release at `STAGING_COMPLETE`. In order: the release's static checks; both backups (one missing is exit 4,
+before anything is linked or read); staging read, still what the release left; then production, inside `withTarget`
+and only through `lib/guard.mjs` `readOnly` (a real push or any SQL that is not a read-only transaction is refused
+before the CLI runs): migration history (pending exactly the release), schema (exactly the release's base, and with
+staging exactly what the release explains), a data snapshot, the dry run (exactly the release's migrations), and a
+second snapshot that has to be identical. Only when everything passed it writes `PROD_PRECHECK_COMPLETE` and
+`prod-precheck.json` (commit, manifest, migration set, backups with their hashes, schema and snapshot hashes, dry
+run), valid for 2 hours. `--reuse` reuses it while it is valid for the same commit, manifest, migrations and backup
+files, with the CLI on staging; otherwise a full precheck runs.
 
 ## SQL smokes (`smoke/`)
 

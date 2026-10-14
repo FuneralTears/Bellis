@@ -56,7 +56,9 @@ if (args[0] === "projects" && args[1] === "list") {
 if (args[0] === "db" && args[1] === "push") {
   const dry = args.includes("--dry-run"); state.log[state.log.length - 1] = dry ? "db push --dry-run" : "db push --yes";
   if (!dry && state.pushFails) { save(); process.stderr.write(`Applying migration...\n${leak}\n`); process.exit(1); }
-  const listed = [...(state.pushable ?? []), ...(dry ? state.dryRunExtra ?? [] : [])];
+  // Per project when given (state.pushableByRef, state.dbAfterDryRun changes that project's data during a dry run).
+  const listed = [...(state.pushableByRef?.[state.linked] ?? state.pushable ?? []), ...(dry ? state.dryRunExtra ?? [] : [])];
+  if (dry && state.dbAfterDryRun) state.dbByRef = { ...(state.dbByRef ?? {}), [state.linked]: state.dbAfterDryRun };
   if (dry && state.moveOnDryRun) { state.linked = state.moveOnDryRun; writeFileSync(join(state.workdir, "supabase", ".temp", "project-ref"), state.linked); }
   if (!dry) {
     state.pushedOn = state.linked; state.pushes = (state.pushes ?? 0) + 1; state.pushed = true;
@@ -83,7 +85,7 @@ if (args[0] === "db" && args[1] === "query") {
    */
   if (sql.includes("Bellis data snapshot")) {
     const { fingerprintRows } = await import("../../scripts/release/snapshot/build-sql.mjs");
-    const config = state.snapshotConfig; const db = state.db ?? {}; const mode = state.snapshot ?? "ok";
+    const config = state.snapshotConfig; const db = state.dbByRef?.[state.linked] ?? state.db ?? {}; const mode = state.snapshot ?? "ok";
     if (mode === "garbage") { save(); process.stdout.write("not json at all\n"); process.exit(0); }
     if (mode === "leak-error") sqlError(`${leak} password=hunter2`);
     const tables = [];
@@ -108,10 +110,10 @@ if (args[0] === "db" && args[1] === "query") {
    * set, is what every capture after a rehearsal sees (a rehearsal that left something behind).
    * state.schemaMode: "garbage", "leak-error".
    */
-  if (sql.includes("Bellis migration history")) answer([{ versions: state.applied ?? [] }]);
+  if (sql.includes("Bellis migration history")) answer([{ versions: state.appliedByRef?.[state.linked] ?? state.applied ?? [] }]);
   if (sql.includes("Bellis residue check")) answer([{ residue: state.residue ?? { users_example_invalid: 0, users_with_smoke_ids: 0, workspaces_with_smoke_ids: 0, workspaces_with_smoke_slugs: 0 } }]);
-  if (sql.includes("Bellis schema capture") && !sql.includes("-- pending migration:") && state.schemaByRef?.[state.linked]) answer([{ schema: state.schemaByRef[state.linked] }]);
-  if (sql.includes("Bellis schema capture") && !sql.includes("-- pending migration:") && state.pushed && state.schemaAfterPush) answer([{ schema: state.schemaAfterPush }]);
+  if (!state.schemaMode && sql.includes("Bellis schema capture") && !sql.includes("-- pending migration:") && state.schemaByRef?.[state.linked]) answer([{ schema: state.schemaByRef[state.linked] }]);
+  if (!state.schemaMode && sql.includes("Bellis schema capture") && !sql.includes("-- pending migration:") && state.pushed && state.schemaAfterPush) answer([{ schema: state.schemaAfterPush }]);
   if (sql.includes("Bellis schema capture")) {
     if (state.schemaMode === "garbage") { save(); process.stdout.write("not json at all\n"); process.exit(0); }
     if (state.schemaMode === "leak-error") sqlError(`${leak} password=hunter2`);
