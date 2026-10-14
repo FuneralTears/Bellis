@@ -21,9 +21,10 @@
  * that cannot be rehearsed safely (it cannot run in a transaction, or it does something a rollback does not undo)
  * stops the rehearsal and asks for a person: nothing is assumed about it.
  */
-import { readFileSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
+import { writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { loadReleaseManifest } from "../lib/manifest.mjs";
 import { CheckFailed, HumanActionRequired, PreconditionError, redact } from "../lib/report.mjs";
 import { confirmTarget, environments } from "../lib/target.mjs";
 import { resolvePending } from "../smoke/runner.mjs";
@@ -69,11 +70,9 @@ export function migrationRisks(text) {
 
 /** The migrations of a release, from its manifest (releases/<id>.json): exactly those files, in that order, with those hashes. */
 export function releaseMigrations(root, release) {
-  if (!/^[a-z0-9][a-z0-9._-]{1,60}$/.test(String(release ?? ""))) throw new PreconditionError("A release id uses lowercase letters, digits, dots and dashes.");
-  let manifest; try { manifest = JSON.parse(readFileSync(join(root, "releases", `${release}.json`), "utf8")); } catch { throw new PreconditionError(`releases/${release}.json could not be read.`); }
-  const files = Array.isArray(manifest?.migrations) ? manifest.migrations.map((item) => item?.file) : null;
-  if (!files?.length) throw new PreconditionError(`releases/${release}.json lists no migrations: there is nothing a release would change.`);
-  if (files.some((file, index) => index > 0 && !(String(files[index - 1]) < String(file)))) throw new CheckFailed(`releases/${release}.json does not list its migrations in the order they are applied.`, { stage: "pending migrations" });
+  const { manifest } = loadReleaseManifest(root, release);
+  const files = manifest.migrations.map((item) => item.file);
+  if (!files.length) throw new PreconditionError(`releases/${release}.json lists no migrations: there is nothing a release would change.`);
   return resolvePending(root, files, { release });
 }
 

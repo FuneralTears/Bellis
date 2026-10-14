@@ -71,6 +71,18 @@ export function returnToStaging(supabase, options = {}) {
   } catch (error) { return { ok: false, problems: [`returning to staging failed (${error?.message ?? error})`] }; }
 }
 
+/** Environments a command may write to in this version of the tooling. Production is not one of them. */
+export const writableEnvironments = Object.freeze(["staging"]);
+/**
+ * Called right before anything that writes (applying migrations): throws, before the write, unless the write is
+ * meant for an environment that may be written to and the CLI is there right now. Cheap: reads the CLI's own file.
+ */
+export function assertWritable(supabase, target, { environment = process.env, operation = "a write" } = {}) {
+  if (!writableEnvironments.includes(target)) throw new ReleaseError(`Refused: ${operation} on ${target}. This tooling does not write to ${target}.`, { exitCode: EXIT.TARGET_NOT_CONFIRMED, stage: "write guard" });
+  const ref = environments[target].ref; const override = (environment.SUPABASE_PROJECT_ID ?? "").trim();
+  if (supabase.linkedRef() !== ref || (override && override !== ref)) throw new TargetNotConfirmed(`Refused: ${operation}. The CLI is not on ${target} right now.`, { stage: "write guard" });
+}
+
 /** The CLI could not be left on staging. Carries what happened before, if anything did. */
 export class CleanupFailed extends ReleaseError {
   constructor(problems, { original = null, result } = {}) {

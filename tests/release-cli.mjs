@@ -24,12 +24,13 @@ async function invoke(t, argv, { cli = fakeCli(t), repo = gitRepo(t), root = rep
 const headings = (output) => output.split("\n").filter((line) => line.startsWith("## "));
 const sectionOf = (output, name) => output.split(/^## /m).find((part) => part.startsWith(`${name}\n`)) ?? "";
 
-test("status, check-core and smoke exist; the commands that write for good are not available yet", () => {
-  assert.deepEqual([...available], ["status", "check-core", "smoke", "snapshot", "drift"]); assert.deepEqual([...planned], ["check", "staging", "prod-precheck", "prod-release"]);
+test("the commands that exist, and the ones that would touch production are not available yet", () => {
+  assert.deepEqual([...available], ["status", "check-core", "smoke", "snapshot", "drift", "check", "staging"]); assert.deepEqual([...planned], ["prod-precheck", "prod-release"]);
   const scripts = JSON.parse(readFileSync(join(repository, "package.json"), "utf8")).scripts;
   assert.equal(scripts["bellis:status"], "node scripts/release/cli.mjs status"); assert.equal(scripts["bellis:check-core"], "node scripts/release/cli.mjs check-core");
   assert.equal(scripts["bellis:smoke"], "node scripts/release/cli.mjs smoke");
-  assert.deepEqual(Object.keys(scripts).filter((name) => name.startsWith("bellis:")).sort(), ["bellis:check-core", "bellis:drift", "bellis:smoke", "bellis:snapshot", "bellis:status"]);
+  assert.deepEqual(Object.keys(scripts).filter((name) => name.startsWith("bellis:")).sort(), ["bellis:check", "bellis:check-core", "bellis:drift", "bellis:smoke", "bellis:snapshot", "bellis:staging", "bellis:status"]);
+  assert.equal(scripts["bellis:check"], "node scripts/release/cli.mjs check"); assert.equal(scripts["bellis:staging"], "node scripts/release/cli.mjs staging");
   assert.equal(scripts["bellis:drift"], "node scripts/release/cli.mjs drift");
   assert.equal(scripts["bellis:snapshot"], "node scripts/release/cli.mjs snapshot");
   assert.equal(scripts.test, "node scripts/run-tests.mjs");
@@ -89,7 +90,7 @@ test("check-core: the guardrails and the rehearsal of the target guard pass, wit
   const { code, output, cli } = await invoke(t, ["check-core"], { root: repository });
   assert.equal(code, EXIT.PASS, output);
   const smokes = sectionOf(output, "SMOKES"); assert.match(smokes, /^SMOKES\nPASS\n- tooling self-test/);
-  for (const name of ["project refs agree", "exit codes", "report sections", "release state outside the repository", "release state refused inside the repository", "Supabase CLI", "redaction", "commands that write are not exposed yet",
+  for (const name of ["project refs agree", "exit codes", "report sections", "release state outside the repository", "release state refused inside the repository", "Supabase CLI", "redaction", "nothing writes to production",
     "production runs and returns to staging", "a link that lands elsewhere stops everything", "an ambiguous list of projects stops everything", "a link that fails stops everything", "a failing step still returns to staging", "a failing way back is reported, not hidden"])
     assert.ok(smokes.includes(`- ok · ${name}:`), name);
   assert.equal(smokes.includes("FAIL ·"), false);
@@ -108,7 +109,7 @@ test("usage: no command, an unknown one, an unknown flag and every planned comma
     assert.equal(code, EXIT.PRECONDITION_OR_USAGE, argv.join(" ")); assert.deepEqual(cli.calls(), []); assert.equal(cli.linkedFile(), refs.staging);
     if (!argv.includes("--json")) { assert.match(output, /## RESULT\nFAIL\n- exit 2 \(PRECONDITION_OR_USAGE\)/); assert.equal(headings(output).length, reportSections.length + 1); }
   }
-  const { output } = await invoke(t, ["prod-release"]); assert.match(output, /"prod-release" is not available yet\. Available: status, check-core, smoke, snapshot, drift\./);
+  const { output } = await invoke(t, ["prod-release"]); assert.match(output, /"prod-release" is not available yet\. Available: status, check-core, smoke, snapshot, drift, check, staging\./);
 });
 
 test("an unexpected error inside a command is a failed check with a redacted message, never a pass", async (t) => {

@@ -60,7 +60,7 @@ test("report: always the same sections in the same order, N/A when a stage has n
 
 test("report: a section waiting for a person is not a pass, and the first failure is the one reported", () => {
   const waiting = createReport("prod-precheck").set("DEPLOY", "HUMAN", ["Preview is protected: HUMAN VERIFICATION REQUIRED"]);
-  assert.equal(waiting.exitCode(), EXIT.HUMAN_ACTION_REQUIRED); assert.equal(waiting.result(), "FAIL");
+  assert.equal(waiting.exitCode(), EXIT.HUMAN_ACTION_REQUIRED); assert.equal(waiting.result(), "HUMAN ACTION REQUIRED");
   assert.equal(createReport("x").set("MIGRATIONS", "INFO", ["45 local"]).exitCode(), EXIT.PASS);
   const report = createReport("prod-release").set("SMOKES", "FAIL");
   report.fail(new TargetNotConfirmed("The CLI could not be confirmed on production.", { stage: "confirm production", details: ["no project is marked as linked"] }));

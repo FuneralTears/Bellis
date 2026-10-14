@@ -23,6 +23,8 @@
     "bellis:smoke": "node scripts/release/cli.mjs smoke",
     "bellis:snapshot": "node scripts/release/cli.mjs snapshot",
     "bellis:drift": "node scripts/release/cli.mjs drift",
+    "bellis:check": "node scripts/release/cli.mjs check",
+    "bellis:staging": "node scripts/release/cli.mjs staging",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {

@@ -100,6 +100,25 @@ export function createSupabase({ cwd = process.cwd(), command, environment = pro
       const text = (value) => (value === null || value === undefined ? null : typeof value === "string" ? value : JSON.stringify(value));
       return { ok: true, rows: parsed.rows.map((row) => Object.fromEntries(columns.map((column) => [column, text(row?.[column])]))) };
     },
+    /**
+     * `db push` to the linked project: { ok, migrations: [file names], seeds, roles, upToDate } or { ok: false,
+     * reason }. With `dryRun` it only lists what would be applied. Without it, it WRITES: the caller must have
+     * passed target.assertWritable first, and `writeConfirmed` says it did; nothing is run otherwise.
+     */
+    push({ dryRun = true, writeConfirmed = false, timeoutMs: limit = 600_000 } = {}) {
+      if (!dryRun && writeConfirmed !== true) return { ok: false, reason: "a push that writes was not confirmed by the write guard" };
+      const result = run(["db", "push", "--linked", ...(dryRun ? ["--dry-run"] : ["--yes"])], limit);
+      if (result.code !== 0) return { ok: false, reason: reason(result) };
+      const parsed = parseJson(result.stdout);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || !Array.isArray(parsed.migrations)) return { ok: false, reason: "the answer of db push could not be read" };
+      const files = [];
+      for (const item of parsed.migrations) {
+        const name = typeof item === "string" ? item.split(/[\\/]/).pop() : item && typeof item === "object" ? (item.name && item.version ? `${item.version}_${item.name}.sql` : String(item.path ?? item.file ?? "").split(/[\\/]/).pop()) : "";
+        if (!/^\d{14}_[a-z0-9_]+\.sql$/.test(name)) return { ok: false, reason: "db push listed something that is not a migration file" };
+        files.push(name);
+      }
+      return { ok: true, migrations: files, seeds: Array.isArray(parsed.seeds) ? parsed.seeds.length : 0, roles: Array.isArray(parsed.roles) ? parsed.roles.length : 0, upToDate: parsed.upToDate === true };
+    },
     /** The CLI's version. Local: no request is sent. */
     version() {
       const result = run(["--version"]);

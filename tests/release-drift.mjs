@@ -15,7 +15,7 @@ import { statements, validateSmokeSql } from "../scripts/release/smoke/sql.mjs";
 import { buildCapture, captureProblems, captureSchema, categories, normalizeCode, schemaSql } from "../scripts/release/drift/capture.mjs";
 import { acceptCapture, compareSchemas, differenceDetail, differenceLine } from "../scripts/release/drift/compare.mjs";
 import { explainExpected, migrationRisks, rehearsalSql, rehearse, releaseMigrations } from "../scripts/release/drift/migration-diff.mjs";
-import { fakeCli, forbidden, gitRepo, refs, scratch } from "./fixtures/release-harness.mjs";
+import { fakeCli, forbidden, gitRepo, refs, releaseManifest, scratch } from "./fixtures/release-harness.mjs";
 
 const copy = (value) => JSON.parse(JSON.stringify(value));
 const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.c2lnbmF0dXJl";
@@ -251,7 +251,7 @@ test("migration risks: what cannot be rehearsed in a rolled-back transaction is 
 function project(t, migrations = { "20261020090000_add_notes_flag.sql": "alter table public.patients add column flagged boolean not null default false;\n" }, { manifest } = {}) {
   const root = scratch(t, "bellis-drift-"); mkdirSync(join(root, "supabase", "migrations"), { recursive: true }); mkdirSync(join(root, "releases"), { recursive: true });
   for (const [name, text] of Object.entries(migrations)) writeFileSync(join(root, "supabase", "migrations", name), text);
-  writeFileSync(join(root, "releases", "h2-9.json"), JSON.stringify(manifest ?? { id: "h2-9", migrations: Object.entries(migrations).map(([file, text]) => ({ file, sha256: sqlHash(text) })) }));
+  writeFileSync(join(root, "releases", "h2-9.json"), JSON.stringify(manifest ?? releaseManifest({ migrations: Object.entries(migrations).map(([file, text]) => ({ file, sha256: sqlHash(text) })) })));
   return { root, home: scratch(t, "bellis-home-"), git: createGit({ cwd: gitRepo(t).dir }) };
 }
 /** What the catalogs say after the release's migration: one more column. */
@@ -262,10 +262,10 @@ test("release migrations: the manifest's files, in order, with their hashes, fro
   assert.deepEqual(releaseMigrations(made.root, "h2-9").map((item) => [item.file, item.verified]), [["20261020090000_a.sql", true], ["20261021090000_b.sql", true]]);
   writeFileSync(join(made.root, "supabase", "migrations", "20261021090000_b.sql"), "create table b(id int, extra int);\n");
   assert.throws(() => releaseMigrations(made.root, "h2-9"), (error) => error instanceof CheckFailed && /the hash differs/.test(error.message));
-  const reversed = project(t, { "20261020090000_a.sql": "create table a(id int);\n", "20261021090000_b.sql": "create table b(id int);\n" }, { manifest: { migrations: [{ file: "20261021090000_b.sql", sha256: sqlHash("create table b(id int);\n") }, { file: "20261020090000_a.sql", sha256: sqlHash("create table a(id int);\n") }] } });
-  assert.throws(() => releaseMigrations(reversed.root, "h2-9"), (error) => error instanceof CheckFailed && /not list its migrations in the order/.test(error.message));
-  const outside = project(t, {}, { manifest: { migrations: [{ file: "../../outside.sql", sha256: "a".repeat(64) }] } });
-  assert.throws(() => releaseMigrations(outside.root, "h2-9"), PreconditionError);
+  const reversed = project(t, { "20261020090000_a.sql": "create table a(id int);\n", "20261021090000_b.sql": "create table b(id int);\n" }, { manifest: releaseManifest({ migrations: [{ file: "20261021090000_b.sql", sha256: sqlHash("create table b(id int);\n") }, { file: "20261020090000_a.sql", sha256: sqlHash("create table a(id int);\n") }] }) });
+  assert.throws(() => releaseMigrations(reversed.root, "h2-9"), (error) => error instanceof CheckFailed && /not in the order they are applied/.test(error.details.join()));
+  const outside = project(t, {}, { manifest: releaseManifest({ migrations: [{ file: "../../outside.sql", sha256: "a".repeat(64) }] }) });
+  assert.throws(() => releaseMigrations(outside.root, "h2-9"), (error) => error instanceof CheckFailed && /the file name of a migration \(no path\)/.test(error.details.join()));
   const own = project(t, { "20261020090000_a.sql": "begin;\ncreate table a(id int);\ncommit;\n" });
   assert.throws(() => releaseMigrations(own.root, "h2-9"), (error) => error instanceof CheckFailed && /cannot run inside a smoke's transaction/.test(error.message));
   assert.throws(() => releaseMigrations(made.root, "nope"), PreconditionError); assert.throws(() => releaseMigrations(made.root, "../x"), PreconditionError);

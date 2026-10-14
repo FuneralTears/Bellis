@@ -33,6 +33,12 @@ export function createGit({ cwd = process.cwd(), run } = {}) {
     /** Whether the link folder is ignored, so it cannot be added by accident. */
     linkStateIgnored() { return exec(["check-ignore", "-q", `${linkStateDir}/project-ref`]).code === 0; },
     isAncestor(ancestor, descendant) { return exec(["merge-base", "--is-ancestor", ancestor, descendant]).code === 0; },
+    /** The paths that differ between two commits. Names only. */
+    changedFiles(from, to) {
+      const result = exec(["diff", "--name-only", "--no-renames", from, to]);
+      if (result.code !== 0) throw new PreconditionError("git diff could not be read.", { details: [redact(result.stderr, 200)] });
+      return result.stdout.split(/\r?\n/).filter(Boolean);
+    },
     /**
      * Whether `branch` could be moved to `target` without a merge: `target` has to descend from it, in a straight
      * line. It only answers the question; nothing is moved.

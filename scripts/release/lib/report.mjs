@@ -67,10 +67,19 @@ export function redact(text, max = 300) {
 
 /** The sections of every report, in the order they are printed. A stage that has nothing to say leaves "N/A". */
 export const reportSections = Object.freeze(["TARGET", "GIT", "MIGRATIONS", "DRIFT", "SNAPSHOT", "SMOKES", "DEPLOY", "CLI FINAL TARGET"]);
-const statuses = Object.freeze(["PASS", "FAIL", "INFO", "HUMAN", "N/A"]);
+/** The orchestrated commands (check, staging) print these sections instead. */
+export const releaseSections = Object.freeze(["RELEASE", "GIT", "MIGRATIONS", "REHEARSAL", "DRY RUN", "STAGING APPLY", "EXPECTED DRIFT", "SMOKES", "SNAPSHOT", "RESIDUE", "PREVIEW", "CLI FINAL TARGET", "STATE"]);
+export const checkSections = Object.freeze(["RELEASE", "GIT", "MIGRATIONS", "SMOKES", "TOOLING", "TESTS", "TYPESCRIPT", "LINT", "BUILD", "STATE"]);
+export const releaseStates = Object.freeze(["CHECKED", "REHEARSED", "STAGING_APPLIED", "STAGING_VERIFIED", "PREVIEW_PENDING", "STAGING_COMPLETE"]);
+/**
+ * What each status word means for the exit code: "ok" does not stop anything, "fail" is a failed check, "human" is
+ * waiting for a person. A section can only be given one of these words.
+ */
+const statuses = Object.freeze({ PASS: "ok", INFO: "ok", "N/A": "ok", "NOT NEEDED": "ok", IDENTICAL: "ok", NONE: "ok", STAGING: "ok",
+  FAIL: "fail", DIFFERENT: "fail", FOUND: "fail", OTHER: "fail", HUMAN: "human", "HUMAN VERIFICATION REQUIRED": "human", ...Object.fromEntries(releaseStates.map((name) => [name, "ok"])) });
 
-export function createReport(command, { now = () => new Date() } = {}) {
-  const sections = new Map(reportSections.map((name) => [name, { status: "N/A", lines: [] }]));
+export function createReport(command, { now = () => new Date(), sections: names = reportSections } = {}) {
+  const sections = new Map(names.map((name) => [name, { status: "N/A", lines: [] }]));
   const startedAt = now();
   let failure = null;
   const report = {
@@ -78,7 +87,7 @@ export function createReport(command, { now = () => new Date() } = {}) {
     /** Sets a section. `lines` are short facts; each one is redacted before it is kept. */
     set(section, status, lines = []) {
       if (!sections.has(section)) throw new PreconditionError(`Unknown report section: ${section}`);
-      if (!statuses.includes(status)) throw new PreconditionError(`Unknown report status: ${status}`);
+      if (!Object.hasOwn(statuses, status)) throw new PreconditionError(`Unknown report status: ${status}`);
       sections.set(section, { status, lines: [].concat(lines).filter((line) => line !== null && line !== undefined && line !== "").map((line) => redact(line, 400)) });
       return report;
     },
@@ -93,12 +102,13 @@ export function createReport(command, { now = () => new Date() } = {}) {
     /** FAIL if anything failed or was thrown; PASS otherwise. A section waiting for a person is not a pass. */
     exitCode() {
       if (failure) return failure.exitCode;
-      const states = [...sections.values()].map((item) => item.status);
-      if (states.includes("FAIL")) return EXIT.CHECK_FAILED;
-      if (states.includes("HUMAN")) return EXIT.HUMAN_ACTION_REQUIRED;
+      const kinds = [...sections.values()].map((item) => statuses[item.status]);
+      if (kinds.includes("fail")) return EXIT.CHECK_FAILED;
+      if (kinds.includes("human")) return EXIT.HUMAN_ACTION_REQUIRED;
       return EXIT.PASS;
     },
-    result() { return report.exitCode() === EXIT.PASS ? "PASS" : "FAIL"; },
+    /** PASS, HUMAN ACTION REQUIRED (waiting for a person, nothing failed) or FAIL. */
+    result() { const code = report.exitCode(); return code === EXIT.PASS ? "PASS" : code === EXIT.HUMAN_ACTION_REQUIRED ? "HUMAN ACTION REQUIRED" : "FAIL"; },
     toJSON() {
       const code = report.exitCode();
       return { command, startedAt: startedAt.toISOString(), finishedAt: now().toISOString(), result: report.result(), exitCode: code, exit: exitName(code),

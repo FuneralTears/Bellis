@@ -19,13 +19,60 @@ whether to go on.
 | `npm run bellis:drift -- --release <id> --compare staging production` | Compares two captures exactly. Any difference fails. | Nothing. Reads two files. |
 | `npm run bellis:drift -- --rehearse --release <id>` | Measures what the release's migrations change, on staging, before they are applied there. | Staging, one transaction that is rolled back and verified. |
 | `npm run bellis:drift -- --expected --release <id>` | Is the difference between staging and production exactly the release? | Nothing. Reads four captures. |
+| `npm run bellis:check -- --release <id>` | Everything about a release that can be checked on this machine. | Nothing. Never touches Supabase. |
+| `npm run bellis:staging -- --release <id>` | Takes the release to staging: rehearsal, smokes, dry run, apply, verification. | Staging only (applies the release's migrations). Production is read, never written. |
+| `npm run bellis:staging -- --release <id> --confirm-preview <id>` | A person confirms they looked at the Preview. | The release's state, nothing else. |
 | `npm test` | Every unit test of the repository (`scripts/run-tests.mjs`). | Nothing. The SQL smokes are not run from here. |
 
 Add `-- --json` to get the report as JSON. `bellis:smoke` also takes `--only <id...>`, `--all` and `--ndjson` (one JSON
 event per line, the report last).
 
-`check`, `staging`, `prod-precheck` and `prod-release` are **not available yet** and answer with exit 2. Nothing in
-this folder links the CLI to production, applies a migration, deploys or moves a branch today.
+`prod-precheck` and `prod-release` are **not available yet** and answer with exit 2. Nothing in this folder writes to
+production, deploys or moves a branch; `bellis:staging` is the only command that applies migrations, and only to
+staging (`lib/target.mjs` `assertWritable` refuses any other target before the write).
+
+## A release (`releases/<id>.json`, `stages/`)
+
+The manifest is versioned in git and checked strictly (`lib/manifest.mjs`; an unknown field is an error):
+
+```json
+{
+  "releaseId": "h2-9",
+  "sourceCommit": "<40-character SHA of the code being released>",
+  "expectedMainBase": "<40-character SHA where main is now>",
+  "migrations": [{ "file": "20261020090000_name.sql", "sha256": "<hash with Unix line endings>" }],
+  "smokeGroups": ["release"],
+  "previewRequired": true,
+  "createdAt": "2026-10-14T00:00:00Z",
+  "branch": "feat/...",
+  "notes": "optional"
+}
+```
+
+`migrations` can be empty. The manifest is committed on top of the source commit, so the repository is accepted at the
+source commit or at a descendant whose only change is the manifest.
+
+`bellis:check` runs the manifest, git (clean tree, branch, source commit, main where the manifest says, main can
+fast-forward, `supabase/.temp` not tracked), the migrations (present, hashes, order, safe to rehearse), the smokes'
+files, the tooling's self-test, `npm test`, TypeScript, ESLint (the tooling and every file changed since main's base)
+and the build. It never touches Supabase.
+
+`bellis:staging` (`stages/staging.mjs`) runs every block inside `withTarget`, so the CLI ends on staging whatever
+happens: preconditions (the local checks are reused for the same commit and manifest), staging's migration history
+(nothing unknown applied, pending exactly the release), data snapshot `pre`, rehearsal (base and expected), production's
+schema read-only (it has to be exactly base), smokes with the pending migrations, a dry run that has to list exactly the
+release, the apply (target, history and hashes checked again right before, then the write guard), the history after,
+smokes without pending migrations, snapshot `post` (identical, or a person reviews it: data changes are never accepted
+automatically), residue, and production read again: staging exactly expected, production still exactly base. A release
+without migrations has no rehearsal and no apply, and staging and production have to match exactly.
+
+Its state (`<release folder>/release-state.json`) moves `CHECKED → REHEARSED → STAGING_APPLIED → STAGING_VERIFIED →
+PREVIEW_PENDING → STAGING_COMPLETE`; a release without migrations skips the two in the middle, and one with
+`previewRequired: false` goes straight to `STAGING_COMPLETE`. Every step is written down with its time, commit,
+environment and result; nothing can be skipped, and a state written for another version of the manifest is refused.
+Run again before the apply, it starts over; after the apply, it does not apply again and goes on verifying, but only if
+this release was rehearsed; with part of the release applied, it stops. The Preview is never checked automatically: a
+person confirms it with `--confirm-preview <id>`, at the commit that was verified.
 
 ## SQL smokes (`smoke/`)
 

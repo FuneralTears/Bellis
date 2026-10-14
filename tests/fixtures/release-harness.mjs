@@ -43,6 +43,11 @@ export function fakeCli(t, { linked = refs.staging, ...behaviour } = {}) {
     calls() { return read().log.map((entry) => entry.replace(/^link --project-ref (\S+)$/, (_, ref) => `link ${ref === refs.staging ? "staging" : ref === refs.production ? "production" : ref}`)); } };
 }
 
+/** A complete release manifest (releases/<id>.json), with placeholder commits unless given. */
+export function releaseManifest({ releaseId = "h2-9", migrations = [], sourceCommit = "a".repeat(40), expectedMainBase = "b".repeat(40), smokeGroups = ["core"], previewRequired = false, ...extra } = {}) {
+  return { releaseId, sourceCommit, expectedMainBase, migrations, smokeGroups, previewRequired, createdAt: "2026-10-14T00:00:00Z", ...extra };
+}
+
 /** A git repository in a scratch folder with one commit on `main`. */
 export function gitRepo(t, { ignoreLinkState = true } = {}) {
   const dir = scratch(t, "bellis-git-");
