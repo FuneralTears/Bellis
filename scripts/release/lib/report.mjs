@@ -72,13 +72,16 @@ export const releaseSections = Object.freeze(["RELEASE", "GIT", "MIGRATIONS", "R
 export const checkSections = Object.freeze(["RELEASE", "GIT", "MIGRATIONS", "SMOKES", "TOOLING", "TESTS", "TYPESCRIPT", "LINT", "BUILD", "STATE"]);
 export const backupSections = Object.freeze(["RELEASE", "BACKUP PUBLIC", "BACKUP PRIVATE", "STATE"]);
 export const precheckSections = Object.freeze(["RELEASE", "STAGING STATE", "BACKUP PUBLIC", "BACKUP PRIVATE", "PROD TARGET", "PROD MIGRATIONS", "PROD DRIFT", "PROD SNAPSHOT", "PROD DRY RUN", "DATA INTEGRITY", "PRECHECK EXPIRY", "CLI FINAL TARGET", "STATE", "SAFE TO APPLY PROD?"]);
+export const deploySections = Object.freeze(["DEPLOYMENT", "HTTP", "COMMIT", "ENVIRONMENT", "SUPABASE REF", "ALIAS", "PREVIEW PROTECTION", "VERIFICATION MODE", "STATE"]);
+/** Records kept next to a release's state when a deployment is verified. They are not steps of the release. */
+export const deployStates = Object.freeze(["DEPLOY_PREVIEW_VERIFIED", "DEPLOY_PROD_VERIFIED"]);
 export const releaseStates = Object.freeze(["CHECKED", "REHEARSED", "STAGING_APPLIED", "STAGING_VERIFIED", "PREVIEW_PENDING", "STAGING_COMPLETE", "PROD_PRECHECK_COMPLETE"]);
 /**
  * What each status word means for the exit code: "ok" does not stop anything, "fail" is a failed check, "human" is
  * waiting for a person. A section can only be given one of these words.
  */
 const statuses = Object.freeze({ PASS: "ok", INFO: "ok", "N/A": "ok", "NOT NEEDED": "ok", IDENTICAL: "ok", NONE: "ok", STAGING: "ok",
-  MATCH: "ok", YES: "ok", NO: "ok",
+  MATCH: "ok", YES: "ok", NO: "ok", AUTOMATIC: "ok", "HUMAN CONFIRMED": "ok", HUMAN_ACTION_REQUIRED: "human", ...Object.fromEntries(deployStates.map((name) => [name, "ok"])),
   FAIL: "fail", DIFFERENT: "fail", FOUND: "fail", OTHER: "fail", DRIFT: "fail", HUMAN: "human", "HUMAN VERIFICATION REQUIRED": "human", REQUIRED: "human", ...Object.fromEntries(releaseStates.map((name) => [name, "ok"])) });
 
 export function createReport(command, { now = () => new Date(), sections: names = reportSections } = {}) {

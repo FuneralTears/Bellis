@@ -25,11 +25,11 @@ const headings = (output) => output.split("\n").filter((line) => line.startsWith
 const sectionOf = (output, name) => output.split(/^## /m).find((part) => part.startsWith(`${name}\n`)) ?? "";
 
 test("the commands that exist, and the ones that would touch production are not available yet", () => {
-  assert.deepEqual([...available], ["status", "check-core", "smoke", "snapshot", "drift", "check", "staging", "backup-check", "prod-precheck"]); assert.deepEqual([...planned], ["prod-release"]);
+  assert.deepEqual([...available], ["status", "check-core", "smoke", "snapshot", "drift", "check", "staging", "backup-check", "prod-precheck", "deploy-check"]); assert.deepEqual([...planned], ["prod-release"]);
   const scripts = JSON.parse(readFileSync(join(repository, "package.json"), "utf8")).scripts;
   assert.equal(scripts["bellis:status"], "node scripts/release/cli.mjs status"); assert.equal(scripts["bellis:check-core"], "node scripts/release/cli.mjs check-core");
   assert.equal(scripts["bellis:smoke"], "node scripts/release/cli.mjs smoke");
-  assert.deepEqual(Object.keys(scripts).filter((name) => name.startsWith("bellis:")).sort(), ["bellis:backup-check", "bellis:check", "bellis:check-core", "bellis:drift", "bellis:prod-precheck", "bellis:smoke", "bellis:snapshot", "bellis:staging", "bellis:status"]);
+  assert.deepEqual(Object.keys(scripts).filter((name) => name.startsWith("bellis:")).sort(), ["bellis:backup-check", "bellis:check", "bellis:check-core", "bellis:deploy-check", "bellis:drift", "bellis:prod-precheck", "bellis:smoke", "bellis:snapshot", "bellis:staging", "bellis:status"]);
   assert.equal(scripts["bellis:prod-release"], undefined, "not yet");
   assert.equal(scripts["bellis:check"], "node scripts/release/cli.mjs check"); assert.equal(scripts["bellis:staging"], "node scripts/release/cli.mjs staging");
   assert.equal(scripts["bellis:drift"], "node scripts/release/cli.mjs drift");
@@ -110,7 +110,7 @@ test("usage: no command, an unknown one, an unknown flag and every planned comma
     assert.equal(code, EXIT.PRECONDITION_OR_USAGE, argv.join(" ")); assert.deepEqual(cli.calls(), []); assert.equal(cli.linkedFile(), refs.staging);
     if (!argv.includes("--json")) { assert.match(output, /## RESULT\nFAIL\n- exit 2 \(PRECONDITION_OR_USAGE\)/); assert.equal(headings(output).length, reportSections.length + 1); }
   }
-  const { output } = await invoke(t, ["prod-release"]); assert.match(output, /"prod-release" is not available yet\. Available: status, check-core, smoke, snapshot, drift, check, staging, backup-check, prod-precheck\./);
+  const { output } = await invoke(t, ["prod-release"]); assert.match(output, /"prod-release" is not available yet\. Available: status, check-core, smoke, snapshot, drift, check, staging, backup-check, prod-precheck, deploy-check\./);
 });
 
 test("an unexpected error inside a command is a failed check with a redacted message, never a pass", async (t) => {

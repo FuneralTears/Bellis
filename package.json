@@ -27,6 +27,7 @@
     "bellis:staging": "node scripts/release/cli.mjs staging",
     "bellis:backup-check": "node scripts/release/cli.mjs backup-check",
     "bellis:prod-precheck": "node scripts/release/cli.mjs prod-precheck",
+    "bellis:deploy-check": "node scripts/release/cli.mjs deploy-check",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {

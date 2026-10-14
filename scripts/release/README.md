@@ -24,6 +24,7 @@ whether to go on.
 | `npm run bellis:staging -- --release <id> --confirm-preview <id>` | A person confirms they looked at the Preview. | The release's state, nothing else. |
 | `npm run bellis:backup-check -- --release <id>` | Checks the two production backups a person made. | Nothing. Local files, read with `pg_restore --list`. |
 | `npm run bellis:prod-precheck -- --release <id>` | Everything about production before a release. | Production, read-only. Never written. |
+| `npm run bellis:deploy-check -- --release <id> --expected-env preview` | What a deployment serves: commit, environment, Supabase project. | Nothing. Public URLs, no credentials. |
 | `npm test` | Every unit test of the repository (`scripts/run-tests.mjs`). | Nothing. The SQL smokes are not run from here. |
 
 Add `-- --json` to get the report as JSON. `bellis:smoke` also takes `--only <id...>`, `--all` and `--ndjson` (one JSON
@@ -101,6 +102,27 @@ second snapshot that has to be identical. Only when everything passed it writes 
 `prod-precheck.json` (commit, manifest, migration set, backups with their hashes, schema and snapshot hashes, dry
 run), valid for 2 hours. `--reuse` reuses it while it is valid for the same commit, manifest, migrations and backup
 files, with the CLI on staging; otherwise a full precheck runs.
+
+## Deployments (`deploy/verify.mjs`, `stages/deploy-check.mjs`)
+
+Every deployment answers `/api/version` (`app/api/version/route.ts`, built by `versionPayload` in
+`lib/supabase-target.ts`): `service`, `commit`, `environment`, `supabaseRef`, `branch`, `deploymentId`, `consistent` and
+`problem`. Nothing else: no key, no address, no setting. The commit comes from Vercel's build metadata
+(`VERCEL_GIT_COMMIT_SHA`), and outside Vercel from git; anything that is not a full SHA is `UNKNOWN`. The environment
+comes from `VERCEL_ENV` (outside Vercel it is `development`), never from a host name. The project ref comes from the
+address the app uses, and the same guard that protects `/api/supabase-config` says whether the three agree (a
+production deployment on staging, or a preview on production, is `consistent: false`).
+
+`bellis:deploy-check` reads `/api/version` from the exact URL of a deployment (`--url`, or found through GitHub's public
+deployments of the commit, with no token), and for production also from the alias (`https://bellis-six.vercel.app` by
+default, `--alias`), which has to serve the same commit and project. The shape has to be exact, and commit,
+environment and project have to be the expected ones (with `--release`, the commit verified on staging). It also opens
+`/`, `/ingresar` and `/api/supabase-config` without credentials: they have to answer and carry nothing secret. A
+deployment behind Vercel's login is never a pass: it is exit 4, and a person who looked at it in their browser
+records it with `--confirm-human <release-id> --url <exact URL>` (Preview only). The result is kept as
+`DEPLOY_PREVIEW_VERIFIED` or `DEPLOY_PROD_VERIFIED` in `deploy-state.json` (URL, alias, expected and observed commit,
+environment, project, time, automatic or human); these are records next to the release's state, not steps of it.
+It never pushes, deploys, promotes, changes an alias or touches Vercel's settings, and keeps no cookie or token.
 
 ## SQL smokes (`smoke/`)
 
