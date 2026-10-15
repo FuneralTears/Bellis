@@ -121,19 +121,32 @@ Bellis no crea proyectos ni credenciales desde código. Para staging/desarrollo:
 Sin estos secretos, `bellis-google-oauth` responde 503 al conectar ("Google Calendar todavía no está disponible") y
 registra `google_config_missing` con el **nombre** de lo que falta, nunca un valor. Desconectar funciona igual.
 
-## Pruebas reales contra Google (cuenta de prueba)
+## Pruebas reales contra Google (resultados observados)
 
-Se corren a mano, con la cuenta de prueba, después de conectar en staging. Responden las preguntas que la
-documentación no aclara y condicionan H3.1B:
+Corridas en staging del 15 al 16 de octubre de 2026, con la cuenta QA (zona horaria de su calendario: Ciudad de
+México, UTC−6), solo con los permisos de Bellis (`calendar.app.created` y `calendar.freebusy`). Las consultas
+FreeBusy fueron de solo lectura sobre `primary`, pedidas en `America/Argentina/Buenos_Aires`. Los eventos de
+`primary` los creó y borró una persona, a mano. Se registra lo observado, sin inferir causas.
 
-1. Zona horaria del calendario: ¿"Turnos Bellis" se crea con `America/Argentina/Buenos_Aires` (la que manda Bellis)?
-   El valor que devuelve Google queda guardado en `calendar_timezone`.
-2. FreeBusy sobre `primary` con: un evento normal, uno de día completo, uno rechazado, uno marcado como "Disponible"
-   (transparente) y uno de otro calendario de la cuenta. ¿Cuáles aparecen como ocupado?
-3. Reutilizar el id de un evento borrado en "Turnos Bellis": ¿Google lo acepta, o responde 409?
-4. Volver a conectar la misma cuenta: se reutiliza el mismo calendario y no se pide consentimiento otra vez.
-5. Borrar "Turnos Bellis" desde Google y volver a conectar: se crea uno nuevo.
-6. Quitar el permiso desde la cuenta de Google y forzar una renovación: la conexión queda `needs_reconnect`.
+| Caso | Resultado observado |
+| --- | --- |
+| Zona horaria de "Turnos Bellis" | Creado con `America/Argentina/Buenos_Aires`; es lo que guarda `calendar_timezone`. |
+| Evento propio "Ocupado" (3 PM CDMX, 15/10) | BUSY. FreeBusy devolvió 18:00–18:45 −03:00 (45 min); la duración no se explicó. |
+| Evento propio "Disponible" (4 PM CDMX, 15/10) | BUSY en 19:00–19:30; al borrarlo, NOT BUSY. Anomalía de ese evento: no se reprodujo. |
+| Evento propio "Disponible", nuevo (4 PM CDMX, 16/10) | NOT BUSY antes, con el evento y después de borrarlo. Lo transparente no bloquea. |
+| Evento invitado, rechazado ("No") | NOT BUSY. |
+| Evento invitado, aceptado ("Sí", "No disponible", en `primary`) | NOT BUSY en su horario, y ningún bloque en todo el día, con espera y con token renovado. **Caso límite sin explicar.** |
+| Evento de todo el día "Ocupado" (20/10) | BUSY durante 24 h, del día calendario de la cuenta: 00:00–24:00 CDMX = 03:00–03:00 en Argentina. |
+| Fuera de la oficina | NOT TESTED: no está disponible en la cuenta QA. |
+| Tiempo de concentración (focus time) | NOT TESTED: no está disponible en la cuenta QA. |
+| Ubicación de trabajo (working location) | NOT TESTED. |
+| Reusar el id de un evento borrado en "Turnos Bellis" | **No se puede.** `events.delete` 204; `events.get` sigue dando 200 con `status: cancelled`; un `insert` con el mismo id da 409 `duplicate` ("The requested identifier already exists."). El mismo id con sufijo `g1` se crea sin problema. |
+
+Para V1, Bellis toma FreeBusy tal cual responde Google: no amplía permisos para explicar el caso del evento invitado.
+Un día completo bloquea según la zona horaria del calendario de la persona, no la del consultorio.
+
+Siguen pendientes del E2E (no son pruebas de FreeBusy): volver a conectar la misma cuenta y reutilizar el calendario,
+borrar "Turnos Bellis" y volver a conectar, y quitar el permiso desde Google para ver `needs_reconnect`.
 
 ## Lo que H3.1B tiene que cambiar
 
@@ -143,6 +156,12 @@ documentación no aclara y condicionan H3.1B:
 - `paused` hoy solo se deriva en `google_calendar_status`. Si H3.1B necesita pausar la sincronización cuando cambia el
   plan o el rollout, la pausa tiene que vivir en el lado que sincroniza, no solo en el panel.
 - El refresh queda listo para usarse (`getValidGoogleAccessToken`); H3.1B lo llama desde donde sincronice.
+- **Ids de evento con generación (obligatorio).** Un id borrado no se puede reusar (ver arriba). `event_links` guarda
+  una `generation` y el id efectivo es `bellis<uuid del turno sin guiones>g<N>` (base32hex). Al sincronizar:
+  `events.get(id)` primero; `confirmed`: se reconcilia o actualiza ese mismo evento; `cancelled`: se pasa a la
+  generación siguiente y se guarda; 404: se crea. Si un `insert` da 409 `duplicate`, se vuelve a leer antes de
+  decidir; nunca se toma como éxito a ciegas. Un HTTP 200 no significa "evento activo": se mira `status`. No se
+  reactivan lápidas (`cancelled` → `confirmed`) sin una prueba aparte.
 
 ## Archivos
 
