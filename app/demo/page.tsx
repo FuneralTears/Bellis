@@ -16,6 +16,8 @@ import { demoLatePayments, demoPatientId, demoPatients as crmPatients, demoServi
 import BellisLogo from "@/components/brand/BellisLogo";
 import { formatDateTime, formatMoney } from "@/lib/market";
 import PaymentSettings, { LatePayments, PendingPayments, mercadoPagoReturnNotice, type MercadoPagoConnection, type PaymentMethod, type PaymentNotice } from "@/components/payments/PaymentSettings";
+import GoogleCalendarSettings, { googleCalendarReturnNotice, type IntegrationNotice } from "@/components/integrations/GoogleCalendarSettings";
+import type { GoogleCalendarState } from "@/lib/google-calendar";
 import "./demo.css";
 import "../dashboard/live.css";
 import "../pacientes/crm.css";
@@ -40,6 +42,12 @@ const demoConnections: { label: string; connection: MercadoPagoConnection }[] = 
 ];
 const initialPayments: DemoPayments = { method: "external_link", url: "", connection: { status: "disconnected" }, connecting: false, notice: null, pending: [{ id: "demo-1", patient: "Lucía Fernández", detail: "Consulta psicológica · $25.000 ARS" }] };
 
+// Perfil → Integraciones: Google Calendar as the server would answer it. Mock only: nothing reaches Google.
+const demoCalendarStates: { label: string; state: GoogleCalendarState }[] = [
+  { label: "No conectado", state: { status: "disconnected", available: true, unavailableReason: null } },
+  { label: "Conectado", state: { status: "connected", available: true, unavailableReason: null, email: "ana.lopez@example.com", calendarLabel: "Turnos Bellis", connectedAt: "2026-10-02T12:00:00Z", lastRefreshAt: "2026-10-14T11:00:00Z" } },
+  { label: "Necesita volver a conectar", state: { status: "needs_reconnect", available: true, unavailableReason: null, email: "ana.lopez@example.com", calendarLabel: "Turnos Bellis", lastErrorCode: "google_invalid_grant" } },
+];
 const demoPlans: { tier: Tier; label: string }[] = [{ tier: "pro_trial", label: "Prueba de Bellis Pro" }, { tier: "free", label: "Bellis Free" }, { tier: "pro", label: "Bellis Pro" }];
 
 export default function Demo(){
@@ -53,6 +61,10 @@ export default function Demo(){
   const [bookingPrefs,setBookingPrefs]=useState<BookingPreferencesValue>({slotInterval:30,maxPerDay:null}); const [prefsSaved,setPrefsSaved]=useState(false);
   // Cobros y pagos: the same screens as the product, driven by local state. Nothing is connected or charged.
   const [pay,setPay]=useState<DemoPayments>(initialPayments);
+  // Integraciones: the same card as the product. On Bellis Free the mock answers as the server does: not available, part of Pro.
+  const [calendarDemo,setCalendarDemo]=useState<{ state: GoogleCalendarState; connecting: boolean; notice: IntegrationNotice | null }>({ state: demoCalendarStates[0].state, connecting: false, notice: null });
+  const calendarState: GoogleCalendarState = hasCapability(access, "google_calendar_sync") ? calendarDemo.state
+    : { ...calendarDemo.state, available: false, unavailableReason: "plan_required", status: calendarDemo.state.status === "disconnected" ? "disconnected" : "paused" };
   const addService=()=>{if(!newService.name.trim()||Number(newService.price)<=0)return;setServices([...services,{name:newService.name,price:Number(newService.price),duration:Number(newService.duration),mode:newService.mode,active:true}]);setNewService({name:"",price:"",duration:"60",mode:"Online"});setCreated(false)};
   const selectedPatient = selected === null ? undefined : patients.find(patient => patient.name === appointments[selected].name);
   const showPatient = (name: string, origin?: "Seguimientos") => { setProfile(demoPatientId(name)); setFromFollowUps(origin === "Seguimientos"); setSection("Pacientes"); };
@@ -91,6 +103,12 @@ export default function Demo(){
             onSaveMethod={(method, url) => setPay({ ...pay, method, url: method === "external_link" ? url.trim() : pay.url, notice: { tone: "success", text: method === "mercado_pago_ar" ? "Listo: tus pacientes van a pagar con Mercado Pago." : "Link de pago guardado." } })} />
           <LatePayments items={demoLatePayments.map(({ patientId, intent, payment }) => { const person = crmPatients([]).find((item) => item.id === patientId); return { id: payment.id, patient: person?.full_name ?? "Paciente", detail: `${demoServiceNames.get(intent.service_id) ?? "Consulta"} · ${formatMoney(payment.amount_minor / 100)}`, approved: formatDateTime(payment.approved_at ?? payment.created_at), onOpen: () => showPatient(person?.full_name ?? "") }; })} />
           <PendingPayments busy={false} items={pay.pending} onApprove={(id) => setPay({ ...pay, pending: pay.pending.filter((item) => item.id !== id) })} />
+        </div>}
+        {profileTab === "integraciones" && <div role="tabpanel" aria-labelledby="crm-tab-integraciones">
+          <div className="pay-demo-bar" role="group" aria-label="Demo: estado de Google Calendar"><span>Demo: ver Google Calendar como</span>{demoCalendarStates.map((item) => <button key={item.label} type="button" aria-pressed={plan !== "free" && calendarDemo.state.status === item.state.status} onClick={() => { if (plan === "free") setPlan("pro_trial"); setCalendarDemo({ state: item.state, connecting: false, notice: null }); }}>{item.label}</button>)}<button type="button" aria-pressed={plan === "free"} onClick={() => { setPlan("free"); setCalendarDemo({ state: demoCalendarStates[0].state, connecting: false, notice: null }); }}>Bellis Free</button></div>
+          <GoogleCalendarSettings state={calendarState} notice={calendarDemo.notice} connecting={calendarDemo.connecting} busy={false} proAction={proButton} formatDate={() => "2 de octubre de 2026"}
+            onConnect={() => { setCalendarDemo((current) => ({ ...current, connecting: true, notice: null })); window.setTimeout(() => setCalendarDemo({ state: demoCalendarStates[1].state, connecting: false, notice: googleCalendarReturnNotice("connected") }), 1200); }}
+            onDisconnect={() => setCalendarDemo({ state: demoCalendarStates[0].state, connecting: false, notice: { tone: "success", text: "Google Calendar quedó desconectado." } })} />
         </div>}
       </>}
     </main></div><Dialog open={selected!==null} onOpenChange={open=>{if(!open)setSelected(null)}}><DialogContent className="sm:max-w-[540px]"><DialogHeader><DialogTitle>Detalle del turno</DialogTitle></DialogHeader>{selected!==null&&<div className="appointment-detail"><h3>{appointments[selected].name}</h3><p>{appointments[selected].time} · {appointments[selected].service}</p><div><b>Paciente</b><span>{selectedPatient?.email}<br/>{selectedPatient?.phone}</span></div><div><b>Pago</b><span>{appointments[selected].paid?"Pagado ✓":"Pendiente de confirmación"}</span></div><PreconsultationSummary questionnaire={starterQuestionnaire(appointments[selected].service==="Primera consulta"?"service-1":"service-0")} answers={sampleAnswers(appointments[selected].service==="Primera consulta"?"service-1":"service-0")}/><div className="detail-actions"><button onClick={()=>{setAppointments(appointments.map((a,i)=>i===selected?{...a,status:"Completado"}:a));setSelected(null)}}>Marcar completado</button><button onClick={()=>{setAppointments(appointments.map((a,i)=>i===selected?{...a,status:"Cancelado"}:a));setSelected(null)}}>Cancelar turno</button></div></div>}</DialogContent></Dialog><Dialog open={created} onOpenChange={setCreated}><DialogContent><DialogHeader><DialogTitle>Nuevo servicio</DialogTitle></DialogHeader><div className="new-service-form"><label className="field-label">Nombre<input value={newService.name} onChange={e=>setNewService({...newService,name:e.target.value})} placeholder="Consulta inicial"/></label><label className="field-label">Precio (ARS)<input type="number" min="1" value={newService.price} onChange={e=>setNewService({...newService,price:e.target.value})}/></label><label className="field-label">Duración (minutos)<input type="number" min="15" value={newService.duration} onChange={e=>setNewService({...newService,duration:e.target.value})}/></label><label className="field-label">Modalidad<select value={newService.mode} onChange={e=>setNewService({...newService,mode:e.target.value})}><option>Online</option><option>Presencial</option><option>Online y presencial</option></select></label><button className="demo-primary" onClick={addService}>Crear servicio</button></div></DialogContent></Dialog></div>;

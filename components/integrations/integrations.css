@@ -1,0 +1,25 @@
+/* Perfil → Integraciones. Built on the Cobros y pagos styles (payment-settings.css); only what they lack is here. */
+.int-panel {
+  max-width: 640px;
+}
+.int-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.int-title svg {
+  color: var(--primary);
+}
+.int-email {
+  overflow-wrap: anywhere;
+}
+.int-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+@media (max-width: 600px) {
+  .int-actions {
+    flex-direction: column;
+  }
+}

@@ -26,11 +26,15 @@ export type NavKey = (typeof appNav)[number]["key"];
 /** Sections rendered inside /dashboard itself. */
 export const dashboardSections = ["Resumen", "Agenda", "Servicios", "Disponibilidad", "Perfil"] as const satisfies readonly NavKey[];
 
-/** Perfil is split in tabs; payment setup lives here instead of being its own navigation entry. */
+/**
+ * Perfil is split in tabs; payment setup lives here instead of being its own navigation entry. Integraciones is shown
+ * only when the server says there is something there (lib/google-calendar.ts showsIntegrations).
+ */
 export const profileTabs = [
   { id: "perfil", label: "Perfil profesional" },
   { id: "pagina", label: "Página pública" },
   { id: "cobros", label: "Cobros y pagos" },
+  { id: "integraciones", label: "Integraciones" },
 ] as const;
 export type ProfileSectionTab = (typeof profileTabs)[number]["id"];
 /** Old links to the removed "Cobros" section (/dashboard?section=Cobros) open Perfil → Cobros y pagos. */
