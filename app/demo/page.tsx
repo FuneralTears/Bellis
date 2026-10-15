@@ -47,6 +47,8 @@ const demoCalendarStates: { label: string; state: GoogleCalendarState }[] = [
   { label: "No conectado", state: { status: "disconnected", available: true, unavailableReason: null } },
   { label: "Conectado", state: { status: "connected", available: true, unavailableReason: null, email: "ana.lopez@example.com", calendarLabel: "Turnos Bellis", connectedAt: "2026-10-02T12:00:00Z", lastRefreshAt: "2026-10-14T11:00:00Z" } },
   { label: "Necesita volver a conectar", state: { status: "needs_reconnect", available: true, unavailableReason: null, email: "ana.lopez@example.com", calendarLabel: "Turnos Bellis", lastErrorCode: "google_invalid_grant" } },
+  // Pro (or the trial) whose workspace is not in the beta: what a direct link to Integraciones shows.
+  { label: "Pro sin beta", state: { status: "disconnected", available: false, unavailableReason: "not_enabled" } },
 ];
 const demoPlans: { tier: Tier; label: string }[] = [{ tier: "pro_trial", label: "Prueba de Bellis Pro" }, { tier: "free", label: "Bellis Free" }, { tier: "pro", label: "Bellis Pro" }];
 
@@ -105,7 +107,7 @@ export default function Demo(){
           <PendingPayments busy={false} items={pay.pending} onApprove={(id) => setPay({ ...pay, pending: pay.pending.filter((item) => item.id !== id) })} />
         </div>}
         {profileTab === "integraciones" && <div role="tabpanel" aria-labelledby="crm-tab-integraciones">
-          <div className="pay-demo-bar" role="group" aria-label="Demo: estado de Google Calendar"><span>Demo: ver Google Calendar como</span>{demoCalendarStates.map((item) => <button key={item.label} type="button" aria-pressed={plan !== "free" && calendarDemo.state.status === item.state.status} onClick={() => { if (plan === "free") setPlan("pro_trial"); setCalendarDemo({ state: item.state, connecting: false, notice: null }); }}>{item.label}</button>)}<button type="button" aria-pressed={plan === "free"} onClick={() => { setPlan("free"); setCalendarDemo({ state: demoCalendarStates[0].state, connecting: false, notice: null }); }}>Bellis Free</button></div>
+          <div className="pay-demo-bar" role="group" aria-label="Demo: estado de Google Calendar"><span>Demo: ver Google Calendar como</span>{demoCalendarStates.map((item) => <button key={item.label} type="button" aria-pressed={plan !== "free" && calendarDemo.state === item.state} onClick={() => { if (plan === "free") setPlan("pro_trial"); setCalendarDemo({ state: item.state, connecting: false, notice: null }); }}>{item.label}</button>)}<button type="button" aria-pressed={plan === "free"} onClick={() => { setPlan("free"); setCalendarDemo({ state: demoCalendarStates[0].state, connecting: false, notice: null }); }}>Bellis Free</button></div>
           <GoogleCalendarSettings state={calendarState} notice={calendarDemo.notice} connecting={calendarDemo.connecting} busy={false} proAction={proButton} formatDate={() => "2 de octubre de 2026"}
             onConnect={() => { setCalendarDemo((current) => ({ ...current, connecting: true, notice: null })); window.setTimeout(() => setCalendarDemo({ state: demoCalendarStates[1].state, connecting: false, notice: googleCalendarReturnNotice("connected") }), 1200); }}
             onDisconnect={() => setCalendarDemo({ state: demoCalendarStates[0].state, connecting: false, notice: { tone: "success", text: "Google Calendar quedó desconectado." } })} />

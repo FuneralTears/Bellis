@@ -4,6 +4,7 @@ import { useId, useRef, type ReactNode } from "react";
 import { AlertCircle, CalendarDays, CircleCheck, Info, CirclePause } from "lucide-react";
 import { ProBadge } from "@/components/plan/PlanUi";
 import type { GoogleCalendarState } from "@/lib/google-calendar";
+import { googleCalendarNotEnabledCopy, googleCalendarPanel } from "@/lib/google-calendar-view";
 import "@/components/payments/payment-settings.css";
 import "./integrations.css";
 
@@ -53,7 +54,7 @@ export default function GoogleCalendarSettings({ state, notice, connecting, busy
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const ids = useId();
-  const stored = state.status === "connected" || state.status === "needs_reconnect" || state.status === "paused";
+  const panel = googleCalendarPanel(state);
   const locked = !state.available && state.unavailableReason === "plan_required";
   const connectButton = (className: string, label: string) => <button type="button" className={className} disabled={connecting || busy} aria-busy={connecting} onClick={onConnect}>{connecting ? "Conectando…" : label}</button>;
   const disconnectButton = <button type="button" className="pay-secondary pay-danger" disabled={busy || connecting} onClick={() => dialog.current?.showModal()}>Desconectar</button>;
@@ -69,20 +70,21 @@ export default function GoogleCalendarSettings({ state, notice, connecting, busy
     <section className="demo-panel pay-panel int-panel" aria-labelledby={`${ids}-gc`}>
       <div className="pay-panel-head">
         <h3 id={`${ids}-gc`} className="int-title"><CalendarDays size={18} aria-hidden />Google Calendar</h3>
-        {locked && !stored ? <ProBadge /> : state.status !== "loading" && state.status !== "unavailable" && <StatusBadge status={state.status} />}
+        {panel === "plan_required" ? <ProBadge /> : panel !== "loading" && panel !== "unavailable" && panel !== "not_enabled" && state.status !== "loading" && state.status !== "unavailable" && <StatusBadge status={state.status} />}
       </div>
       {state.status === "loading" ? <p className="pay-muted" role="status">Consultando el estado de Google Calendar…</p>
         : state.status === "unavailable" ? <p className="pay-muted">No pudimos consultar el estado de Google Calendar en este momento. Volvé a intentar en unos minutos.</p>
-        : !state.available ? <>
-          {stored ? <>
-            {account}
-            <p>{locked ? "Tu conexión está guardada, pero Google Calendar es parte de Bellis Pro. Mientras tanto Bellis no usa tu cuenta de Google." : "Tu conexión está guardada. Por ahora Bellis no usa tu cuenta de Google."}</p>
-          </> : <>
-            <p><b>Disponible en Bellis Pro.</b></p>
-            <p className="pay-muted">{googleCalendarCopy}</p>
-          </>}
+        // Not in the beta, nothing stored: a neutral sentence. No Pro badge and no way to upgrade: the plan is not the reason.
+        : panel === "not_enabled" ? <p>{googleCalendarNotEnabledCopy}</p>
+        : panel === "plan_required" ? <>
+          <p><b>Disponible en Bellis Pro.</b></p>
+          <p className="pay-muted">{googleCalendarCopy}</p>
+          {proAction && <div className="plan-actions">{proAction}</div>}
+        </> : panel === "stored_unavailable" ? <>
+          {account}
+          <p>{locked ? "Tu conexión está guardada, pero Google Calendar es parte de Bellis Pro. Mientras tanto Bellis no usa tu cuenta de Google." : "Tu conexión está guardada. Por ahora Bellis no usa tu cuenta de Google."}</p>
           {locked && proAction && <div className="plan-actions">{proAction}</div>}
-          {stored && <div className="int-actions">{disconnectButton}</div>}
+          <div className="int-actions">{disconnectButton}</div>
         </> : state.status === "connected" ? <>
           {account}
           <p className="pay-muted">{googleCalendarCopy}</p>

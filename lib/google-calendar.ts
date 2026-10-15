@@ -78,11 +78,4 @@ export async function googleCalendarStatus(workspaceId: string): Promise<GoogleC
   }
 }
 
-/**
- * Whether Perfil shows the Integraciones tab: there is something to connect or to say. A workspace outside the
- * rollout with nothing stored sees nothing at all. Decided from the server's answer only.
- */
-export function showsIntegrations(state: GoogleCalendarState): boolean {
-  if (state.status === "loading" || state.status === "unavailable") return false;
-  return state.available || state.unavailableReason === "plan_required" || state.status !== "disconnected";
-}
+export { showsIntegrations } from "./google-calendar-view";
