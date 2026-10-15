@@ -143,7 +143,7 @@ test("the real manifest: valid, complete, and every smoke is a transaction that 
   const manifest = loadManifest(repository);
   const onDisk = readdirSync(join(repository, "supabase", "tests")).filter((name) => name.endsWith(".sql")).sort();
   assert.deepEqual(manifest.smokes.map((smoke) => smoke.file.split("/").at(-1)).sort(), onDisk);
-  assert.deepEqual(Object.keys(manifest.groups), ["core", "crm", "plans", "admin", "release"]);
+  assert.deepEqual(Object.keys(manifest.groups), ["core", "crm", "plans", "admin", "calendar", "release"]);
   for (const smoke of manifest.smokes) { accepted(readFileSync(join(repository, smoke.file), "utf8"), { checks: smoke.checks ?? [] }); assert.equal(smoke.id, smoke.file.split("/").at(-1).replace(/_smoke\.sql$/, "")); assert.ok(smoke.groups.includes("release")); }
   assert.equal(selectSmokes(manifest, { groups: ["release"] }).length, manifest.smokes.length);
 });

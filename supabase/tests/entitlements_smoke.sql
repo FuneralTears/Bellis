@@ -94,7 +94,7 @@ begin
   -- 3. Durante la prueba: Pro completo, y todo lo de Free.
   if a->>'tier' <> 'pro_trial' or (a->>'has_pro_access')::boolean is not true or a->>'plan_code' <> 'free' then raise exception 'trial_access_wrong: %', a; end if;
   if (a->>'trial_days_remaining')::integer <> 30 or (a->>'trial_last_day')::date <> (select today from pl) + 30 then raise exception 'trial_dates_wrong: %', a; end if;
-  if pg_temp.caps((select w3 from pl)) <> 'advanced_insights,advanced_tags,automations,crm,external_payment_link,followups,insurance_management,manual_appointments,manual_patients,manual_payments,marketing_tools,mercado_pago,patient_notes,patient_origin,public_booking,reports,smart_followups,weekly_metrics'
+  if pg_temp.caps((select w3 from pl)) <> 'advanced_insights,advanced_tags,automations,crm,external_payment_link,followups,google_calendar_sync,insurance_management,manual_appointments,manual_patients,manual_payments,marketing_tools,mercado_pago,patient_notes,patient_origin,public_booking,reports,smart_followups,weekly_metrics'
     then raise exception 'trial_capabilities_wrong: %', pg_temp.caps((select w3 from pl)); end if;
   -- Un miembro no ve el plan de otro workspace.
   perform pg_temp.fails(format('select public.workspace_access(%L)',(select w1 from pl)),'not_authorized');

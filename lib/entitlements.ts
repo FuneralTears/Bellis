@@ -9,6 +9,8 @@ export type Capability =
   | "manual_patients" | "manual_appointments" | "manual_payments" | "patient_notes" | "public_booking" | "external_payment_link"
   // Bellis Pro: follow-ups, the CRM that groups and prioritizes patients, automations and Mercado Pago.
   | "followups" | "crm" | "smart_followups" | "automations" | "mercado_pago"
+  // Bellis Pro, behind a rollout: available only where the server also has the workspace in the Google Calendar beta.
+  | "google_calendar_sync"
   // Reserved for functions that do not exist yet.
   | "patient_origin" | "advanced_tags" | "insurance_management" | "weekly_metrics" | "advanced_insights" | "reports" | "marketing_tools";
 export type Tier = "free" | "pro_trial" | "pro";
@@ -156,7 +158,7 @@ export function describeUpgradeError(message: string): string {
 export function exampleAccess(tier: Tier, today: string, daysRemaining = 18): WorkspaceAccess {
   const day = (offset: number) => new Date(Date.parse(`${today}T12:00:00Z`) + offset * 86400000).toISOString().slice(0, 10);
   const free = ["manual_patients", "manual_appointments", "manual_payments", "patient_notes", "public_booking", "external_payment_link"];
-  const pro = [...free, "followups", "crm", "smart_followups", "automations", "mercado_pago", "patient_origin", "advanced_tags", "insurance_management", "weekly_metrics", "advanced_insights", "reports", "marketing_tools"];
+  const pro = [...free, "followups", "crm", "smart_followups", "automations", "mercado_pago", "google_calendar_sync", "patient_origin", "advanced_tags", "insurance_management", "weekly_metrics", "advanced_insights", "reports", "marketing_tools"];
   const trial = tier === "pro_trial" ? { started: day(daysRemaining - 30), last: day(daysRemaining) } : { started: day(-45), last: day(-15) };
   return { tier, plan_code: tier === "pro" ? "pro" : "free", has_pro_access: tier !== "free", status: "active",
     trial_started_at: `${trial.started}T15:00:00Z`, trial_ends_at: `${day(tier === "pro_trial" ? daysRemaining + 1 : -14)}T03:00:00Z`, trial_last_day: trial.last,
