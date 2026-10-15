@@ -64,6 +64,15 @@ export function createState({ root, repository = process.cwd(), environment = pr
       try { const document = JSON.parse(readFileSync(fileOf(releaseId, name), "utf8")); return document && document.release === releaseId && document.name === name ? { savedAt: document.savedAt, data: document.data } : null; }
       catch { return null; }
     },
+    /**
+     * A file of any release folder (an archived one, say), with the release written inside it: { release, savedAt,
+     * data }. Unlike `load`, the folder's name does not have to be the release; the caller checks `release` itself.
+     * Read only. Null when there is nothing or it cannot be read.
+     */
+    read(folder, name) {
+      try { const document = JSON.parse(readFileSync(fileOf(folder, name), "utf8")); return document && document.name === name && typeof document.release === "string" ? { release: document.release, savedAt: document.savedAt, data: document.data } : null; }
+      catch { return null; }
+    },
     /** How old a saved state is, in minutes. Infinity when there is none. */
     ageMinutes(releaseId, name) {
       const found = this.load(releaseId, name); const at = found ? Date.parse(found.savedAt) : NaN;

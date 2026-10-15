@@ -22,6 +22,7 @@ whether to go on.
 | `npm run bellis:check -- --release <id>` | Everything about a release that can be checked on this machine. | Nothing. Never touches Supabase. |
 | `npm run bellis:staging -- --release <id>` | Takes the release to staging: rehearsal, smokes, dry run, apply, verification. | Staging only (applies the release's migrations). Production is read, never written. |
 | `npm run bellis:staging -- --release <id> --confirm-preview <id>` | A person confirms they looked at the Preview. | The release's state, nothing else. |
+| `npm run bellis:staging -- --release <id> --reuse-rehearsal <folder>` | Resumes an applied release whose state lost its rehearsal, reusing an earlier one only after every check passes. | Staging is only read for it; then the usual run. |
 | `npm run bellis:backup-check -- --release <id>` | Checks the two production backups a person made. | Nothing. Local files, read with `pg_restore --list`. |
 | `npm run bellis:prod-precheck -- --release <id>` | Everything about production before a release. | Production, read-only. Never written. |
 | `npm run bellis:deploy-check -- --release <id> --expected-env preview` | What a deployment serves: commit, environment, Supabase project. | Nothing. Public URLs, no credentials. |
@@ -77,6 +78,19 @@ environment and result; nothing can be skipped, and a state written for another 
 Run again before the apply, it starts over; after the apply, it does not apply again and goes on verifying, but only if
 this release was rehearsed; with part of the release applied, it stops. The Preview is never checked automatically: a
 person confirms it with `--confirm-preview <id>`, at the commit that was verified.
+
+An applied release whose state lost its rehearsal (its folder was moved aside because the source commit changed with
+no migration touched) stops and asks for a person. The one explicit way on is `--reuse-rehearsal <folder>`
+(`stages/rehearsal-reuse.mjs`): the earlier rehearsal kept in that folder of the releases directory is reused only if
+its state is this release's (inside the files, not by folder name) and its rehearsal finished; its base and expected
+captures are there and valid, of staging, at one commit; it rehearsed exactly the manifest's migrations, in order, with
+the same SHA-256; that commit descends from the main base, is an ancestor of HEAD, and no migration changed since; the
+whole release is applied on staging with nothing pending or unknown; and staging, captured now (read only), is an
+EXACT MATCH of the earlier expected schema. Anything else fails closed and nothing is saved. When it passes, the base and
+expected are kept as this release's, `rehearsal-reuse.json` records where they came from (`mode: reused`, source,
+commits, migration hashes, schema hashes, `verifiedAt`, `actor: tooling`), `REHEARSED` is written down as reused, the
+data snapshot before is taken then, and the rest of the run (smokes, snapshot, residue, expected drift, Preview) is the
+usual one. Nothing is written to a database.
 
 ## Backups (`backup/validate.mjs`)
 

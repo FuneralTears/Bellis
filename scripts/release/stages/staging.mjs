@@ -24,7 +24,8 @@
  *
  * Running it again: before the apply it starts over; after the apply it does not apply again and goes on with the
  * checks, but only if this release was rehearsed (its state and its captures are there); with part of the release
- * applied it stops.
+ * applied it stops. --reuse-rehearsal <folder> is the one explicit way to resume an applied release whose state lost
+ * its rehearsal: an earlier rehearsal of the same release is reused only after every check of rehearsal-reuse.mjs.
  */
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -41,6 +42,7 @@ import { acceptSnapshot, compareSnapshots, differenceLine as snapshotLine } from
 import { localChecks, staticChecks } from "./check.mjs";
 import { compareHistory, migrationHistory, residue } from "./database.mjs";
 import { openReleaseState } from "./release-state.mjs";
+import { judgeRehearsalReuse, readEarlierRehearsal, reuseRecordName } from "./rehearsal-reuse.mjs";
 
 const localFiles = (root) => readdirSync(join(root, "supabase", "migrations")).filter((name) => /^\d{14}_[a-z0-9_]+\.sql$/.test(name)).sort();
 const same = (a, b) => a.length === b.length && a.every((item, index) => item === b[index]);
@@ -64,7 +66,7 @@ export function releaseMode(applied, files) {
   return done === 0 ? "apply" : done === files.length ? "all" : "partial";
 }
 
-export async function runStaging({ root, git, supabase, environment = process.env, home, release, report, runLocal, commands, signals, state, now = () => new Date() }) {
+export async function runStaging({ root, git, supabase, environment = process.env, home, release, report, runLocal, commands, signals, state, now = () => new Date(), reuseRehearsal = null }) {
   // A. Preconditions. The static checks run every time; the slow local ones once per commit and manifest.
   const found = staticChecks({ root, git, release, report });
   if (!found.ok) throw new CheckFailed("The release does not pass its checks. Nothing was sent to Supabase.", { stage: "check" });
@@ -84,14 +86,14 @@ export async function runStaging({ root, git, supabase, environment = process.en
       if (!ok) throw new CheckFailed("A local check failed. Nothing was sent to Supabase.", { stage: "check" });
     }
     progress.advance("CHECKED", { commit: head, detail: checkedHere ? "local checks reused: same commit and manifest" : "bellis:check passed" });
-    return await toStaging({ root, supabase, environment, release, report, signals, state, now, manifest, head, files, smokeManifest, smokes, progress });
+    return await toStaging({ root, git, supabase, environment, release, report, signals, state, now, manifest, head, files, smokeManifest, smokes, progress, reuseRehearsal });
   } catch (error) {
     progress.note(error?.stage ?? "staging", { commit: head, environment: "staging", result: "FAIL", detail: redact(error?.message ?? String(error), 200) });
     throw error;
   }
 }
 
-async function toStaging({ root, supabase, environment, release, report, signals, state, manifest, head, files, smokeManifest, smokes, progress }) {
+async function toStaging({ root, git, supabase, environment, release, report, signals, state, now, manifest, head, files, smokeManifest, smokes, progress, reuseRehearsal }) {
   const target = { environment, signals };
   const record = (to, detail, where = "staging") => progress.advance(to, { commit: head, environment: where, detail });
   const save = (name, data) => state.save(release, name, data);
@@ -117,14 +119,18 @@ async function toStaging({ root, supabase, environment, release, report, signals
     const others = waiting.filter((file) => !files.includes(file));
     if (others.length) throw new CheckFailed("Staging has pending migrations that are not part of this release.", { stage: "migration history", details: others.map((file) => `pending, not in the release: ${file}`) });
     if (mode === "apply" && !same(waiting, files)) throw new CheckFailed("What is pending on staging is not exactly the release.", { stage: "migration history", details: [`pending: ${waiting.join(", ") || "none"}`, `release: ${files.join(", ")}`] });
+    if (reuseRehearsal && mode !== "all") throw new PreconditionError("--reuse-rehearsal is only for a release whose migrations are all applied on staging already. Nothing was reused.", { stage: "rehearsal reuse" });
 
     if (mode === "all") {
       // Already applied: nothing is applied again, and no rehearsal is made up after the fact.
       const base = load("schema-base", acceptCapture), expected = load("schema-expected", acceptCapture);
-      if (!progress.reached("REHEARSED") || !base || !expected || !same(expected.meta.rehearsed.map((item) => item.file), files))
-        throw new HumanActionRequired("The release's migrations are already applied on staging, and there is no rehearsal of this release to check them against.", { stage: "rehearsal", details: ["it cannot be rehearsed after the fact: a person has to decide how to verify it"] });
+      if (!progress.reached("REHEARSED") || !base || !expected || !same(expected.meta.rehearsed.map((item) => item.file), files)) {
+        if (!reuseRehearsal) throw new HumanActionRequired("The release's migrations are already applied on staging, and there is no rehearsal of this release to check them against.", { stage: "rehearsal", details: ["it cannot be rehearsed after the fact: a person has to decide how to verify it"] });
+        return reuse(on, waiting);
+      }
+      const reused = state.load(release, reuseRecordName)?.data;
       if (!load("snapshot-staging-pre", acceptSnapshot)) throw new HumanActionRequired("The release is applied on staging but its data snapshot from before is missing.", { stage: "snapshot" });
-      report.set("REHEARSAL", "PASS", [`rehearsed before the apply (${expected.meta.capturedAt}); not run again`]);
+      report.set("REHEARSAL", "PASS", reused ? [`REUSED earlier: the rehearsal of ${reused.source} (${reused.rehearsedAt}), verified ${reused.verifiedAt}; not run again`] : [`rehearsed before the apply (${expected.meta.capturedAt}); not run again`]);
       return { base, expected, mode };
     }
     const pre = captureSnapshot({ supabase, config: loadConfig(root), target: "staging", release, label: "staging-pre", commit: head, environment });
@@ -142,6 +148,30 @@ async function toStaging({ root, supabase, environment, release, report, signals
     record("REHEARSED", `${changes.differences.length} object(s) change`);
     return { base, expected, mode };
   }, target)).result;
+
+  /**
+   * --reuse-rehearsal: every condition of rehearsal-reuse.mjs, checked against staging captured now (read only). Only
+   * then are the earlier base and expected kept as this release's, with a record of where they came from; the data
+   * snapshot "before" is taken now, before the smokes, so the snapshot after still has to be identical.
+   */
+  function reuse(on, waiting) {
+    if (waiting.length) throw new CheckFailed("Staging has pending migrations: an earlier rehearsal cannot be reused.", { stage: "rehearsal reuse", details: waiting.map((file) => `pending: ${file}`) });
+    const earlier = readEarlierRehearsal(state, reuseRehearsal);
+    const stagingNow = captureSchema({ supabase, target: "staging", release, label: "staging-reuse", gitCommit: head, environment });
+    const verdict = judgeRehearsalReuse({ release, manifest, head, git, earlier, stagingNow, now });
+    if (!verdict.ok) { report.set("REHEARSAL", "FAIL", [`the rehearsal of ${redact(String(reuseRehearsal), 80)} cannot be reused`, ...verdict.problems]); throw new CheckFailed("The earlier rehearsal cannot be reused. Nothing was reused or saved.", { stage: "rehearsal reuse", details: verdict.problems }); }
+    on.assertOnTarget();
+    save("schema-base", verdict.base); save("schema-expected", verdict.expected); save(reuseRecordName, verdict.record);
+    const pre = captureSnapshot({ supabase, config: loadConfig(root), target: "staging", release, label: "staging-pre", commit: head, environment });
+    save("snapshot-staging-pre", pre);
+    record("REHEARSED", `REUSED the rehearsal of ${verdict.record.source} (${verdict.record.rehearsalCommit.slice(0, 7)}): same migrations and SHA-256, staging an exact match of its expected schema`);
+    report.set("REHEARSAL", "PASS", [`REUSED: the rehearsal of ${verdict.record.source}, made at ${verdict.record.rehearsalCommit.slice(0, 7)} (${verdict.record.rehearsedAt}); not run again`,
+      ...verdict.record.migrationHashes.map((item) => `${item.file}: sha256 ${item.sha256.slice(0, 12)}, the same as rehearsed`),
+      `staging now: EXACT MATCH of the rehearsal's expected schema (${verdict.record.schemaExpectedHash.slice(0, 12)})`,
+      "the rehearsal's commit descends from the main base and is an ancestor of HEAD; no migration changed since",
+      `data snapshot before taken now: ${pre.tables.length} table(s)`]);
+    return { base: verdict.base, expected: verdict.expected, mode: "all" };
+  }
 
   // D. Production, read-only: it has to be exactly what the release starts from.
   const productionBefore = await readProduction(); save("schema-production", productionBefore);

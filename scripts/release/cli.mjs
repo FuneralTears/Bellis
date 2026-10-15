@@ -39,6 +39,10 @@
  *   node scripts/release/cli.mjs staging --release <id>   takes the release to staging (see stages/staging.mjs). Writes
  *                                              only to staging; production is only read.
  *     --confirm-preview <id>   a person confirms they looked at the Preview. Writes nothing but the release's state.
+ *     --reuse-rehearsal <folder>   only when the release is already applied on staging and its state has no rehearsal:
+ *                              reuse the rehearsal kept in that folder of the releases directory, after checking it is
+ *                              this release's, of the same migrations and hashes, on the same line of commits, and that
+ *                              staging is an exact match of its expected schema. Any failure stops; nothing is reused.
  *
  *   node scripts/release/cli.mjs backup-check --release <id>   the two production backups (public, private) a person
  *                                              made: local files only, read with pg_restore --list.
@@ -102,7 +106,7 @@ const optionsOf = Object.freeze({
   "prod-release": { "--json": true, "--release": "list" },
   "deploy-check": { "--json": true, "--release": "list", "--url": "list", "--alias": "list", "--expected-commit": "list", "--expected-env": "list", "--expected-ref": "list", "--confirm-human": "list" },
   "prod-precheck": { "--json": true, "--release": "list", "--reuse": true, "--public": "list", "--private": "list", "--max-age-hours": "list" },
-  staging: { "--json": true, "--release": "list", "--confirm-preview": "list" },
+  staging: { "--json": true, "--release": "list", "--confirm-preview": "list", "--reuse-rehearsal": "list" },
   snapshot: { "--ndjson": true, "--json": true, "--replace": true, "--release": "list", "--label": "list", "--env": "list", "--output": "list", "--compare": "list" },
 });
 
@@ -338,8 +342,10 @@ async function check({ report, root, supabase, git, environment, home, options, 
 async function staging({ report, root, supabase, git, environment, home, options, runLocal, signals }) {
   const release = one(options, "--release"); if (!release) throw new PreconditionError("staging needs --release <id>.");
   const state = createState({ repository: root, environment, home });
+  const reuseRehearsal = one(options, "--reuse-rehearsal");
+  if (reuseRehearsal && options.lists["--confirm-preview"]) throw new PreconditionError("--reuse-rehearsal cannot be combined with --confirm-preview.");
   if (options.lists["--confirm-preview"]) { confirmPreview({ root, git, release, typed: one(options, "--confirm-preview"), report, state }); report.set("CLI FINAL TARGET", "N/A", ["Supabase was not used"]); return; }
-  try { await runStaging({ root, git, supabase, environment, home, release, report, state, signals, commands: available, runLocal: runLocal ?? defaultRunLocal(root, environment) }); }
+  try { await runStaging({ root, git, supabase, environment, home, release, report, state, signals, reuseRehearsal, commands: available, runLocal: runLocal ?? defaultRunLocal(root, environment) }); }
   finally { const env = environmentOf(supabase.linkedRef()); report.set("CLI FINAL TARGET", env === "staging" ? "STAGING" : "OTHER", [env ? environments[env].label : "not linked"]); }
 }
 
