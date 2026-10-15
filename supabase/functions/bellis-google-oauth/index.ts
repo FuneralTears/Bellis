@@ -1,6 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2.117.2";
 import * as jose from "npm:jose@6.2.12";
-import { completeGoogleOAuth, disconnectGoogle, googleIdTokenVerifier, googleOAuthConfigFromEnv, missingGoogleConfig, sha256Hex, startGoogleOAuth, supabaseGoogleConnectionStore } from "../_shared/google-calendar-oauth.ts";
+import { checkGoogleConnection, completeGoogleOAuth, disconnectGoogle, googleIdTokenVerifier, googleOAuthConfigFromEnv, missingGoogleConfig, sha256Hex, startGoogleOAuth, supabaseGoogleConnectionStore } from "../_shared/google-calendar-oauth.ts";
 import { configuredOrigins, isAllowedOrigin, sessionCorsHeaders } from "../_shared/origin-policy.ts";
 import { logEvent, type LogFields } from "../_shared/payment-errors.ts";
 
@@ -39,7 +39,7 @@ Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors(request) });
   const action = new URL(request.url).searchParams.get("action") ?? "";
   try {
-    if (request.method !== "POST" || !["start", "complete", "disconnect"].includes(action))
+    if (request.method !== "POST" || !["start", "complete", "disconnect", "check"].includes(action))
       return json(request, { error: "Acción no disponible" }, 404);
     const origin = request.headers.get("origin");
     if (origin && !isAllowedOrigin(origin, allowedOrigins)) return json(request, { error: "Origen no permitido" }, 403);
@@ -63,6 +63,19 @@ Deno.serve(async (request) => {
     }
 
     if (!configured) return json(request, { error: "Google Calendar todavía no está disponible." }, 503);
+
+    if (action === "check") {
+      // Opening Integraciones checks the stored connection once. Only a renewal Google refused for good changes it.
+      if (!await limit(`google_oauth_check:${userId}`, 30)) return json(request, { error: "Intentá nuevamente más tarde" }, 429);
+      try {
+        const { outcome, reason } = await checkGoogleConnection(store, config, userId);
+        log(outcome === "unverified" ? "warn" : "info", "connection_checked", { action, provider: "google_calendar", status: outcome, error_code: reason ?? undefined });
+        return json(request, { outcome });
+      } catch (caught) {
+        if (has(caught, "not_authorized")) return json(request, { error: "No encontramos tu perfil profesional." }, 403);
+        throw caught;
+      }
+    }
 
     if (action === "start") {
       if (!await limit(`google_oauth_start:${userId}`, 10)) return json(request, { error: "Intentá nuevamente más tarde" }, 429);

@@ -50,3 +50,26 @@ test("demo: Integraciones offers the states of the product, including Pro withou
   for (const label of ["No conectado", "Conectado", "Necesita volver a conectar", "Pro sin beta", "Bellis Free"]) assert.ok(demo.includes(`"${label}"`) || demo.includes(`>${label}<`), label);
   assert.match(demo, /label: "Pro sin beta", state: \{ status: "disconnected", available: false, unavailableReason: "not_enabled" \}/);
 });
+
+test("check: only a stored connection with tokens is checked; never one that needs reconnecting, is disconnected or unknown", async () => {
+  const { shouldCheckConnection, googleCalendarUnverifiedCopy } = await import("../lib/google-calendar-view.ts");
+  assert.equal(shouldCheckConnection(connected), true);
+  assert.equal(shouldCheckConnection({ status: "paused", available: false, unavailableReason: "plan_required" }), true);
+  for (const state of [needsReconnect, disconnected, free, proWithoutBeta, { status: "loading", available: false, unavailableReason: null }, { status: "unavailable", available: false, unavailableReason: null }])
+    assert.equal(shouldCheckConnection(state), false, state.status);
+  assert.equal(googleCalendarUnverifiedCopy, "No pudimos verificar Google Calendar en este momento.");
+});
+
+test("check 10: the dashboard checks once per load of Integraciones, guarded by a ref, and only reacts to a clear answer", () => {
+  const page = readFileSync(new URL("../app/dashboard/page.tsx", import.meta.url), "utf8");
+  assert.equal((page.match(/checkGoogleCalendarConnection\(\)/g) ?? []).length, 1, "one call site");
+  const effect = page.slice(page.indexOf('if (profileTab !== "integraciones"'), page.indexOf("}, [profileTab, data, calendar]);"));
+  assert.match(effect, /if \(profileTab !== "integraciones" \|\| !data \|\| calendarChecked\.current \|\| !shouldCheckConnection\(calendar\)\) return;\s*calendarChecked\.current = true;/);
+  assert.doesNotMatch(effect, /setInterval|setTimeout/, "no polling");
+  // Only needs_reconnect reloads the status; unverified only adds the calm line and keeps the state.
+  assert.match(effect, /outcome === "needs_reconnect"\) setCalendar\(await googleCalendarStatus\(workspace\)\)/);
+  assert.match(effect, /outcome === "unverified"\) setCalendarNotice\(\(current\) => current \?\? \{ tone: "info", text: googleCalendarUnverifiedCopy \}\)/);
+  assert.match(page, /const calendarChecked = useRef\(false\);/);
+  const client = readFileSync(new URL("../lib/google-calendar.ts", import.meta.url), "utf8");
+  assert.match(client, /if \(!response\?\.ok\) return "unverified";/, "any refusal or failure is unverified, never needs_reconnect");
+});

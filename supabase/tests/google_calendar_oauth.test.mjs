@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import * as jose from 'jose';
 import {
-  GoogleOAuthError, authorizationUrl, calendarName, completeGoogleOAuth, disconnectGoogle, getValidGoogleAccessToken, googleIdTokenVerifier, googleOAuthConfigFromEnv,
+  GoogleOAuthError, authorizationUrl, calendarName, checkGoogleConnection, completeGoogleOAuth, disconnectGoogle, getValidGoogleAccessToken, googleIdTokenVerifier, googleOAuthConfigFromEnv,
   googleScopes, missingGoogleConfig, pkceChallenge, redirectProblem, sha256Hex, startGoogleOAuth,
 } from '../functions/_shared/google-calendar-oauth.ts';
 
@@ -481,4 +481,110 @@ test('the module asks Google for nothing beyond what H3.1A needs: no calendar li
   assert.doesNotMatch(source, /calendarList|\/events|userinfo|people\.googleapis|auth\/calendar\.events|auth\/calendar\.readonly/);
   const edge = await readFile(new URL('../functions/bellis-google-oauth/index.ts', import.meta.url), 'utf8');
   assert.doesNotMatch(edge, /console\.(log|info|warn|error)\(/, 'logs go through the checked log line');
+});
+
+// --- action=check: does the stored connection still work? -------------------------------------------------------
+const calendarPath = '/calendar/calendars/old-cal%40group.calendar.google.com';
+const renewal = () => ({ status: 200, body: { access_token: 'access-token-renewed-09', expires_in: 3599, scope: `${appCreated} ${freeBusy}` } });
+const check = (store, config, clock = {}, userId = 'user-a') => checkGoogleConnection(store, config, userId, { now, ...clock });
+const noCalendarCreated = (google) => assert.equal(google.calls.filter((call) => call.method === 'POST' && call.path === '/calendar/calendars').length, 0, 'check never creates a calendar');
+const edgeSource = async () => (await import('node:fs/promises')).readFile(new URL('../functions/bellis-google-oauth/index.ts', import.meta.url), 'utf8');
+
+test('check 1: the stored token reads the stored calendar (200): connected, nothing renewed or written', async (t) => {
+  const google = await fakeGoogle(t, { get: () => ({ status: 200, body: { id: 'old-cal@group.calendar.google.com' } }) });
+  const store = memoryStore({ account: connected() });
+  assert.deepEqual(await check(store, google.config), { outcome: 'connected', reason: null });
+  assert.deepEqual(google.calls.map((call) => `${call.method} ${call.path}`), [`GET ${calendarPath}`]);
+  assert.equal(google.calls[0].auth, 'Bearer access-token-old-0001');
+  assert.equal(google.of('/token').length, 0); assert.equal(store.claims, 0); assert.deepEqual(store.failures, []);
+});
+
+test('check 2: 401, the renewal works and the second read is 200: connected, with the new token stored', async (t) => {
+  let reads = 0;
+  const google = await fakeGoogle(t, { token: renewal, get: () => (++reads === 1 ? { status: 401, body: { error: { code: 401 } } } : { status: 200, body: { id: 'old-cal@group.calendar.google.com' } }) });
+  const store = memoryStore({ account: connected() });
+  assert.deepEqual(await check(store, google.config), { outcome: 'connected', reason: null });
+  assert.equal(google.of('/token').length, 1, 'renewed although the stored token had 50 minutes left');
+  assert.deepEqual(google.calls.filter((call) => call.path === calendarPath).map((call) => call.auth), ['Bearer access-token-old-0001', 'Bearer access-token-renewed-09'], 'read again once, with the new token');
+  assert.equal(store.account.accessToken, 'access-token-renewed-09'); assert.equal(store.account.status, 'connected');
+  noCalendarCreated(google);
+});
+
+test('check 3: 401 and Google refuses the renewal (invalid_grant): needs_reconnect, tokens erased, through the helper', async (t) => {
+  const google = await fakeGoogle(t, { token: () => ({ status: 400, body: { error: 'invalid_grant', error_description: 'Token has been expired or revoked.' } }), get: () => ({ status: 401, body: {} }) });
+  const store = memoryStore({ account: connected() });
+  assert.deepEqual(await check(store, google.config), { outcome: 'needs_reconnect', reason: 'google_invalid_grant' });
+  assert.deepEqual(store.failures, [{ permanent: true, code: 'google_invalid_grant' }]);
+  assert.equal(store.account.status, 'needs_reconnect'); assert.equal(store.account.accessToken, null); assert.equal(store.account.refreshToken, null);
+  assert.equal(google.calls.filter((call) => call.path === calendarPath).length, 1, 'not read again after a refused renewal');
+  // Checked again later: already needs_reconnect, Google is not asked.
+  const before = google.calls.length;
+  assert.deepEqual(await check(store, google.config), { outcome: 'needs_reconnect', reason: null }); assert.equal(google.calls.length, before);
+  noCalendarCreated(google);
+});
+
+test('check 4-7: 403, 404, 429 and 5xx never mark the connection, never renew, never create a calendar', async (t) => {
+  for (const status of [403, 404, 429, 500, 503]) {
+    const google = await fakeGoogle(t, { get: () => ({ status, body: { error: { code: status } } }) });
+    const store = memoryStore({ account: connected() });
+    assert.deepEqual(await check(store, google.config), { outcome: 'unverified', reason: `google_calendar_http_${status}` }, String(status));
+    assert.equal(store.account.status, 'connected'); assert.equal(store.account.accessToken, 'access-token-old-0001');
+    assert.equal(google.of('/token').length, 0); assert.deepEqual(store.failures, []); noCalendarCreated(google);
+  }
+});
+
+test('check 8: a read that times out, or Google unreachable, is unverified and changes nothing', async (t) => {
+  const google = await fakeGoogle(t, { get: () => new Promise((resolve) => setTimeout(() => resolve({ status: 200, body: {} }), 400)) });
+  const store = memoryStore({ account: connected() });
+  assert.deepEqual(await check(store, google.config, { timeoutMs: 50 }), { outcome: 'unverified', reason: 'google_timeout' });
+  assert.equal(store.account.status, 'connected');
+  const down = { ...google.config, endpoints: { ...google.config.endpoints, calendar: 'http://127.0.0.1:9/calendar' } };
+  assert.deepEqual(await check(store, down), { outcome: 'unverified', reason: 'google_unreachable' });
+  assert.equal(store.account.status, 'connected'); assert.deepEqual(store.failures, []);
+});
+
+test('check 9: 401 with the application refused (invalid_client) or a renewal failing for now: unverified, not marked', async (t) => {
+  for (const [answer, reason] of [[{ status: 401, body: { error: 'invalid_client' } }, 'google_oauth_invalid_client'], [{ status: 503, body: {} }, 'google_oauth_http_503']]) {
+    const google = await fakeGoogle(t, { token: () => answer, get: () => ({ status: 401, body: {} }) });
+    const store = memoryStore({ account: connected() });
+    assert.deepEqual(await check(store, google.config), { outcome: 'unverified', reason });
+    assert.equal(store.account.status, 'connected'); assert.deepEqual(store.failures, [{ permanent: false, code: reason }]);
+  }
+  // Without the application's settings nothing is renewed and nothing is marked.
+  const google = await fakeGoogle(t, { get: () => ({ status: 401, body: {} }) });
+  const store = memoryStore({ account: connected() });
+  assert.deepEqual(await check(store, { ...google.config, clientSecret: '' }), { outcome: 'unverified', reason: 'google_oauth_not_configured' });
+  assert.equal(store.account.status, 'connected'); assert.equal(google.of('/token').length, 0);
+  // Renewed, but Google still says 401: unverified, not marked.
+  const still = await fakeGoogle(t, { token: renewal, get: () => ({ status: 401, body: {} }) });
+  const other = memoryStore({ account: connected() });
+  assert.deepEqual(await check(other, still.config), { outcome: 'unverified', reason: 'google_still_unauthorized' }); assert.equal(other.account.status, 'connected');
+});
+
+test('check 11: only the caller own professional profile, from the session; nothing without a profile', async (t) => {
+  const google = await fakeGoogle(t, { get: () => ({ status: 200, body: {} }) });
+  const store = memoryStore({ account: connected() }); const asked = [];
+  const credentials = store.credentials.bind(store); store.credentials = async (professionalId) => { asked.push(professionalId); return credentials(professionalId); };
+  await check(store, google.config, {}, 'user-b');
+  assert.deepEqual(asked, ['pro-b']);
+  await assert.rejects(check(store, google.config, {}, 'stranger'), /not_authorized/);
+  await assert.rejects(checkGoogleConnection(store, google.config, undefined, { now }), /not_authorized/);
+  // Nothing stored: Google is not called.
+  const empty = memoryStore(); const before = google.calls.length;
+  assert.deepEqual(await check(empty, google.config), { outcome: 'not_connected', reason: null }); assert.equal(google.calls.length, before);
+  // The edge function takes the person from the session before any action, and reads nothing of the body for check.
+  const edge = await edgeSource(); const handler = edge.slice(edge.indexOf('Deno.serve('));
+  assert.ok(handler.indexOf('db.auth.getUser(session)') < handler.indexOf('action === "check"'), 'the session is verified first');
+  const branch = handler.slice(handler.indexOf('action === "check"'), handler.indexOf('action === "start"'));
+  assert.match(branch, /checkGoogleConnection\(store, config, userId\)/); assert.doesNotMatch(branch, /request\.json|body/);
+  assert.match(branch, /limit\(`google_oauth_check:\$\{userId\}`, 30\)/);
+});
+
+test('check 12: what comes back and what is logged are short codes only: no token, calendar or Google answer', async (t) => {
+  const google = await fakeGoogle(t, { token: () => ({ status: 400, body: { error: 'invalid_grant', error_description: 'refresh-token-old-0001 secret-1' } }), get: () => ({ status: 401, body: { error: { message: 'old-cal@group.calendar.google.com access-token-old-0001' } } }) });
+  const result = await check(memoryStore({ account: connected() }), google.config);
+  assert.deepEqual(Object.keys(result).sort(), ['outcome', 'reason']);
+  assert.doesNotMatch(JSON.stringify(result), /token|secret|old-cal|group\.calendar|Bearer/);
+  const edge = await edgeSource(); const branch = edge.slice(edge.indexOf('action === "check"'), edge.indexOf('action === "start"'));
+  assert.match(branch, /return json\(request, \{ outcome \}\);/, 'only the outcome reaches the browser');
 });

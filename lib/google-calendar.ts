@@ -19,7 +19,7 @@ export type GoogleCalendarState = {
 export const googleCalendarLoading: GoogleCalendarState = { status: "loading", available: false, unavailableReason: null };
 
 /** Calls the connection function as the signed-in person. Null when there is no session. */
-async function connectionRequest(action: "start" | "complete" | "disconnect", body?: unknown): Promise<Response | null> {
+async function connectionRequest(action: "start" | "complete" | "disconnect" | "check", body?: unknown): Promise<Response | null> {
   const client = await getSupabase();
   const { data } = await client.auth.getSession();
   if (!data.session) return null;
@@ -54,6 +54,22 @@ export async function completeGoogleCalendarConnection(code: string, state: stri
   if (!response.ok) return "error";
   const { outcome } = await response.json() as { outcome?: string };
   return outcome === "connected" || outcome === "invalid_state" || outcome === "plan_required" || outcome === "not_enabled" || outcome === "scopes_missing" ? outcome : "error";
+}
+
+export type GoogleCalendarCheck = "connected" | "needs_reconnect" | "unverified" | "not_connected";
+/**
+ * Asks the server whether the stored connection still works (one cheap read at Google). Only "needs_reconnect" means
+ * something changed; anything that is not a clear answer (no session, a network error, a refusal) is "unverified".
+ */
+export async function checkGoogleCalendarConnection(): Promise<GoogleCalendarCheck> {
+  try {
+    const response = await connectionRequest("check");
+    if (!response?.ok) return "unverified";
+    const { outcome } = await response.json() as { outcome?: string };
+    return outcome === "connected" || outcome === "needs_reconnect" || outcome === "not_connected" ? outcome : "unverified";
+  } catch {
+    return "unverified";
+  }
 }
 
 export async function disconnectGoogleCalendar(): Promise<void> {

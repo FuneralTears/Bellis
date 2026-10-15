@@ -56,7 +56,11 @@ type Fetch = typeof fetch;
 /** `report` receives the short internal reason of a failure, for the log. Never a token or a code. */
 export type Clock = { fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise<void>; report?: (reason: string) => void;
   /** Checks an ID token's signature and claims (googleIdTokenVerifier). Completing a connection without one is refused. */
-  verifyIdToken?: IdTokenVerifier };
+  verifyIdToken?: IdTokenVerifier;
+  /** Renew even though the stored token looks valid: Google has just rejected it (401). It is then treated as expired. */
+  force?: boolean;
+  /** How long one call to Google may take before it counts as a failure (ms). */
+  timeoutMs?: number };
 
 /** `permanent`: Google rejected the grant itself (invalid_grant). Retrying will not help; the professional has to reconnect. */
 export class GoogleOAuthError extends Error {
@@ -308,7 +312,8 @@ export async function getValidGoogleAccessToken(
     const stored = await store.credentials(professionalId);
     if (!stored || stored.status !== "connected") throw new GoogleOAuthError("google_calendar_not_connected", true);
     const result = (accessToken: string) => ({ accessToken, calendarId: stored.calendarId });
-    const remaining = stored.expiresAt ? Date.parse(stored.expiresAt) - now() : 0;
+    // A token Google has just rejected is as good as expired, whatever its date says.
+    const remaining = clock.force ? 0 : stored.expiresAt ? Date.parse(stored.expiresAt) - now() : 0;
     if (remaining > refreshMarginMs) return result(stored.accessToken);
     if (!stored.refreshToken) throw new GoogleOAuthError("google_calendar_not_connected", true);
     // A function deployed without the application's settings must not look like a rejected account.
@@ -334,6 +339,49 @@ export async function getValidGoogleAccessToken(
     await sleep(500);
   }
   throw new GoogleOAuthError("google_refresh_in_progress", false);
+}
+
+export type CheckOutcome = "connected" | "needs_reconnect" | "unverified" | "not_connected";
+
+/**
+ * Checks that a stored connection still works, for the person's own professional profile (from their session, never
+ * from the request). One cheap read: calendars.get of the stored "Turnos Bellis". 200: connected. 401: the token is
+ * renewed with getValidGoogleAccessToken (forced) and the read is tried once more; when Google answers invalid_grant
+ * the helper itself leaves the connection in needs_reconnect and erases its tokens. Anything else (403, 404, 429,
+ * 5xx, a timeout, a network error, Bellis's own client refused) is "unverified" and changes nothing: only a
+ * renewal Google refused for good marks a connection. A missing calendar is not recreated here.
+ * `reason` is a short code for the log; nothing of Google's answer, the token or the calendar is returned.
+ */
+export async function checkGoogleConnection(store: GoogleConnectionStore, config: GoogleOAuthConfig, userId: string, clock: Clock = {}): Promise<{ outcome: CheckOutcome; reason: string | null }> {
+  const professionalId = await store.professionalOf(userId);
+  if (!professionalId) throw new Error("not_authorized");
+  const stored = await store.credentials(professionalId);
+  if (!stored || stored.status !== "connected" || !stored.calendarId) {
+    // A connection Google refused keeps no tokens, so its state is read where no token is needed.
+    const status = stored?.status ?? (await store.previous(professionalId))?.status;
+    return { outcome: status === "needs_reconnect" ? "needs_reconnect" : "not_connected", reason: null };
+  }
+  const fetchImpl = clock.fetch ?? fetch; const timeoutMs = clock.timeoutMs ?? 8000;
+  const read = async (accessToken: string): Promise<number | string> => {
+    try {
+      const response = await fetchImpl(`${config.endpoints.calendar}/calendars/${encodeURIComponent(stored.calendarId as string)}`, {
+        headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" }, signal: AbortSignal.timeout(timeoutMs) });
+      await response.body?.cancel().catch(() => undefined);
+      return response.status;
+    } catch (caught) { return (caught as { name?: string } | null)?.name === "TimeoutError" ? "google_timeout" : "google_unreachable"; }
+  };
+  const verdict = (answer: number | string) => answer === 200 ? { outcome: "connected" as const, reason: null } : { outcome: "unverified" as const, reason: typeof answer === "string" ? answer : `google_calendar_http_${answer}` };
+  const first = await read(stored.accessToken);
+  if (first !== 401) return verdict(first);
+  let renewed: string;
+  try { renewed = (await getValidGoogleAccessToken(store, config, professionalId, { ...clock, force: true })).accessToken; }
+  catch (caught) {
+    // The helper has already recorded a permanent refusal (needs_reconnect, tokens erased); anything else changed nothing.
+    if (caught instanceof GoogleOAuthError && caught.permanent) return { outcome: "needs_reconnect", reason: caught.message };
+    return { outcome: "unverified", reason: caught instanceof GoogleOAuthError ? caught.message : "google_refresh_failed" };
+  }
+  const second = await read(renewed);
+  return second === 401 ? { outcome: "unverified", reason: "google_still_unauthorized" } : verdict(second);
 }
 
 /**

@@ -23,6 +23,12 @@ export function googleCalendarPanel(state: GoogleCalendarState): GoogleCalendarP
   return state.status === "paused" ? "stored_unavailable" : state.status;
 }
 
+/** A stored connection with tokens (connected, or paused because the plan or the rollout changed) is worth checking. */
+export function shouldCheckConnection(state: GoogleCalendarState): boolean {
+  return state.status === "connected" || state.status === "paused";
+}
+export const googleCalendarUnverifiedCopy = "No pudimos verificar Google Calendar en este momento.";
+
 /**
  * Whether Perfil shows the Integraciones tab: there is something to connect or to say. A workspace outside the
  * rollout with nothing stored sees nothing at all (a direct link still opens it, with the neutral sentence).

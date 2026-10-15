@@ -17,14 +17,15 @@ import { RecordOfflinePayment } from "@/components/payments/RecordOfflinePayment
 import type { NewPatientValues } from "@/components/crm/NewPatientForm";
 import { createManualPatient, lookupPatientDuplicates } from "../pacientes/manual-patient";
 import BellisLogo from "@/components/brand/BellisLogo";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, CalendarDays, Clock3, CreditCard, LogOut, Plus, Users } from "lucide-react";
 import { getSupabase } from "@/lib/supabase/browser";
 import PaymentSettings, { LatePayments, PendingPayments, mercadoPagoReturnNotice, type MercadoPagoConnection, type PaymentMethod, type PaymentNotice } from "@/components/payments/PaymentSettings";
 import { disconnectMercadoPago, mercadoPagoAccess, startMercadoPagoConnection } from "@/lib/mercado-pago";
 import GoogleCalendarSettings, { googleCalendarReturnNotice, type IntegrationNotice } from "@/components/integrations/GoogleCalendarSettings";
-import { disconnectGoogleCalendar, googleCalendarLoading, googleCalendarStatus, showsIntegrations, startGoogleCalendarConnection, type GoogleCalendarState } from "@/lib/google-calendar";
+import { checkGoogleCalendarConnection, disconnectGoogleCalendar, googleCalendarLoading, googleCalendarStatus, showsIntegrations, startGoogleCalendarConnection, type GoogleCalendarState } from "@/lib/google-calendar";
+import { googleCalendarUnverifiedCopy, shouldCheckConnection } from "@/lib/google-calendar-view";
 import { latePayments } from "@/lib/late-payments";
 import { landingRouteForUser } from "@/lib/auth/navigation";
 import { formatDateTime, formatMoney } from "@/lib/market";
@@ -103,6 +104,8 @@ export default function LiveDashboard() {
   const [calendar, setCalendar] = useState<GoogleCalendarState>(googleCalendarLoading);
   const [calendarNotice, setCalendarNotice] = useState<IntegrationNotice | null>(null);
   const [calendarConnecting, setCalendarConnecting] = useState(false);
+  // Opening Integraciones checks a stored connection once per load of the panel: no polling, no repeat on render.
+  const calendarChecked = useRef(false);
   const [profileForm, setProfileForm] = useState({ display_name: "", specialty: "", biography: "", province: "", city: "", address: "", offers_online: true, offers_in_person: false });
   const [weekly, setWeekly] = useState<{ weekday: number; enabled: boolean; starts_at: string; ends_at: string; buffer_minutes: number }[]>([]);
   const [bookingPrefs, setBookingPrefs] = useState<BookingPreferencesValue>({ slotInterval: 30, maxPerDay: null });
@@ -111,6 +114,17 @@ export default function LiveDashboard() {
   const [blockDay, setBlockDay] = useState("");
   const [blockReason, setBlockReason] = useState("");
   useEffect(() => { loadData().then((result) => { setData(result); const query = new URLSearchParams(window.location.search); if (query.has("mp")) { /* Feedback only: the real state comes from the status below. */ setPayNotice(mercadoPagoReturnNotice(query.get("mp"))); const kept = new URLSearchParams(query); kept.delete("mp"); window.history.replaceState(null, "", `${window.location.pathname}?${kept}`); } mercadoPagoAccess(result.workspace.id).then(setPayAccess); if (query.has("gc")) { /* Feedback only, like ?mp=. */ setCalendarNotice(googleCalendarReturnNotice(query.get("gc"))); const kept = new URLSearchParams(window.location.search); kept.delete("gc"); window.history.replaceState(null, "", `${window.location.pathname}?${kept}`); } googleCalendarStatus(result.workspace.id).then(setCalendar); const requested = query.get("section"); const requestedTab = profileTabFromQuery(requested, query.get("tab")); if (requestedTab) { setSection("Perfil"); setProfileTab(requestedTab); } else if (requested && sections.includes(requested as Section)) setSection(requested as Section); setProfileForm({ display_name: result.professional.display_name, specialty: result.professional.specialty, biography: result.professional.biography ?? "", province: result.professional.province ?? "", city: result.professional.city ?? "", address: result.professional.address ?? "", offers_online: result.professional.offers_online, offers_in_person: result.professional.offers_in_person }); setBookingPrefs({ slotInterval: result.professional.slot_interval_minutes, maxPerDay: result.professional.max_appointments_per_day }); setWeekly(Array.from({ length: 7 }, (_, weekday) => { const rule = result.rules.find((item) => item.weekday === weekday); return { weekday, enabled: !!rule, starts_at: rule?.starts_at.slice(0, 5) ?? "09:00", ends_at: rule?.ends_at.slice(0, 5) ?? "18:00", buffer_minutes: rule?.buffer_minutes ?? 15 }; })); }).catch((caught) => { if (caught.message === "onboarding_required") window.location.replace("/onboarding"); else if (String(caught.message).includes("sesión")) window.location.replace("/ingresar"); else setError(caught.message); }); }, []);
+  useEffect(() => {
+    if (profileTab !== "integraciones" || !data || calendarChecked.current || !shouldCheckConnection(calendar)) return;
+    calendarChecked.current = true;
+    const workspace = data.workspace.id;
+    checkGoogleCalendarConnection().then(async (outcome) => {
+      // Google refused the renewal: the server already marked it; the card shows what the server now says.
+      if (outcome === "needs_reconnect") setCalendar(await googleCalendarStatus(workspace));
+      // Not a clear answer: the card keeps its state, and a calm line says it could not be checked.
+      else if (outcome === "unverified") setCalendarNotice((current) => current ?? { tone: "info", text: googleCalendarUnverifiedCopy });
+    });
+  }, [profileTab, data, calendar]);
   const refresh = async () => { const next = await loadData(); setData(next); return next; };
   const action = async (work: () => Promise<void>, success: string) => { setBusy(true); setError(""); setNotice(""); try { await work(); await refresh(); setNotice(success); } catch (caught) { setError(friendlyError(caught, "No pudimos guardar los cambios. Intentá de nuevo.")); } finally { setBusy(false); } };
   const market = data ? { country: "AR", currency: data.workspace.currency_code.trim(), timezone: data.workspace.timezone, locale: data.workspace.locale, paymentProvider: data.workspace.payment_provider } : undefined;
