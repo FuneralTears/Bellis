@@ -1,6 +1,6 @@
 {
   "releaseId": "h3-1a",
-  "sourceCommit": "8b727a4f38328aee3ff046bc515e77f7bf89c77b",
+  "sourceCommit": "3a6ef9f74fdbe9a81a61a51570eb91087beb4ecb",
   "expectedMainBase": "dcd8119dfa441ca0f78a26a86264d087404e22c5",
   "migrations": [
     {
@@ -12,7 +12,7 @@
     "release"
   ],
   "previewRequired": true,
-  "createdAt": "2026-10-15T03:56:41Z",
+  "createdAt": "2026-10-15T16:23:13Z",
   "branch": "feat/h3-1a-google-calendar-oauth",
   "notes": "Google Calendar connection (H3.1A): rollout flags, google_calendar_sync, OAuth with PKCE, Turnos Bellis calendar, refresh and disconnect, Perfil > Integraciones and its demo. Staging only; not for production yet."
 }
