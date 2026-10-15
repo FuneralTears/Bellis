@@ -17,13 +17,15 @@ export const calendarDescription = "Turnos agendados en Bellis. Bellis crea y ac
 export const defaultCalendarTimeZone = "America/Argentina/Buenos_Aires";
 export const callbackPath = "/google-calendar/callback";
 
-export type GoogleEndpoints = { authorize: string; token: string; revoke: string; calendar: string };
+export type GoogleEndpoints = { authorize: string; token: string; revoke: string; calendar: string; jwks: string };
 /** Google's own addresses. Tests point a config at a local fake instead; the environment can never change them. */
 export const googleEndpoints: GoogleEndpoints = Object.freeze({
   authorize: "https://accounts.google.com/o/oauth2/v2/auth",
   token: "https://oauth2.googleapis.com/token",
   revoke: "https://oauth2.googleapis.com/revoke",
   calendar: "https://www.googleapis.com/calendar/v3",
+  // Google's current signing keys for ID tokens (the jwks_uri of https://accounts.google.com/.well-known/openid-configuration).
+  jwks: "https://www.googleapis.com/oauth2/v3/certs",
 });
 export type GoogleOAuthConfig = { clientId: string; clientSecret: string; redirectUri: string; endpoints: GoogleEndpoints };
 
@@ -52,7 +54,9 @@ export type CompletionOutcome = "connected" | "invalid_state" | "error" | "plan_
 
 type Fetch = typeof fetch;
 /** `report` receives the short internal reason of a failure, for the log. Never a token or a code. */
-export type Clock = { fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise<void>; report?: (reason: string) => void };
+export type Clock = { fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise<void>; report?: (reason: string) => void;
+  /** Checks an ID token's signature and claims (googleIdTokenVerifier). Completing a connection without one is refused. */
+  verifyIdToken?: IdTokenVerifier };
 
 /** `permanent`: Google rejected the grant itself (invalid_grant). Retrying will not help; the professional has to reconnect. */
 export class GoogleOAuthError extends Error {
@@ -158,23 +162,42 @@ async function tokenRequest(config: GoogleOAuthConfig, grant: Record<string, str
 }
 export const hasCalendarScopes = (scopes: readonly string[]) => requiredCalendarScopes.every((scope) => scopes.includes(scope));
 
+/** The two issuers Google uses in ID tokens. */
+export const googleIssuers = Object.freeze(["https://accounts.google.com", "accounts.google.com"]);
+export type IdTokenVerifier = (idToken: string | null, now: number) => Promise<GoogleIdentity>;
+/** The part of the `jose` library this needs. The Edge Function passes npm:jose, the tests the same package from node_modules. */
+export type JoseLike = {
+  createRemoteJWKSet: (url: URL, options?: { cooldownDuration?: number; cacheMaxAge?: number; timeoutDuration?: number }) => unknown;
+  jwtVerify: (jwt: string, key: never, options: { issuer: string[]; audience: string; algorithms: string[]; requiredClaims: string[]; currentDate: Date; clockTolerance: number }) => Promise<{ payload: Record<string, unknown> }>;
+};
+
 /**
- * Who authorized, from the ID token. It was received directly from Google's token endpoint over TLS, so its
- * signature does not have to be checked (OpenID Connect Core 3.1.3.7); its audience, issuer and expiry are.
- * `sub` identifies the Google account; the email is only shown to the professional.
+ * Who authorized, from Google's ID token, checked the way Google documents it: the signature against Google's
+ * published keys (JWKS, fetched and cached by jose, which fetches again when a token names a key it does not know,
+ * so key rotation needs nothing here), RS256 only, `aud` = this application's client id, `iss` = Google, `exp` in
+ * the future (with 30 s of clock tolerance) and `sub` present. `sub` is the stable identity of the Google account;
+ * the email is only an attribute shown to the professional, never used to tell accounts apart.
+ * Any failure is the same short code: nothing of the token, the keys or the network error is reported.
+ * Create it once per process so the key cache lives across requests.
  */
-export function identityFromIdToken(idToken: string | null, clientId: string, now: number): GoogleIdentity {
-  const payload = (() => { try {
-    const part = (idToken ?? "").split(".")[1] ?? "";
-    return JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(part.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(part.length / 4) * 4, "=")), (char) => char.charCodeAt(0)))) as Record<string, unknown>;
-  } catch { return null; } })();
-  const audience = payload?.aud;
-  if (!payload || !(audience === clientId || (Array.isArray(audience) && audience.includes(clientId)))
-    || (payload.iss !== "https://accounts.google.com" && payload.iss !== "accounts.google.com")
-    || typeof payload.exp !== "number" || payload.exp * 1000 <= now - 60_000
-    || typeof payload.sub !== "string" || !/^[A-Za-z0-9_-]{1,255}$/.test(payload.sub)) throw new GoogleOAuthError("invalid_google_id_token", false);
-  const email = typeof payload.email === "string" && payload.email.length <= 320 && payload.email.includes("@") && payload.email_verified !== false ? payload.email : null;
-  return { subject: payload.sub, email };
+export function googleIdTokenVerifier(jose: JoseLike, { clientId, jwksUrl = googleEndpoints.jwks, cooldownMs, cacheMaxAgeMs }: { clientId: string; jwksUrl?: string; cooldownMs?: number; cacheMaxAgeMs?: number }): IdTokenVerifier {
+  const keys = jose.createRemoteJWKSet(new URL(jwksUrl), { timeoutDuration: 5000, ...(cooldownMs !== undefined ? { cooldownDuration: cooldownMs } : {}), ...(cacheMaxAgeMs !== undefined ? { cacheMaxAge: cacheMaxAgeMs } : {}) });
+  return async (idToken, now) => {
+    if (!clientId || typeof idToken !== "string" || idToken.length > 8192) throw new GoogleOAuthError("invalid_google_id_token", false);
+    let payload: Record<string, unknown>;
+    try {
+      ({ payload } = await jose.jwtVerify(idToken, keys as never, { issuer: [...googleIssuers], audience: clientId, algorithms: ["RS256"], requiredClaims: ["sub", "exp", "iat"], currentDate: new Date(now), clockTolerance: 30 }));
+    } catch (caught) {
+      // A problem of the token itself (signature, claims, format, algorithm, unknown key) is an invalid token. Anything
+      // else (network, timeout, a bad answer from Google's key endpoint) means the keys could not be read: said apart.
+      const code = String((caught as { code?: unknown } | null)?.code ?? "");
+      const tokenProblem = /^ERR_(JWT_|JWS_|JOSE_ALG_NOT_ALLOWED|JOSE_NOT_SUPPORTED|JWKS_NO_MATCHING_KEY|JWKS_MULTIPLE_MATCHING_KEYS)/.test(code);
+      throw new GoogleOAuthError(tokenProblem ? "invalid_google_id_token" : "google_jwks_unavailable", false);
+    }
+    if (typeof payload.sub !== "string" || !/^[A-Za-z0-9_-]{1,255}$/.test(payload.sub)) throw new GoogleOAuthError("invalid_google_id_token", false);
+    const email = typeof payload.email === "string" && payload.email.length <= 320 && payload.email.includes("@") && payload.email_verified !== false ? payload.email : null;
+    return { subject: payload.sub, email };
+  };
 }
 
 /** Asks Google to revoke a token (and with it the whole authorization of Bellis for that account). True when it is gone. */
@@ -243,7 +266,9 @@ export async function completeGoogleOAuth(
   let tokens: GoogleTokenSet | null = null; let keepGrant = false;
   try {
     tokens = await tokenRequest(config, { grant_type: "authorization_code", code: params.code, redirect_uri: config.redirectUri, code_verifier: attempt.codeVerifier }, now, fetchImpl);
-    const identity = identityFromIdToken(tokens.idToken, config.clientId, now);
+    // Fail closed: without a verifier the token is never trusted.
+    if (!clock.verifyIdToken) throw new GoogleOAuthError("google_id_token_verifier_missing", false);
+    const identity = await clock.verifyIdToken(tokens.idToken, now);
     const previous = await store.previous(attempt.professionalId);
     const sameAccount = previous?.googleSubject === identity.subject;
     // Revoking any token of an account revokes all of Bellis's access to it: never while that account stays connected.

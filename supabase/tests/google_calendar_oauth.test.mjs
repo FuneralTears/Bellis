@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
+import * as jose from 'jose';
 import {
-  GoogleOAuthError, authorizationUrl, calendarName, completeGoogleOAuth, disconnectGoogle, getValidGoogleAccessToken, googleOAuthConfigFromEnv,
+  GoogleOAuthError, authorizationUrl, calendarName, completeGoogleOAuth, disconnectGoogle, getValidGoogleAccessToken, googleIdTokenVerifier, googleOAuthConfigFromEnv,
   googleScopes, missingGoogleConfig, pkceChallenge, redirectProblem, sha256Hex, startGoogleOAuth,
 } from '../functions/_shared/google-calendar-oauth.ts';
 
@@ -13,19 +14,38 @@ const now = () => Date.parse('2026-10-14T12:00:00Z');
 const at = (ms) => new Date(now() + ms).toISOString();
 const minute = 60 * 1000;
 
+/** RSA signing keys made for this run, published the way Google publishes its own: a JWK with a kid. Never written anywhere. */
+async function signingKey(kid) {
+  const { publicKey, privateKey } = await jose.generateKeyPair('RS256', { extractable: true });
+  return { kid, privateKey, jwk: { ...await jose.exportJWK(publicKey), kid, alg: 'RS256', use: 'sig' } };
+}
+const keyA = await signingKey('key-a'), keyB = await signingKey('key-b'), stranger = await signingKey('key-a');
+const clientId = 'client-1.apps.googleusercontent.com';
+/** An ID token as Google signs it. A claim given as undefined is left out. */
+async function idToken(claims = {}, key = keyA) {
+  const payload = Object.fromEntries(Object.entries({ iss: 'https://accounts.google.com', aud: clientId, sub: '1098765', email: 'qa@example.test', email_verified: true,
+    iat: Math.floor(now() / 1000) - 10, exp: Math.floor(now() / 1000) + 3600, ...claims }).filter(([, value]) => value !== undefined));
+  return new jose.SignJWT(payload).setProtectedHeader({ alg: 'RS256', kid: key.kid, typ: 'JWT' }).sign(key.privateKey);
+}
+/** The verifier each fake Google's config is checked with: its own key set, no cooldown so a rotation is seen at once. */
+const verifiers = new WeakMap();
+
 /**
- * Google, answered locally: the token endpoint (code exchange and renewal), revocation and the two calendar calls Bellis
- * makes. `script` decides each answer; every request is recorded, with its form or JSON body.
+ * Google, answered locally: the token endpoint (code exchange and renewal), revocation, the two calendar calls Bellis
+ * makes and the signing keys (JWKS). `script` decides each answer; every request is recorded, with its form or JSON body.
+ * `published.keys` is the key set being served; replacing it simulates a rotation.
  */
 async function fakeGoogle(t, script = {}) {
   const calls = [];
+  const published = { keys: [keyA] };
   const server = createServer(async (request, response) => {
     let raw = ''; for await (const chunk of request) raw += chunk;
     const type = request.headers['content-type'] ?? '';
     const body = type.includes('json') ? JSON.parse(raw || '{}') : Object.fromEntries(new URLSearchParams(raw));
     const call = { method: request.method, path: request.url, body, auth: request.headers.authorization ?? null };
     calls.push(call);
-    const route = request.url === '/token' ? script.token ?? (() => tokenAnswer())
+    const route = request.url === '/jwks' ? script.jwks ?? (() => ({ status: 200, body: { keys: published.keys.map((key) => key.jwk) } }))
+      : request.url === '/token' ? script.token ?? (() => tokenAnswer())
       : request.url === '/revoke' ? script.revoke ?? (() => ({ status: 200, body: {} }))
       : request.method === 'POST' && request.url === '/calendar/calendars' ? script.create ?? (() => ({ status: 200, body: { id: 'new-cal@group.calendar.google.com', summary: call.body.summary, timeZone: call.body.timeZone } }))
       : request.method === 'GET' && request.url.startsWith('/calendar/calendars/') ? script.get ?? (() => ({ status: 404, body: { error: { code: 404 } } }))
@@ -37,14 +57,14 @@ async function fakeGoogle(t, script = {}) {
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise((resolve) => { server.closeAllConnections?.(); server.close(resolve); }));
   const base = `http://127.0.0.1:${server.address().port}`;
-  const config = { clientId: 'client-1.apps.googleusercontent.com', clientSecret: 'secret-1', redirectUri: 'http://localhost:5173/google-calendar/callback',
-    endpoints: { authorize: 'https://accounts.google.com/o/oauth2/v2/auth', token: `${base}/token`, revoke: `${base}/revoke`, calendar: `${base}/calendar` } };
-  return { calls, config, of: (path) => calls.filter((call) => call.path === path || call.path.startsWith(`${path}/`)) };
+  const config = { clientId, clientSecret: 'secret-1', redirectUri: 'http://localhost:5173/google-calendar/callback',
+    endpoints: { authorize: 'https://accounts.google.com/o/oauth2/v2/auth', token: `${base}/token`, revoke: `${base}/revoke`, calendar: `${base}/calendar`, jwks: `${base}/jwks` } };
+  const verify = googleIdTokenVerifier(jose, { clientId, jwksUrl: config.endpoints.jwks, cooldownMs: 0 });
+  verifiers.set(config, verify);
+  return { calls, config, verify, published, of: (path) => calls.filter((call) => call.path === path || call.path.startsWith(`${path}/`)) };
 }
-const b64 = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
-const idToken = (claims = {}) => `${b64({ alg: 'RS256' })}.${b64({ iss: 'https://accounts.google.com', aud: 'client-1.apps.googleusercontent.com', sub: '1098765', email: 'qa@example.test', email_verified: true, exp: now() / 1000 + 3600, ...claims })}.signature`;
-function tokenAnswer({ refresh = 'refresh-token-new-0001', scope = allScopes, claims, idTokenValue } = {}) {
-  return { status: 200, body: { access_token: 'access-token-new-0001', expires_in: 3599, token_type: 'Bearer', scope, ...(refresh ? { refresh_token: refresh } : {}), id_token: idTokenValue ?? idToken(claims) } };
+async function tokenAnswer({ refresh = 'refresh-token-new-0001', scope = allScopes, claims, idTokenValue } = {}) {
+  return { status: 200, body: { access_token: 'access-token-new-0001', expires_in: 3599, token_type: 'Bearer', scope, ...(refresh ? { refresh_token: refresh } : {}), id_token: idTokenValue ?? await idToken(claims) } };
 }
 
 /** The database's rules, in memory: a state belongs to the person who started it, works once, and expires. */
@@ -86,7 +106,7 @@ function memoryStore({ account = null, available = 'yes' } = {}) {
 const connected = (extra = {}) => ({ googleSubject: '1098765', status: 'connected', accessToken: 'access-token-old-0001', refreshToken: 'refresh-token-old-0001', expiresAt: at(50 * minute), calendarId: 'old-cal@group.calendar.google.com', ...extra });
 const stateOf = (url) => new URL(url).searchParams.get('state');
 async function startAndReturn(store, config, userId = 'user-a') { return stateOf(await startGoogleOAuth(store, config, userId)); }
-const finish = (store, config, state, clock = {}, userId = 'user-a') => completeGoogleOAuth(store, config, { userId, code: '4/0Acode', state }, { now, ...clock });
+const finish = (store, config, state, clock = {}, userId = 'user-a') => completeGoogleOAuth(store, config, { userId, code: '4/0Acode', state }, { now, verifyIdToken: verifiers.get(config), ...clock });
 
 test('start: exactly the four scopes, offline, PKCE S256, a random state stored only as its hash, and consent when Bellis holds no refresh token', async (t) => {
   const { config } = await fakeGoogle(t);
@@ -133,7 +153,7 @@ test('complete, first connection: the code is exchanged with the verifier, "Turn
   const [exchange] = google.of('/token');
   assert.deepEqual(exchange.body, { client_id: google.config.clientId, client_secret: 'secret-1', grant_type: 'authorization_code', code: '4/0Acode', redirect_uri: google.config.redirectUri, code_verifier: verifier });
   // Bellis never lists calendars: nothing was stored, so it creates one.
-  assert.equal(google.calls.filter((call) => call.method === 'GET').length, 0);
+  assert.equal(google.calls.filter((call) => call.method === 'GET' && call.path.startsWith('/calendar')).length, 0);
   const [create] = google.of('/calendar/calendars');
   assert.equal(create.method, 'POST'); assert.equal(create.auth, 'Bearer access-token-new-0001');
   assert.equal(create.body.summary, calendarName); assert.equal(calendarName, 'Turnos Bellis'); assert.equal(create.body.timeZone, 'America/Argentina/Buenos_Aires');
@@ -179,7 +199,7 @@ test('complete, another Google account: a new calendar is created (the old id be
   const google = await fakeGoogle(t, { token: () => tokenAnswer({ claims: { sub: '2222222', email: 'otra@example.test' } }) });
   const store = memoryStore({ account: connected() });
   assert.equal(await finish(store, google.config, await startAndReturn(store, google.config)), 'connected');
-  assert.equal(google.calls.filter((call) => call.method === 'GET').length, 0);
+  assert.equal(google.calls.filter((call) => call.method === 'GET' && call.path.startsWith('/calendar')).length, 0);
   assert.equal(store.saved[0].subject, '2222222'); assert.equal(store.saved[0].calendarId, 'new-cal@group.calendar.google.com');
   assert.deepEqual(google.of('/revoke').map((call) => call.body.token), ['refresh-token-old-0001']);
 });
@@ -211,16 +231,106 @@ test('complete: no refresh token from Google and none stored for that account is
   assert.deepEqual(google.of('/revoke').map((call) => call.body.token), ['access-token-new-0001']);
 });
 
-test('complete: an ID token for another client, another issuer, or expired is refused', async (t) => {
-  for (const claims of [{ aud: 'someone-else' }, { iss: 'https://evil.example' }, { exp: now() / 1000 - 3600 }, { sub: '' }]) {
+test('complete: an ID token that does not verify is refused, nothing is saved and the grant is handed back', async (t) => {
+  for (const claims of [{ aud: 'someone-else' }, { iss: 'https://evil.example' }, { exp: Math.floor(now() / 1000) - 3600 }, { sub: undefined }]) {
     const google = await fakeGoogle(t, { token: () => tokenAnswer({ claims }) });
     const store = memoryStore(); let reason = '';
     assert.equal(await finish(store, google.config, await startAndReturn(store, google.config), { report: (value) => { reason = value; } }), 'error');
     assert.equal(reason, 'invalid_google_id_token'); assert.equal(store.saved.length, 0);
+    assert.equal(google.calls.filter((call) => call.path.startsWith('/calendar')).length, 0, 'no calendar for an unverified account');
+    assert.equal(google.of('/revoke').length, 1);
   }
   const google = await fakeGoogle(t, { token: () => tokenAnswer({ idTokenValue: 'not-a-jwt' }) });
   const store = memoryStore();
   assert.equal(await finish(store, google.config, await startAndReturn(store, google.config)), 'error');
+});
+
+test('complete: without a verifier the ID token is never trusted (fails closed)', async (t) => {
+  const google = await fakeGoogle(t);
+  const store = memoryStore(); let reason = '';
+  assert.equal(await finish(store, google.config, await startAndReturn(store, google.config), { verifyIdToken: undefined, report: (value) => { reason = value; } }), 'error');
+  assert.equal(reason, 'google_id_token_verifier_missing'); assert.equal(store.saved.length, 0);
+});
+
+const refused = (promise, code) => assert.rejects(promise, (error) => error instanceof GoogleOAuthError && error.message === code && !error.permanent);
+const seconds = (offset = 0) => Math.floor(now() / 1000) + offset;
+
+test('ID token 1: signed with a key Google publishes, it is accepted; sub is the identity and the email only an attribute', async (t) => {
+  const google = await fakeGoogle(t);
+  assert.deepEqual(await google.verify(await idToken(), now()), { subject: '1098765', email: 'qa@example.test' });
+  assert.deepEqual(await google.verify(await idToken({ iss: 'accounts.google.com' }), now()), { subject: '1098765', email: 'qa@example.test' });
+  assert.deepEqual(await google.verify(await idToken({ email_verified: false }), now()), { subject: '1098765', email: null }, 'an unverified email is not kept');
+  assert.deepEqual(await google.verify(await idToken({ email: undefined }), now()), { subject: '1098765', email: null });
+});
+
+test('ID token 2: an invalid signature is refused, and so are unsigned and symmetric tokens', async (t) => {
+  const google = await fakeGoogle(t);
+  // Same kid as the published key, signed by a different key.
+  await refused(google.verify(await idToken({}, stranger), now()), 'invalid_google_id_token');
+  // A real token whose payload was swapped after signing.
+  const [header, , signature] = (await idToken()).split('.');
+  const forged = Buffer.from(JSON.stringify({ iss: 'https://accounts.google.com', aud: clientId, sub: 'someone-else', iat: seconds(), exp: seconds(3600) })).toString('base64url');
+  await refused(google.verify(`${header}.${forged}.${signature}`, now()), 'invalid_google_id_token');
+  const none = `${Buffer.from(JSON.stringify({ alg: 'none', kid: 'key-a' })).toString('base64url')}.${forged}.`;
+  await refused(google.verify(none, now()), 'invalid_google_id_token');
+  const hs256 = await new jose.SignJWT({ iss: 'https://accounts.google.com', aud: clientId, sub: '1098765', iat: seconds(), exp: seconds(3600) })
+    .setProtectedHeader({ alg: 'HS256', kid: 'key-a' }).sign(new TextEncoder().encode('a-shared-secret-that-is-long-enough-0001'));
+  await refused(google.verify(hs256, now()), 'invalid_google_id_token');
+  await refused(google.verify(null, now()), 'invalid_google_id_token');
+  await refused(google.verify('not-a-jwt', now()), 'invalid_google_id_token');
+});
+
+test('ID token 3: a key id Google does not publish is refused, after asking Google for its keys again', async (t) => {
+  const google = await fakeGoogle(t);
+  await google.verify(await idToken(), now());
+  const fetched = google.of('/jwks').length;
+  await refused(google.verify(await idToken({}, keyB), now()), 'invalid_google_id_token');
+  assert.ok(google.of('/jwks').length > fetched, 'the keys were fetched again before refusing');
+});
+
+test('ID token 4-7: wrong audience, wrong issuer, expired, or without sub are refused', async (t) => {
+  const google = await fakeGoogle(t);
+  await refused(google.verify(await idToken({ aud: 'someone-else.apps.googleusercontent.com' }), now()), 'invalid_google_id_token');
+  await refused(google.verify(await idToken({ aud: undefined }), now()), 'invalid_google_id_token');
+  await refused(google.verify(await idToken({ iss: 'https://accounts.google.com.evil.example' }), now()), 'invalid_google_id_token');
+  await refused(google.verify(await idToken({ iss: undefined }), now()), 'invalid_google_id_token');
+  await refused(google.verify(await idToken({ exp: seconds(-120) }), now()), 'invalid_google_id_token');
+  await refused(google.verify(await idToken({ exp: undefined }), now()), 'invalid_google_id_token');
+  await refused(google.verify(await idToken({ sub: undefined }), now()), 'invalid_google_id_token');
+  await refused(google.verify(await idToken({ sub: '' }), now()), 'invalid_google_id_token');
+  await refused(google.verify(await idToken({ sub: 'not a subject' }), now()), 'invalid_google_id_token');
+  // Without the expected client id nothing is accepted.
+  await refused(googleIdTokenVerifier(jose, { clientId: '', jwksUrl: google.config.endpoints.jwks })(await idToken(), now()), 'invalid_google_id_token');
+});
+
+test('ID token 8: Google rotates its keys; the new key is fetched and the retired one stops being accepted', async (t) => {
+  const google = await fakeGoogle(t);
+  const oldToken = await idToken();
+  assert.equal((await google.verify(oldToken, now())).subject, '1098765');
+  // Google publishes both while it rolls over, then only the new one.
+  google.published.keys = [keyA, keyB];
+  assert.equal((await google.verify(await idToken({}, keyB), now())).subject, '1098765');
+  google.published.keys = [keyB];
+  const fresh = googleIdTokenVerifier(jose, { clientId, jwksUrl: google.config.endpoints.jwks, cooldownMs: 0, cacheMaxAgeMs: 0 });
+  assert.equal((await fresh(await idToken({}, keyB), now())).subject, '1098765');
+  await refused(fresh(oldToken, now()), 'invalid_google_id_token');
+});
+
+test('ID token 9: Google keys that cannot be read give their own short code, and nothing secret is reported', async (t) => {
+  for (const jwks of [() => ({ status: 500, body: { error: 'secret-1 4/0Acode' } }), () => ({ status: 200, body: { nope: true } })]) {
+    const google = await fakeGoogle(t, { jwks });
+    const token = await idToken();
+    await assert.rejects(google.verify(token, now()), (error) => error instanceof GoogleOAuthError && error.message === 'google_jwks_unavailable'
+      && !String(error.stack).includes(token.slice(-24)) && !String(error.stack).includes('secret-1'));
+    // Through the whole flow: the report is the code, never the token, the authorization code, the client secret or the address.
+    const store = memoryStore(); const reports = [];
+    assert.equal(await finish(store, google.config, await startAndReturn(store, google.config), { report: (value) => reports.push(value) }), 'error');
+    assert.deepEqual(reports, ['google_jwks_unavailable']);
+    assert.doesNotMatch(reports.join(' '), /secret-1|4\/0Acode|access-token|refresh-token|127\.0\.0\.1|eyJ/);
+    assert.equal(store.saved.length, 0);
+  }
+  // Nobody listening at the address of the keys.
+  await refused(googleIdTokenVerifier(jose, { clientId, jwksUrl: 'http://127.0.0.1:9/jwks', cooldownMs: 0 })(await idToken(), now()), 'google_jwks_unavailable');
 });
 
 test('complete: the state must be live, single use and presented by the person who started it; Google is not called otherwise', async (t) => {

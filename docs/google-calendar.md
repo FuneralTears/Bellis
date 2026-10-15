@@ -16,6 +16,12 @@ ningún turno ni se lee disponibilidad: eso empieza en H3.1B.
   del calendario, ni el identificador de la cuenta de Google: solo `google_calendar_status`, que devuelve si está
   disponible y por qué no, el estado, el email, "Turnos Bellis", la fecha de conexión, la última renovación y el
   último código de error.
+- Identidad: la cuenta de Google se identifica por el `sub` del ID token, que se verifica como indica Google: firma
+  RS256 contra las claves publicadas en `https://www.googleapis.com/oauth2/v3/certs` (librería `jose`, que las cachea y
+  las vuelve a pedir cuando aparece un `kid` desconocido, así la rotación no necesita nada), `aud` = `GOOGLE_CLIENT_ID`,
+  `iss` de Google, `exp` vigente y `sub` presente. Sin verificación no se conecta nada; si no se pueden leer las claves
+  de Google, se informa `google_jwks_unavailable`. El email es solo un dato que se muestra, nunca la identidad. No se usa
+  `tokeninfo`.
 - OAuth: acceso offline, PKCE S256, un `state` de un solo uso guardado como hash (10 minutos, ligado a la persona que
   empezó), verificación de los permisos concedidos, `prompt=consent` solo cuando Bellis no tiene un refresh token que
   funcione. Si Google no manda un refresh token nuevo, se conserva el guardado, pero solo para la misma cuenta.

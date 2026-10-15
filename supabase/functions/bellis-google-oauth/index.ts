@@ -1,5 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2.117.2";
-import { completeGoogleOAuth, disconnectGoogle, googleOAuthConfigFromEnv, missingGoogleConfig, sha256Hex, startGoogleOAuth, supabaseGoogleConnectionStore } from "../_shared/google-calendar-oauth.ts";
+import * as jose from "npm:jose@6.2.12";
+import { completeGoogleOAuth, disconnectGoogle, googleIdTokenVerifier, googleOAuthConfigFromEnv, missingGoogleConfig, sha256Hex, startGoogleOAuth, supabaseGoogleConnectionStore } from "../_shared/google-calendar-oauth.ts";
 import { configuredOrigins, isAllowedOrigin } from "../_shared/origin-policy.ts";
 import { logEvent, type LogFields } from "../_shared/payment-errors.ts";
 
@@ -14,6 +15,8 @@ const config = googleOAuthConfigFromEnv((name) => Deno.env.get(name), siteOrigin
 // Names of what is missing, never values. Connecting needs all of it; disconnecting does not.
 const missing = missingGoogleConfig(config);
 const configured = !!siteOrigin && missing.length === 0;
+// One verifier per instance, so Google's signing keys stay cached across requests (and are fetched again on rotation).
+const verifyIdToken = googleIdTokenVerifier(jose, { clientId: config.clientId, jwksUrl: config.endpoints.jwks });
 /** Ids and codes only: never the request, a token, the state, the verifier or the authorization code. */
 // The same checked log line as the payment functions; Google's codes are short ids of their own (google_*).
 type Fields = Omit<LogFields, "error_code"> & { error_code?: string };
@@ -88,7 +91,7 @@ Deno.serve(async (request) => {
     try { body = await request.json(); } catch { return json(request, { error: "Solicitud inválida" }, 400); }
     // The person is the verified session. Nothing in the body says who they are or which professional this is for.
     let reason = "";
-    const outcome = await completeGoogleOAuth(store, config, { userId, code: body?.code, state: body?.state }, { report: (value) => { reason = value; } });
+    const outcome = await completeGoogleOAuth(store, config, { userId, code: body?.code, state: body?.state }, { verifyIdToken, report: (value) => { reason = value; } });
     if (outcome === "connected") log("info", "oauth_connected", { action, provider: "google_calendar", status: outcome });
     else log("warn", "oauth_not_connected", { action, provider: "google_calendar", status: outcome,
       error_code: outcome === "invalid_state" ? "google_oauth_invalid_state" : reason || "google_oauth_exchange_failed" });
