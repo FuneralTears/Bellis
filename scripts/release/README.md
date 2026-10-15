@@ -125,6 +125,15 @@ records it with `--confirm-human <release-id> --url <exact URL>` (Preview only).
 environment, project, time, automatic or human); these are records next to the release's state, not steps of it.
 It never pushes, deploys, promotes, changes an alias or touches Vercel's settings, and keeps no cookie or token.
 
+In production the exact URL of a deployment is behind Vercel's login while the alias is public. The alias is always
+read: if it serves exactly the release and the exact URL is protected, the result is `DEPLOY_PROD_PARTIAL_VERIFIED`
+(exit 4), never a pass for the protected URL. prod-release then stops recoverably at `MAIN_ADVANCED` (nothing is
+written again), and a person who looked at the exact URL confirms it with
+`bellis:deploy-check -- --release <id> --expected-env production --url <exact URL> --confirm-human <id>`. That is
+accepted only at `MAIN_ADVANCED`, for the release's commit and the deployment that was partially verified, with the
+alias read again; it records `DEPLOY_PROD_VERIFIED` (human, with the alias's automatic reading), runs the public QA
+and completes the release. A deployment verified automatically at `MAIN_ADVANCED` closes the release the same way.
+
 ## Production release (`stages/prod-release.mjs`)
 
 It cannot start by accident: it needs, at once, `CONFIRM_PROD_RELEASE=<release-id>@<short commit>` in the

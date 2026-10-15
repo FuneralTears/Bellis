@@ -31,7 +31,7 @@ import { readOnly, withProdWriteAuthorization } from "../lib/guard.mjs";
 import { CheckFailed, EXIT, FailureAfterProdWrite, HumanActionRequired, checkSections, createReport, exitCodeFor, redact } from "../lib/report.mjs";
 import { assertWritable, environments, withTarget } from "../lib/target.mjs";
 import { backupsDir } from "../backup/validate.mjs";
-import { cleanOrigin, discoverDeployment, fetchPage, productionAlias, secretsIn, verifyDeployment } from "../deploy/verify.mjs";
+import { cleanOrigin, discoverDeployment, productionAlias, qaPaths, techQa, verifyDeployment } from "../deploy/verify.mjs";
 import { captureSchema } from "../drift/capture.mjs";
 import { acceptCapture, compareSchemas, differenceLine as driftLine } from "../drift/compare.mjs";
 import { resolvePending, runSmokes } from "../smoke/runner.mjs";
@@ -44,7 +44,7 @@ import { deployStateName } from "./deploy-check.mjs";
 import { migrationSetHash, precheckName, reusablePrecheck } from "./prod-precheck.mjs";
 import { openReleaseState } from "./release-state.mjs";
 
-export const qaPaths = Object.freeze(["/", "/ingresar", "/registro", "/dashboard", "/pro", "/pacientes", "/seguimientos", "/automatizaciones", "/notificaciones", "/admin", "/api/version", "/api/supabase-config"]);
+export { qaPaths };
 export const timing = Object.freeze({ deployTimeoutMs: 15 * 60_000, deployIntervalMs: 15_000, aliasAttempts: 12, aliasIntervalMs: 15_000 });
 const localFiles = (root) => readdirSync(join(root, "supabase", "migrations")).filter((name) => /^\d{14}_[a-z0-9_]+\.sql$/.test(name)).sort();
 const same = (a, b) => a.length === b.length && a.every((item, index) => item === b[index]);
@@ -171,25 +171,42 @@ export async function runProdRelease({ root, git, supabase, environment = proces
     report.set("DEPLOYMENT", "READY", [found2.url]);
     const want = { commit: head, environment: "production", supabaseRef: environments.production.ref };
     let seen = null;
-    for (let attempt = 1; attempt <= timings.aliasAttempts; attempt++) { seen = await verifyDeployment({ url: found2.url, alias, expected: want, fetchImpl }); if (seen.status === "PASS" || !seen.exact?.ok || (seen.alias && seen.alias.observed && seen.alias.observed.supabaseRef !== want.supabaseRef)) break; if (attempt < timings.aliasAttempts) await sleep(timings.aliasIntervalMs); }
-    const observed = seen.exact?.observed;
-    report.set("PROD VERSION", seen.exact?.ok ? "PASS" : "FAIL", [`commit ${observed?.commit ?? "not observed"}`, `environment ${observed?.environment ?? "not observed"}`, `project ${observed?.supabaseRef ?? "not observed"}`, ...(seen.exact?.problems ?? [])]);
-    report.set("PROD ALIAS", seen.alias?.ok ? "PASS" : "FAIL", [cleanOrigin(alias) ?? "not an address", `commit ${seen.alias?.observed?.commit ?? "not observed"}`, ...(seen.alias?.problems ?? [])]);
-    if (seen.status !== "PASS") throw new CheckFailed("Production does not serve the release.", { stage: "deploy verify", details: seen.problems.slice(0, 10) });
+    // The alias may lag behind for a few tries; nothing else is waited for. An exact URL behind Vercel's login is not
+    // a reason to stop reading the alias.
+    for (let attempt = 1; attempt <= timings.aliasAttempts; attempt++) {
+      seen = await verifyDeployment({ url: found2.url, alias, expected: want, fetchImpl });
+      const exactFine = seen.exact?.ok || seen.protected; const wrongProject = seen.alias?.observed && seen.alias.observed.supabaseRef !== want.supabaseRef;
+      if (seen.status === "PASS" || seen.status === "PARTIAL" || !exactFine || wrongProject) break;
+      if (attempt < timings.aliasAttempts) await sleep(timings.aliasIntervalMs);
+    }
+    const observed = seen.exact?.observed; const aliasSeen = seen.alias?.observed;
+    report.set("PROD VERSION", seen.protected ? "HUMAN VERIFICATION REQUIRED" : seen.exact?.ok ? "PASS" : "FAIL", seen.protected
+      ? [`exact deployment ${found2.url} is behind Vercel's login: not read by this tool`, `served through the alias: commit ${aliasSeen?.commit ?? "not observed"}, environment ${aliasSeen?.environment ?? "not observed"}, project ${aliasSeen?.supabaseRef ?? "not observed"}`]
+      : [`commit ${observed?.commit ?? "not observed"}`, `environment ${observed?.environment ?? "not observed"}`, `project ${observed?.supabaseRef ?? "not observed"}`, ...(seen.exact?.problems ?? [])]);
+    report.set("PROD ALIAS", seen.alias?.ok ? "PASS" : "FAIL", [cleanOrigin(alias) ?? "not an address", `commit ${aliasSeen?.commit ?? "not observed"}`, ...(seen.alias?.problems ?? [])]);
     const deployRecords = state.load(release, deployStateName)?.data ?? {};
-    state.save(release, deployStateName, { ...deployRecords, production: { state: "DEPLOY_PROD_VERIFIED", mode: "automatic", actor: "bellis:prod-release", url: found2.url, alias: cleanOrigin(alias), expectedCommit: head, observedCommit: observed.commit, environment: observed.environment, supabaseRef: observed.supabaseRef, at: now().toISOString() } });
+    if (seen.status === "PARTIAL") {
+      // Recoverable: production and main are done and the alias serves the release; only a person can look at the
+      // exact URL. Nothing is written again: the confirmation goes through bellis:deploy-check.
+      state.save(release, deployStateName, { ...deployRecords, production: { state: "DEPLOY_PROD_PARTIAL_VERIFIED", mode: "automatic", scope: "alias", actor: "bellis:prod-release", url: found2.url, alias: cleanOrigin(alias), expectedCommit: head, observedCommit: aliasSeen.commit, environment: aliasSeen.environment, supabaseRef: aliasSeen.supabaseRef, deploymentId: aliasSeen.deploymentId, at: now().toISOString() } });
+      report.set("TECH QA", "N/A", ["runs after a person confirms the exact deployment"]);
+      const pending = new HumanActionRequired("The production alias serves the release, but the exact deployment is behind Vercel's login. A person has to confirm it.", { stage: "deploy verify",
+        details: [`open ${found2.url}/api/version in a browser and check commit ${head}, environment production, project ${want.supabaseRef}`, `then: npm run bellis:deploy-check -- --release ${release} --expected-env production --url ${found2.url} --confirm-human ${release}`] });
+      pending.recoverable = true; throw pending;
+    }
+    if (seen.status !== "PASS") throw new CheckFailed("Production does not serve the release.", { stage: "deploy verify", details: seen.problems.slice(0, 10) });
+    state.save(release, deployStateName, { ...deployRecords, production: { state: "DEPLOY_PROD_VERIFIED", mode: "automatic", actor: "bellis:prod-release", url: found2.url, alias: cleanOrigin(alias), expectedCommit: head, observedCommit: observed.commit, environment: observed.environment, supabaseRef: observed.supabaseRef, deploymentId: observed.deploymentId, at: now().toISOString() } });
     record("DEPLOY_PROD_VERIFIED", found2.url, "vercel");
 
     // QA without a login: every page answers, and nothing secret is in any of them.
-    const origin = cleanOrigin(alias); const qa = [];
-    for (const path of qaPaths) { const page = await fetchPage(`${origin}${path}`, { fetchImpl }); const ok = (page.kind === "ok" || page.kind === "redirect") && !(page.text && secretsIn(page.text).length); qa.push({ path, ok, status: page.status ?? page.kind }); }
-    const failing = qa.filter((item) => !item.ok);
-    if (failing.length) { report.set("TECH QA", "FAIL", failing.map((item) => `${item.path}: ${item.status}`)); throw new CheckFailed("A page of production does not answer as it should.", { stage: "tech qa" }); }
-    report.set("TECH QA", manifest.previewRequired ? "HUMAN QA REQUIRED" : "PASS", [`${qa.length} page(s) answered without a login, nothing secret in them`, ...(manifest.previewRequired ? ["the release changes screens behind a login: a person has to look at them in production"] : [])]);
+    const qa = await techQa(cleanOrigin(alias), { fetchImpl });
+    if (!qa.ok) { report.set("TECH QA", "FAIL", qa.results.filter((item) => !item.ok).map((item) => `${item.path}: ${item.status}`)); throw new CheckFailed("A page of production does not answer as it should.", { stage: "tech qa" }); }
+    report.set("TECH QA", manifest.previewRequired ? "HUMAN QA REQUIRED" : "PASS", [`${qa.results.length} page(s) answered without a login, nothing secret in them`, ...(manifest.previewRequired ? ["the release changes screens behind a login: a person has to look at them in production"] : [])]);
     record("RELEASE_COMPLETE", `released ${short(head)} to production`);
   } catch (error) {
     progress.note(error?.stage ?? "prod-release", { commit: head, environment: "production", result: "FAIL", detail: redact(error?.message ?? String(error), 200) });
-    if (wrote && exitCodeFor(error) !== EXIT.FAILURE_AFTER_PROD_WRITE) throw new FailureAfterProdWrite(`${error?.message ?? error} Production had already been written to.`, { stage: error?.stage ?? "prod-release", details: error?.details ?? [], cause: error });
+    // A recoverable stop (waiting for a person, with nothing left to write) keeps its own exit code.
+    if (wrote && exitCodeFor(error) !== EXIT.FAILURE_AFTER_PROD_WRITE && error?.recoverable !== true) throw new FailureAfterProdWrite(`${error?.message ?? error} Production had already been written to.`, { stage: error?.stage ?? "prod-release", details: error?.details ?? [], cause: error });
     throw error;
   }
 }

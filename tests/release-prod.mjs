@@ -108,7 +108,7 @@ test("a release with a migration goes all the way: apply, verify, main, deployme
   for (const [section, status] of Object.entries(expected)) assert.equal(statusOf(out.output, section), status, section);
   assert.match(sectionOf(out.output, "MAIN"), new RegExp(`${context.made.mainBase.slice(0, 7)} -> ${context.head.slice(0, 7)}`)); assert.match(sectionOf(out.output, "PROD SMOKES"), /1\/1 PASS, self-test 3\/3, rollbacks verified/);
   assert.equal(context.originMain(), context.head, "origin/main is the release commit"); assert.equal(context.made.git.commit("main"), context.head, "and so is the local main");
-  assert.equal(used.flat().some((arg) => /^(-f|--force.*)$/.test(arg) || arg.startsWith("+")), false, "never a forced push"); assert.ok(used.some((args) => args[0] === "push" && args.at(-1) === `${context.head}:refs/heads/main`));
+  assert.equal(used.flat().some((arg) => /^(-f|--force.*)$/.test(arg)), false, "never --force"); assert.equal(used.filter((args) => args[0] === "push").flat().some((arg) => arg.startsWith("+")), false, "never a forced push"); assert.ok(used.some((args) => args[0] === "push" && args.at(-1) === `${context.head}:refs/heads/main`));
   const history = stateOf(context.made).history.filter((entry) => !entry.rerun).map((entry) => entry.state);
   assert.deepEqual(history.slice(-6), ["PROD_PRECHECK_COMPLETE", "PROD_APPLIED", "PROD_VERIFIED", "MAIN_ADVANCED", "DEPLOY_PROD_VERIFIED", "RELEASE_COMPLETE"]);
   const deploy = JSON.parse(readFileSync(join(folder(context.made), "deploy-state.json"), "utf8")).data.production;

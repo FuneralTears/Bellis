@@ -117,20 +117,43 @@ export async function discoverDeployment({ commit, environment, fetchImpl = fetc
 
 /**
  * Verifies a deployment. `url` is its exact URL; `alias` (production) is checked too and has to serve the same.
- * Returns { status: "PASS" | "HUMAN" | "FAIL", exact, alias, pages, problems }.
+ * Returns { status, protected, exact, alias, pages, problems }, where status is:
+ *   "PASS"     the exact deployment and the alias (if any) serve what was expected
+ *   "PARTIAL"  the exact URL is behind Vercel's login, so it was not read, but the alias was, and it serves exactly
+ *              what was expected: a person still has to confirm the exact deployment
+ *   "HUMAN"    the exact URL is behind Vercel's login and there is no alias to read (a Preview)
+ *   "FAIL"     anything else
+ * The alias is always read, whatever happened with the exact URL. A protected URL is never reported as verified.
  */
 export async function verifyDeployment({ url, alias = null, expected, fetchImpl = fetch, timeoutMs = 15_000 }) {
-  const origin = cleanOrigin(url); if (!origin) return { status: "FAIL", problems: ["the deployment URL is not an http(s) address without credentials"], exact: null, alias: null, pages: [] };
+  const origin = cleanOrigin(url); if (!origin) return { status: "FAIL", protected: false, problems: ["the deployment URL is not an http(s) address without credentials"], exact: null, alias: null, pages: [] };
   const options = { fetchImpl, timeoutMs };
-  const exactPage = await fetchPage(`${origin}/api/version`, options); const exact = { url: origin, http: exactPage.kind === "ok" ? "PASS" : "FAIL", status: exactPage.status, ...checkVersion(exactPage, expected) };
-  if (exactPage.kind === "protected") return { status: "HUMAN", protected: true, exact, alias: null, pages: [], problems: ["the deployment is behind Vercel's login: a person has to look at it"] };
+  const exactPage = await fetchPage(`${origin}/api/version`, options); const isProtected = exactPage.kind === "protected";
+  const exact = { url: origin, http: exactPage.kind === "ok" ? "PASS" : "FAIL", status: exactPage.status, ...checkVersion(exactPage, expected) };
   let aliasResult = null;
   if (alias) {
     const aliasOrigin = cleanOrigin(alias);
     const page = aliasOrigin ? await fetchPage(`${aliasOrigin}/api/version`, options) : { kind: "network", status: null, contentType: "", text: "" };
     aliasResult = { url: aliasOrigin, status: page.status, ...checkVersion(page, expected) };
   }
+  const humanLine = "the exact deployment is behind Vercel's login: a person has to confirm it";
+  if (isProtected) {
+    if (!aliasResult) return { status: "HUMAN", protected: true, exact, alias: null, pages: [], problems: ["the deployment is behind Vercel's login: a person has to look at it"] };
+    if (!aliasResult.ok) return { status: "FAIL", protected: true, exact, alias: aliasResult, pages: [], problems: [`exact deployment: ${humanLine}`, ...aliasResult.problems.map((item) => `production alias: ${item}`)] };
+    const pages = await checkPages(aliasResult.url, expected, options);
+    const pageProblems = pages.filter((page) => !page.ok).map((page) => `${page.path}: ${page.problems.join(", ")}`);
+    return { status: pageProblems.length ? "FAIL" : "PARTIAL", protected: true, exact, alias: aliasResult, pages, problems: [`exact deployment: ${humanLine}`, ...pageProblems] };
+  }
   const pages = exact.ok ? await checkPages(origin, expected, options) : [];
   const problems = [...exact.problems.map((item) => `exact deployment: ${item}`), ...(aliasResult ? aliasResult.problems.map((item) => `production alias: ${item}`) : []), ...pages.filter((page) => !page.ok).map((page) => `${page.path}: ${page.problems.join(", ")}`)];
   return { status: problems.length ? "FAIL" : "PASS", protected: false, exact, alias: aliasResult, pages, problems };
+}
+
+/** The pages of a release's technical QA, opened without a login. */
+export const qaPaths = Object.freeze(["/", "/ingresar", "/registro", "/dashboard", "/pro", "/pacientes", "/seguimientos", "/automatizaciones", "/notificaciones", "/admin", "/api/version", "/api/supabase-config"]);
+/** Every QA page has to answer (a redirect counts) and carry nothing secret. Returns { ok, results }. */
+export async function techQa(origin, { fetchImpl = fetch, timeoutMs = 15_000 } = {}) {
+  const results = [];
+  for (const path of qaPaths) { const page = await fetchPage(`${origin}${path}`, { fetchImpl, timeoutMs }); const ok = (page.kind === "ok" || page.kind === "redirect") && !(page.text && secretsIn(page.text).length); results.push({ path, ok, status: page.status ?? page.kind }); }
+  return { ok: results.every((item) => item.ok), results };
 }

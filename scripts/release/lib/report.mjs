@@ -72,9 +72,9 @@ export const releaseSections = Object.freeze(["RELEASE", "GIT", "MIGRATIONS", "R
 export const checkSections = Object.freeze(["RELEASE", "GIT", "MIGRATIONS", "SMOKES", "TOOLING", "TESTS", "TYPESCRIPT", "LINT", "BUILD", "STATE"]);
 export const backupSections = Object.freeze(["RELEASE", "BACKUP PUBLIC", "BACKUP PRIVATE", "STATE"]);
 export const precheckSections = Object.freeze(["RELEASE", "STAGING STATE", "BACKUP PUBLIC", "BACKUP PRIVATE", "PROD TARGET", "PROD MIGRATIONS", "PROD DRIFT", "PROD SNAPSHOT", "PROD DRY RUN", "DATA INTEGRITY", "PRECHECK EXPIRY", "CLI FINAL TARGET", "STATE", "SAFE TO APPLY PROD?"]);
-export const deploySections = Object.freeze(["DEPLOYMENT", "HTTP", "COMMIT", "ENVIRONMENT", "SUPABASE REF", "ALIAS", "PREVIEW PROTECTION", "VERIFICATION MODE", "STATE"]);
+export const deploySections = Object.freeze(["DEPLOYMENT", "HTTP", "COMMIT", "ENVIRONMENT", "SUPABASE REF", "ALIAS", "PREVIEW PROTECTION", "VERIFICATION MODE", "TECH QA", "STATE"]);
 /** Records kept next to a release's state when a deployment is verified. They are not steps of the release. */
-export const deployStates = Object.freeze(["DEPLOY_PREVIEW_VERIFIED", "DEPLOY_PROD_VERIFIED"]);
+export const deployStates = Object.freeze(["DEPLOY_PREVIEW_VERIFIED", "DEPLOY_PROD_PARTIAL_VERIFIED", "DEPLOY_PROD_VERIFIED"]);
 export const releaseStates = Object.freeze(["CHECKED", "REHEARSED", "STAGING_APPLIED", "STAGING_VERIFIED", "PREVIEW_PENDING", "STAGING_COMPLETE", "PROD_PRECHECK_COMPLETE",
   "PROD_APPLIED", "PROD_VERIFIED", "MAIN_ADVANCED", "DEPLOY_PROD_VERIFIED", "RELEASE_COMPLETE"]);
 export const prodReleaseSections = Object.freeze(["RELEASE", "HUMAN APPROVAL", "PRECHECK", "PROD TARGET", "PROD MIGRATIONS", "PROD APPLY", "PROD SCHEMA", "PROD SMOKES", "PROD SNAPSHOT", "MAIN", "DEPLOYMENT", "PROD VERSION", "PROD ALIAS", "TECH QA", "CLI FINAL TARGET", "STATE"]);

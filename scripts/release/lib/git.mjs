@@ -56,8 +56,12 @@ export function createGit({ cwd = process.cwd(), run } = {}) {
      * Remote operations. Only prod-release uses them, to move main forward to a commit that descends from it. There is
      * no force anywhere: the server itself refuses a push that is not a fast-forward.
      */
-    /** Fetches origin's main. Returns { ok, reason }. */
-    fetchMain() { const result = exec(["fetch", "--quiet", "--no-tags", "origin", "main"]); return result.code === 0 ? { ok: true } : { ok: false, reason: redact(result.stderr || `exit ${result.code}`, 200) }; },
+    /**
+     * Fetches origin's main into the local copy of it (refs/remotes/origin/main), so what git status and the reports
+     * show is current. `git fetch origin main` alone only fills FETCH_HEAD and can leave that copy days old. The "+"
+     * is about that local copy only; decisions are still taken with remoteMain(), asked to the remote itself.
+     */
+    fetchMain() { const result = exec(["fetch", "--quiet", "--no-tags", "origin", "+refs/heads/main:refs/remotes/origin/main"]); return result.code === 0 ? { ok: true } : { ok: false, reason: redact(result.stderr || `exit ${result.code}`, 200) }; },
     /** Where origin's main is right now (asked to the remote, not to the local copy), or null. */
     remoteMain() { const line = out(["ls-remote", "origin", "refs/heads/main"]); const sha = line?.split(/\s+/)[0]; return /^[0-9a-f]{40}$/.test(sha ?? "") ? sha : null; },
     /** Pushes `sha` to origin's main as a fast-forward. Returns { ok, reason }. */
