@@ -1,7 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2.117.2";
 import * as jose from "npm:jose@6.2.12";
 import { completeGoogleOAuth, disconnectGoogle, googleIdTokenVerifier, googleOAuthConfigFromEnv, missingGoogleConfig, sha256Hex, startGoogleOAuth, supabaseGoogleConnectionStore } from "../_shared/google-calendar-oauth.ts";
-import { configuredOrigins, isAllowedOrigin } from "../_shared/origin-policy.ts";
+import { configuredOrigins, isAllowedOrigin, sessionCorsHeaders } from "../_shared/origin-policy.ts";
 import { logEvent, type LogFields } from "../_shared/payment-errors.ts";
 
 // Every action needs a signed-in person. Deployed with verify_jwt=false only because the browser's CORS preflight
@@ -24,16 +24,8 @@ const log = (level: "info" | "warn" | "error", event: string, fields: Fields = {
 const errorCode = (caught: unknown) => { const message = String((caught as { message?: unknown } | null)?.message ?? ""); return /^[a-z0-9_]{1,48}$/.test(message) ? message : "internal_error"; };
 if (!configured) for (const name of siteOrigin ? missing : ["BELLIS_SITE_ORIGIN", ...missing]) log("error", "config_missing", { error_code: "google_config_missing", status: name.replace(/[^A-Za-z0-9_]/g, "_").slice(0, 48) });
 
-function cors(request: Request) {
-  const origin = request.headers.get("origin") ?? "";
-  return {
-    "Access-Control-Allow-Origin": isAllowedOrigin(origin, allowedOrigins) ? origin : siteOrigin,
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "content-type, apikey, authorization",
-    "Vary": "Origin",
-    "Cache-Control": "no-store",
-  };
-}
+// The same CORS as bellis-mp-oauth: configured origins and local development only, never "*", on every answer.
+const cors = (request: Request) => sessionCorsHeaders(request.headers.get("origin"), allowedOrigins, siteOrigin);
 function json(request: Request, data: unknown, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: { ...cors(request), "Content-Type": "application/json" } });
 }
