@@ -12,3 +12,7 @@ verify_jwt = false
 # Gateway verification stays off so the browser's CORS preflight, which carries no session, is not rejected.
 [functions.bellis-mp-oauth]
 verify_jwt = false
+
+# Google Calendar connection: same as bellis-mp-oauth, every action verifies the session in code.
+[functions.bellis-google-oauth]
+verify_jwt = false
