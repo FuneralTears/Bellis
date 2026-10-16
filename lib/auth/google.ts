@@ -1,7 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { getSupabase } from "@/lib/supabase/browser";
 import { landingRouteForUser } from "@/lib/auth/navigation";
-import { finishGoogleSignIn, googleSignInOptions, parseGoogleCallback, type GoogleSignInProblem } from "@/lib/auth/google-flow";
+import { finishGoogleSignIn, googleSignInOptions, parseGoogleCallback, serializeGoogleCallback, type GoogleSignInOutcome, type GoogleSignInProblem } from "@/lib/auth/google-flow";
 
 /**
  * Browser side of sign-in with Google. The Google step runs on its own short-lived client with PKCE: the verifier
@@ -52,31 +52,49 @@ export async function startGoogleSignIn(): Promise<GoogleSignInProblem | null> {
 /** The callback page: exchanges the code, hands the session over, and says where to go. */
 export async function completeGoogleSignIn(query: URLSearchParams): Promise<{ route: string } | { problem: GoogleSignInProblem }> {
   const callback = parseGoogleCallback(query);
-  try {
-    const bellis = await getSupabase();
-    const settings = callback.kind === "code" ? await config() : null;
-    return await finishGoogleSignIn(callback, {
-      exchange: async (code) => {
-        const client = signInClient(settings as Config);
-        try {
-          const { data, error } = await client.auth.exchangeCodeForSession(code);
+  const requestLock = typeof navigator !== "undefined" && navigator.locks
+    ? (name: string, task: () => Promise<GoogleSignInOutcome>) => new Promise<GoogleSignInOutcome>((resolve, reject) => {
+      void navigator.locks.request(name, () => task().then(resolve, reject)).catch(reject);
+    })
+    : null;
+
+  return serializeGoogleCallback(requestLock, async () => {
+    try {
+      // Created inside the lock: a second tab reads the session adopted by the first one before doing anything else.
+      const bellis = await getSupabase();
+      let signIn: SupabaseClient | null = null;
+      const ephemeral = async () => signIn ??= signInClient(await config());
+      const outcome = await finishGoogleSignIn(callback, {
+        exchange: async (code) => {
+          const { data, error } = await (await ephemeral()).auth.exchangeCodeForSession(code);
           if (error || !data.session) throw new Error("exchange_failed");
           return { access_token: data.session.access_token, refresh_token: data.session.refresh_token, user: data.session.user };
-        } finally { clearRoundTrip(); }
-      },
-      currentUser: async () => (await bellis.auth.getUser()).data.user,
-      adopt: async (session) => {
-        const { error } = await bellis.auth.setSession({ access_token: session.access_token, refresh_token: session.refresh_token });
-        if (error) throw new Error("session_not_adopted");
-      },
-      discard: async (session) => {
-        // Revokes only this session, on a client that holds it for the moment; nothing is kept in this browser.
-        const client = signInClient(settings as Config);
-        await client.auth.setSession({ access_token: session.access_token, refresh_token: session.refresh_token });
-        await client.auth.signOut({ scope: "local" });
-        clearRoundTrip();
-      },
-      landing: (userId) => landingRouteForUser(bellis, userId),
-    });
-  } catch { clearRoundTrip(); return { problem: "error" }; }
+        },
+        currentUser: async () => (await bellis.auth.getUser()).data.user,
+        pendingSession: async () => {
+          const { data } = await (await ephemeral()).auth.getSession();
+          const session = data.session;
+          return session ? { access_token: session.access_token, refresh_token: session.refresh_token, user: session.user } : null;
+        },
+        adopt: async (session) => {
+          const { error } = await bellis.auth.setSession({ access_token: session.access_token, refresh_token: session.refresh_token });
+          if (error) throw new Error("session_not_adopted");
+        },
+        discard: async (session) => {
+          // Revokes only this session, on a client that holds it for the moment; nothing is kept in this browser.
+          const client = await ephemeral();
+          await client.auth.setSession({ access_token: session.access_token, refresh_token: session.refresh_token });
+          await client.auth.signOut({ scope: "local" });
+        },
+        landing: (userId) => landingRouteForUser(bellis, userId),
+      });
+      // Cleanup happens only after the session handoff/landing decision completed. If the page refreshes mid-handoff,
+      // the exchanged session stays recoverable in this tab's sessionStorage and the one-time code is not reused.
+      clearRoundTrip();
+      return outcome;
+    } catch {
+      // Do not sign out or clear a recoverable tab session. The callback renders a calm retry action.
+      return { problem: "error" };
+    }
+  });
 }

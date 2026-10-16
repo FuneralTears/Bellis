@@ -91,6 +91,8 @@ export type FinishDeps = {
   exchange(code: string): Promise<Session>;
   /** The person already signed in on Bellis's own client, if any. */
   currentUser(): Promise<User | null>;
+  /** A session exchanged in this tab but not handed to Bellis yet, if a refresh interrupted the handoff. */
+  pendingSession(): Promise<Session | null>;
   /** Hands the session to Bellis's own client, where every page reads it. */
   adopt(session: Session): Promise<void>;
   /** Ends a session that must not be used (an unverified email). */
@@ -99,21 +101,56 @@ export type FinishDeps = {
   landing(userId: string): Promise<string>;
 };
 
+export type GoogleSignInOutcome = { route: string } | { problem: GoogleSignInProblem };
+export const googleCallbackLockName = "bellis-google-signin-callback";
+
+/** Uses the browser's cross-tab lock when available; it never stores or shares the PKCE verifier. */
+export function serializeGoogleCallback(
+  request: ((name: string, task: () => Promise<GoogleSignInOutcome>) => Promise<GoogleSignInOutcome>) | null,
+  task: () => Promise<GoogleSignInOutcome>,
+): Promise<GoogleSignInOutcome> {
+  return request ? request(googleCallbackLockName, task) : task();
+}
+
+async function routeCurrentUser(deps: FinishDeps): Promise<{ route: string } | null> {
+  const current = await deps.currentUser().catch(() => null);
+  return current?.email_confirmed_at ? { route: await deps.landing(current.id) } : null;
+}
+
+async function acceptSession(session: Session, deps: FinishDeps): Promise<GoogleSignInOutcome> {
+  if (!session.user?.email_confirmed_at) {
+    await deps.discard(session).catch(() => undefined);
+    return { problem: "unverified" };
+  }
+  await deps.adopt(session);
+  return { route: await deps.landing(session.user.id) };
+}
+
 /**
  * The callback, after its query was read. A code works once: a second callback (a refresh, a second tab) finds the
  * session already there and goes on from it instead of failing. An email Google did not verify never becomes a
  * Bellis session. Returns where to go, or a problem code; never a token, a code or a provider message.
  */
-export async function finishGoogleSignIn(callback: GoogleCallback, deps: FinishDeps): Promise<{ route: string } | { problem: GoogleSignInProblem }> {
+export async function finishGoogleSignIn(callback: GoogleCallback, deps: FinishDeps): Promise<GoogleSignInOutcome> {
+  // A duplicated callback must prefer the already-valid Bellis session and must never touch it.
+  const existing = await routeCurrentUser(deps);
+  if (existing) return existing;
+
+  // A refresh can happen after Supabase stored the exchanged session in this tab but before Bellis adopted it.
+  if (callback.kind === "invalid") {
+    const pending = await deps.pendingSession().catch(() => null);
+    return pending ? acceptSession(pending, deps) : { problem: "invalid" };
+  }
   if (callback.kind !== "code") return { problem: callback.kind };
+
   let session: Session;
   try { session = await deps.exchange(callback.code); }
   catch {
-    const already = await deps.currentUser().catch(() => null);
-    if (already?.email_confirmed_at) return { route: await deps.landing(already.id) };
+    const pending = await deps.pendingSession().catch(() => null);
+    if (pending) return acceptSession(pending, deps);
+    const already = await routeCurrentUser(deps);
+    if (already) return already;
     return { problem: "invalid" };
   }
-  if (!session.user?.email_confirmed_at) { await deps.discard(session).catch(() => undefined); return { problem: "unverified" }; }
-  await deps.adopt(session);
-  return { route: await deps.landing(session.user.id) };
+  return acceptSession(session, deps);
 }

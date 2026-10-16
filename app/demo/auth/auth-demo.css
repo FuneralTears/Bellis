@@ -33,6 +33,8 @@
   flex-wrap: wrap;
   justify-content: center;
   gap: 4px;
+  min-width: 0;
+  max-width: 100%;
 }
 .auth-demo-tabs button {
   min-height: 44px;
@@ -67,4 +69,10 @@
   display: inline;
   min-height: 0;
   font-size: inherit;
+}
+
+@media (max-width: 600px) {
+  .auth-demo-tabs {
+    width: 100%;
+  }
 }

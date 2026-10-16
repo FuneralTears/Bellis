@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { finishGoogleSignIn, googleCallbackPath, googleCallbackUrl, googleSignInMessage, googleSignInOptions, parseGoogleCallback, watchOAuthReturn } from "../lib/auth/google-flow.ts";
+import { finishGoogleSignIn, googleCallbackLockName, googleCallbackPath, googleCallbackUrl, googleSignInMessage, googleSignInOptions, parseGoogleCallback, serializeGoogleCallback, watchOAuthReturn } from "../lib/auth/google-flow.ts";
 import { landingRouteForUser } from "../lib/auth/navigation.ts";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
@@ -17,6 +17,8 @@ test("demo: the auth showroom shows the same Google button and the account compl
   const demo = read("app/demo/auth/auth-demo.tsx"), view = read("components/auth/GoogleSignInButton.tsx");
   assert.ok(demo.includes('import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";'));
   assert.ok(demo.includes('{ key: "completar", label: "Completar (Google)" }'));
+  assert.ok(demo.includes('{ key: "callback", label: "Callback repetido" }'));
+  assert.match(demo, /Volver a iniciar sesión/);
   assert.doesNotMatch(demo + view, /getSupabase|supabase|signInWithOAuth|lib\/auth\/google/);
 });
 
@@ -57,11 +59,13 @@ test("4-7: the callback query: a code, a cancellation, a provider error, or some
 });
 
 /** The callback's dependencies, recorded. */
-function deps({ exchange, current = null, landing = "/dashboard" } = {}) {
+function deps({ exchange, current = null, pending = null, landing = "/dashboard" } = {}) {
   const log = { adopted: [], discarded: [], landed: [] };
   return { log, deps: {
     exchange: exchange ?? (async () => ({ access_token: "access-token-x", refresh_token: "refresh-token-x", user: { id: "u-1", email_confirmed_at: "2026-10-16T00:00:00Z" } })),
-    currentUser: async () => current, adopt: async (session) => { log.adopted.push(session.user.id); },
+    currentUser: async () => typeof current === "function" ? current() : current,
+    pendingSession: async () => typeof pending === "function" ? pending() : pending,
+    adopt: async (session) => { log.adopted.push(session.user.id); },
     discard: async (session) => { log.discarded.push(session.user.id); }, landing: async (id) => { log.landed.push(id); return landing; },
   } };
 }
@@ -74,14 +78,16 @@ test("4, 9, 10: a verified Google account gets its session on Bellis's client an
   }
 });
 
-test("5-6: cancelled, failed or invalid callbacks end on the login page with a calm message and no session", async () => {
+test("5-6: cancelled, failed or invalid callbacks show a calm retry state with no raw provider error", async () => {
   for (const kind of ["cancelled", "error", "invalid"]) {
     const { log, deps: d } = deps();
     assert.deepEqual(await finishGoogleSignIn({ kind }, d), { problem: kind });
     assert.deepEqual(log.adopted, []);
     assert.ok(googleSignInMessage(kind));
   }
-  assert.match(callback, /`\/ingresar\?google=\$\{outcome\.problem\}`/);
+  assert.match(callback, /No pudimos completar el inicio de sesión/);
+  assert.match(callback, /Volver a iniciar sesión/);
+  assert.doesNotMatch(callback, /error_description|outcome\.problem\}/);
   assert.match(login, /googleSignInMessage\(useSyncExternalStore\(subscribeToNothing, googleProblem, \(\) => null\)\)/);
 });
 
@@ -129,17 +135,88 @@ test("7: an email Google did not verify never becomes a Bellis session; the sess
   assert.match(googleSignInMessage("unverified").text, /no tiene el email verificado/);
 });
 
-test("11: a repeated callback (refresh, second tab) finds the session already there and goes on; without one it is refused", async () => {
-  const failing = async () => { throw new Error("code already used"); };
+test("callback refresh after success uses the valid main session even after the URL code was removed", async () => {
+  let exchanges = 0;
+  const refreshed = deps({
+    exchange: async () => { exchanges += 1; throw new Error("must not exchange again"); },
+    current: { id: "u-1", email_confirmed_at: "2026-10-16T00:00:00Z" },
+    landing: "/dashboard",
+  });
+  assert.deepEqual(await finishGoogleSignIn({ kind: "invalid" }, refreshed.deps), { route: "/dashboard" });
+  assert.equal(exchanges, 0, "the one-time code is not reused");
+  assert.deepEqual(refreshed.log.adopted, []);
+  assert.deepEqual(refreshed.log.discarded, [], "the main session is never signed out");
+});
+
+test("a consumed second callback routes an existing session, while one with no session shows a friendly retry", async () => {
+  let exchanges = 0;
+  const failing = async () => { exchanges += 1; throw new Error("code already used"); };
   const again = deps({ exchange: failing, current: { id: "u-1", email_confirmed_at: "2026-10-16T00:00:00Z" }, landing: "/onboarding" });
   assert.deepEqual(await finishGoogleSignIn({ kind: "code", code: "abcdefgh" }, again.deps), { route: "/onboarding" });
-  assert.deepEqual(again.log.adopted, [], "nothing new is adopted");
+  assert.equal(exchanges, 0, "an existing session wins before exchange");
+  assert.deepEqual(again.log.adopted, []);
+  assert.deepEqual(again.log.discarded, []);
+
   const none = deps({ exchange: failing });
   assert.deepEqual(await finishGoogleSignIn({ kind: "code", code: "abcdefgh" }, none.deps), { problem: "invalid" });
+  assert.equal(exchanges, 1);
+  assert.deepEqual(none.log.discarded, [], "an exchange error never signs out the main client");
+
   const unverified = deps({ exchange: failing, current: { id: "u-2", email_confirmed_at: null } });
   assert.deepEqual(await finishGoogleSignIn({ kind: "code", code: "abcdefgh" }, unverified.deps), { problem: "invalid" });
   // The callback page hands the code over once and takes it out of the address bar at once.
   assert.match(callback, /if \(started\.current\) return;\s*started\.current = true;\s*const query = new URLSearchParams\(window\.location\.search\);\s*window\.history\.replaceState\(null, "", window\.location\.pathname\);/);
+});
+
+test("a refresh interrupted after exchange recovers the tab-scoped session without reusing the code", async () => {
+  let exchanges = 0;
+  const pending = { access_token: "pending-a", refresh_token: "pending-r", user: { id: "u-1", email_confirmed_at: "2026-10-16T00:00:00Z" } };
+  const resumed = deps({
+    exchange: async () => { exchanges += 1; throw new Error("must not exchange again"); },
+    pending,
+    landing: "/registro/completar",
+  });
+  assert.deepEqual(await finishGoogleSignIn({ kind: "invalid" }, resumed.deps), { route: "/registro/completar" });
+  assert.equal(exchanges, 0);
+  assert.deepEqual(resumed.log.adopted, ["u-1"]);
+});
+
+test("two callback tabs serialize the exchange and preserve one session without account duplication", async () => {
+  let tail = Promise.resolve();
+  const request = (name, task) => {
+    assert.equal(name, googleCallbackLockName);
+    const run = tail.then(task);
+    tail = run.then(() => undefined, () => undefined);
+    return run;
+  };
+  let current = null;
+  let exchanges = 0;
+  let adoptions = 0;
+  const task = () => {
+    const attempt = deps({
+      current: () => current,
+      exchange: async () => {
+        exchanges += 1;
+        await new Promise(resolve => setImmediate(resolve));
+        return { access_token: "a", refresh_token: "r", user: { id: "u-1", email_confirmed_at: "2026-10-16T00:00:00Z" } };
+      },
+    });
+    attempt.deps.adopt = async (session) => { adoptions += 1; current = session.user; };
+    return finishGoogleSignIn({ kind: "code", code: "abcdefgh" }, attempt.deps);
+  };
+  const outcomes = await Promise.all([
+    serializeGoogleCallback(request, task),
+    serializeGoogleCallback(request, task),
+  ]);
+  assert.deepEqual(outcomes, [{ route: "/dashboard" }, { route: "/dashboard" }]);
+  assert.equal(exchanges, 1);
+  assert.equal(adoptions, 1);
+  assert.match(googleClient, /navigator\.locks\.request/);
+  assert.doesNotMatch(googleClient, /bellis\.auth\.signOut/);
+  assert.doesNotMatch(callback + googleClient, /complete_bellis_account|from\("(?:workspaces|professionals)"\)/);
+  const accountSmoke = read("supabase/tests/google_login_account_smoke.sql");
+  assert.match(accountSmoke, /A second submit, a refresh, another tab: the same workspace, nothing new/);
+  assert.match(accountSmoke, /pg_advisory_xact_lock/);
 });
 
 /** A stand-in for the browser client's query builder: answers each table from `rows`. */
@@ -183,7 +260,7 @@ test("15: no token, code or provider message is logged or shown", () => {
 
 test("16: no open redirect: the callback goes only where the account says; nothing in the URL chooses the destination", () => {
   assert.doesNotMatch(callback + googleClient + flow, /get\("(next|redirect|redirect_to|returnTo)"\)/);
-  assert.match(callback, /window\.location\.replace\("route" in outcome \? outcome\.route : `\/ingresar\?google=\$\{outcome\.problem\}`\)/);
+  assert.match(callback, /if \("route" in outcome\) window\.location\.replace\(outcome\.route\)/);
   const navigation = read("lib/auth/navigation.ts");
   assert.match(navigation, /Promise<"\/registro\/completar" \| "\/onboarding" \| "\/dashboard">/);
 });

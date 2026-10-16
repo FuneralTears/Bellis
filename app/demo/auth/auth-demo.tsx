@@ -13,13 +13,14 @@ import "./auth-demo.css";
  * but every form only moves local state: no Supabase, no session, no emails.
  */
 
-type Screen = "ingresar" | "registro" | "recuperar" | "completar";
+type Screen = "ingresar" | "registro" | "recuperar" | "completar" | "callback";
 type Step = "form" | "sent" | "update" | "done";
 const screens: { key: Screen; label: string }[] = [
   { key: "ingresar", label: "Ingresar" },
   { key: "registro", label: "Registro" },
   { key: "recuperar", label: "Recuperar" },
   { key: "completar", label: "Completar (Google)" },
+  { key: "callback", label: "Callback repetido" },
 ];
 // In the demo "Continuar con Google" goes nowhere: it shows the screen a new Google account completes in Bellis.
 const googleDemo = { tone: "info" as const, text: "En la demo no se inicia sesión con Google. En Bellis, una cuenta nueva completa sus datos en el paso siguiente." };
@@ -92,6 +93,12 @@ export default function AuthDemo() {
           <p className="auth-note">Después vas a configurar tu primera sesión y tus horarios. Lleva menos de 2 minutos.</p>
         </form>
       </>)}
+
+      {screen === "callback" && <>
+        <AuthHeading title="No pudimos completar el inicio de sesión">Tu cuenta no se modificó.</AuthHeading>
+        <AuthMessage tone="error">El inicio de sesión con Google no se completó. Empezá de nuevo desde acá.</AuthMessage>
+        <button type="button" className="auth-button" onClick={() => go("ingresar")}>Volver a iniciar sesión</button>
+      </>}
 
       {screen === "recuperar" && (step === "done" ? <AuthNotice title="Tu contraseña se actualizó correctamente" actions={<button type="button" className="auth-button" onClick={() => go("ingresar")}>Ir a iniciar sesión</button>}>
         <p>Ya podés entrar con tu nueva contraseña.</p>
