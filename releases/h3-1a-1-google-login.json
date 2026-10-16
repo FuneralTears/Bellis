@@ -1,0 +1,18 @@
+{
+  "releaseId": "h3-1a-1-google-login",
+  "sourceCommit": "4ada8a8fae0f136ad1d668d5a10b238b8337379f",
+  "expectedMainBase": "7fbc24666ea131daeb9b1e7a57b302789bf1d5ed",
+  "migrations": [
+    {
+      "file": "20261020090000_google_login_account.sql",
+      "sha256": "c85cffbee23b1e9e372b1099b53d20cca880c758980c7fb0c6b7a8fbd1aa6fa7"
+    }
+  ],
+  "smokeGroups": [
+    "release"
+  ],
+  "previewRequired": true,
+  "createdAt": "2026-10-16T03:35:28Z",
+  "branch": "feat/h3-1a-1-google-login",
+  "notes": "Sign-in with Google (H3.1A.1): identity only, PKCE, /auth/callback, complete_bellis_account for Google sign-ups. No Calendar scopes."
+}
