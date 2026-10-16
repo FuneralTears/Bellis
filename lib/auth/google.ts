@@ -41,9 +41,11 @@ export async function googleSignInAvailable(): Promise<boolean> {
 /** Sends the person to Google. Returns a problem code only when it cannot. */
 export async function startGoogleSignIn(): Promise<GoogleSignInProblem | null> {
   try {
+    const signIn = googleSignInOptions(window.location.origin);
+    if (!signIn) return "unavailable";
     if (!await googleSignInAvailable()) return "unavailable";
     const client = signInClient(await config());
-    const { provider, options } = googleSignInOptions(window.location.origin);
+    const { provider, options } = signIn;
     const { error } = await client.auth.signInWithOAuth({ provider, options });
     return error ? "error" : null;
   } catch { return "network"; }

@@ -27,6 +27,9 @@ Se puede usar uno sin el otro: entrar con Google y no conectar Calendar, o entra
   contraseña. El cliente de siempre no cambia de flujo: los enlaces de confirmación de email y de recuperación de
   contraseña funcionan igual que antes.
 - `lib/auth/google-flow.ts`: las reglas, sin navegador, con tests.
+- El `redirectTo` se construye exclusivamente como `origin actual + /auth/callback`, después de validar el origin. Se
+  permiten `http://localhost:5173`, producción exacta y hosts `bellis-…-bellis1.vercel.app` por HTTPS. Cualquier otro
+  origin falla cerrado y el OAuth no comienza.
 - `app/auth/callback/page.tsx`: lee el código una sola vez, lo saca de la barra de direcciones y decide el destino por la
   cuenta, nunca por la URL (no hay `next` ni `redirect`). Si algo falla vuelve a `/ingresar?google=<código corto>`.
 - `app/registro/completar/page.tsx` y la migración `20261020090000_google_login_account.sql`: ver "Cuenta nueva".
@@ -96,15 +99,18 @@ hasta aprobar el release.
 1. Authentication → Providers → **Google**: Enable; Client ID y Client Secret del cliente `Bellis Sign-In (staging)`;
    **Skip nonce check: apagado**; dejar "Allow users without an email" apagado.
 2. Authentication → URL Configuration:
-   - Site URL: la que ya tiene.
-   - Redirect URLs, agregar: `http://localhost:5173/auth/callback` y `https://<host estable de staging>/auth/callback`.
-     Para probar en Previews de Vercel, opcionalmente `https://bellis-*-<team>.vercel.app/auth/callback` (solo el team de
-     Bellis). Nunca un comodín más amplio.
+   - Site URL: `https://bellis-git-staging-bellis1.vercel.app`.
+   - Redirect URLs: `http://localhost:5173/auth/callback`,
+     `https://bellis-git-staging-bellis1.vercel.app/auth/callback` y
+     `https://bellis-*-bellis1.vercel.app/auth/callback`.
+   - El último patrón es el mecanismo de Preview recomendado por Supabase, restringido al prefijo del proyecto Bellis,
+     al team `bellis1` y al path exacto `/auth/callback`. En los globs de Supabase, `*` no cruza los separadores `.` ni
+     `/`; no usar `https://**.vercel.app/**` ni un comodín de host más amplio.
 3. Authentication → Sign In / Providers: **Manual linking** apagado (es el valor por defecto).
 
 ### Producción
 
-Lo mismo, con el cliente de producción y solo `https://<dominio de producción>/auth/callback` en Redirect URLs. Sin
+Lo mismo, con el cliente de producción y solo `https://bellis-six.vercel.app/auth/callback` en Redirect URLs. Sin
 localhost ni Previews. **No configurar hasta la aprobación del release.**
 
 ## Rollback

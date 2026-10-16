@@ -51,6 +51,41 @@ test("3, 14, 17: the sign-in starts with PKCE on its own client, to the fixed ca
   assert.doesNotMatch(read("lib/supabase/browser.ts"), /flowType/);
 });
 
+test("Google redirect stays on the allowed current origin and always uses /auth/callback", () => {
+  const cases = [
+    ["localhost", "http://localhost:5173"],
+    ["stable staging", "https://bellis-git-staging-bellis1.vercel.app"],
+    ["current Preview", "https://bellis-git-feat-h3-1a-1-google-login-bellis1.vercel.app"],
+    ["exact Vercel deployment", "https://bellis-2obl8m6in-bellis1.vercel.app"],
+    ["production", "https://bellis-six.vercel.app"],
+  ];
+  for (const [label, origin] of cases) {
+    const callbackUrl = googleCallbackUrl(origin);
+    assert.equal(callbackUrl, `${origin}/auth/callback`, label);
+    const parsed = new URL(callbackUrl);
+    assert.equal(parsed.origin, origin, `${label}: same host`);
+    assert.equal(parsed.pathname, "/auth/callback", `${label}: never the root path`);
+    assert.equal(parsed.search, "", `${label}: Supabase adds the code after choosing the callback`);
+    assert.equal(googleSignInOptions(origin).options.redirectTo, callbackUrl);
+  }
+
+  const preview = googleCallbackUrl("https://bellis-git-feat-h3-1a-1-google-login-bellis1.vercel.app");
+  assert.doesNotMatch(preview, /bellis-git-staging-bellis1/, "a Preview never falls back to stable staging in code");
+  for (const origin of [
+    "https://example.com",
+    "http://bellis-six.vercel.app",
+    "https://bellis-six.vercel.app.evil.example",
+    "https://another-project-bellis1.vercel.app",
+    "https://bellis-git-staging-other-team.vercel.app",
+    "https://bellis-git-staging-bellis1.vercel.app/extra",
+    "not-an-origin",
+  ]) {
+    assert.equal(googleCallbackUrl(origin), null, origin);
+    assert.equal(googleSignInOptions(origin), null, `${origin}: OAuth does not start`);
+  }
+  assert.match(googleClient, /const signIn = googleSignInOptions\(window\.location\.origin\);\s*if \(!signIn\) return "unavailable";/);
+});
+
 test("4-7: the callback query: a code, a cancellation, a provider error, or something invalid", () => {
   assert.deepEqual(parseGoogleCallback(new URLSearchParams("code=abcDEF123-_.~xyz")), { kind: "code", code: "abcDEF123-_.~xyz" });
   assert.deepEqual(parseGoogleCallback(new URLSearchParams("error=access_denied&error_description=User+cancelled")), { kind: "cancelled" });

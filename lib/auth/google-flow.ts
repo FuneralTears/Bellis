@@ -3,16 +3,36 @@
  * are tested directly. Connecting Google Calendar is a separate consent, in Integraciones: nothing here asks for its scopes.
  */
 
-/** Where Supabase sends the person back. Always this fixed path of the current origin: no `next`, nothing from the URL. */
+/** Where Supabase sends the person back. Always this fixed path of an allowed Bellis origin. */
 export const googleCallbackPath = "/auth/callback";
-export const googleCallbackUrl = (origin: string) => `${origin}${googleCallbackPath}`;
+const localOrigin = "http://localhost:5173";
+const productionOrigin = "https://bellis-six.vercel.app";
+const bellisVercelOrigin = /^bellis-[a-z0-9-]+-bellis1\.vercel\.app$/;
+
+/**
+ * Accepts only a canonical origin owned by this app. Vercel Preview hosts are restricted to the Bellis project in
+ * the bellis1 account; a URL with credentials, a path, a query, another protocol or another host fails closed.
+ */
+export function googleCallbackUrl(origin: string): string | null {
+  try {
+    const candidate = new URL(origin);
+    if (candidate.origin !== origin) return null;
+    const allowed = candidate.origin === localOrigin
+      || candidate.origin === productionOrigin
+      || (candidate.protocol === "https:" && candidate.port === "" && bellisVercelOrigin.test(candidate.hostname));
+    return allowed ? `${candidate.origin}${googleCallbackPath}` : null;
+  } catch { return null; }
+}
 
 /**
  * The options of supabase.auth.signInWithOAuth. No `scopes`: Supabase asks Google for openid, email and profile, which
  * is all sign-in needs. Calendar scopes are never added here. `select_account` lets the person choose the account.
  */
 export function googleSignInOptions(origin: string) {
-  return { provider: "google" as const, options: { redirectTo: googleCallbackUrl(origin), queryParams: { prompt: "select_account" } } };
+  const redirectTo = googleCallbackUrl(origin);
+  return redirectTo
+    ? { provider: "google" as const, options: { redirectTo, queryParams: { prompt: "select_account" } } }
+    : null;
 }
 
 export type GoogleCallback = { kind: "code"; code: string } | { kind: "cancelled" } | { kind: "error" } | { kind: "invalid" };
