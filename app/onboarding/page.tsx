@@ -21,7 +21,8 @@ export default function Onboarding() {
       const { data, error: authError } = await client.auth.getUser();
       if (authError || !data.user) { window.location.replace("/ingresar"); return; }
       const destination = await landingRouteForUser(client, data.user.id);
-      if (destination === "/dashboard") window.location.replace(destination);
+      // Done already, or no Bellis account yet (signed up with Google): elsewhere.
+      if (destination !== "/onboarding") window.location.replace(destination);
       else if (active) setReady(true);
     }).catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : "No pudimos abrir tu espacio."); });
     return () => { active = false; };

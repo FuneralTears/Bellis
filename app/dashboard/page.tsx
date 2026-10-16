@@ -58,7 +58,7 @@ async function loadData(): Promise<Data> {
   const client = await getSupabase();
   const { data: auth, error: authError } = await client.auth.getUser();
   if (authError || !auth.user) throw new Error("Tu sesión venció. Volvé a ingresar.");
-  if (await landingRouteForUser(client, auth.user.id) === "/onboarding") throw new Error("onboarding_required");
+  if (await landingRouteForUser(client, auth.user.id) !== "/dashboard") throw new Error("onboarding_required");
   const { data: professional, error: profileError } = await client.from("professionals")
     .select("id,workspace_id,display_name,specialty,biography,public_slug,province,city,address,offers_online,offers_in_person,slot_interval_minutes,max_appointments_per_day")
     .eq("user_id", auth.user.id).limit(1).maybeSingle();

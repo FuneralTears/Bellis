@@ -2,11 +2,15 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 export class AccountSetupError extends Error {}
 
-export async function landingRouteForUser(client: SupabaseClient, userId: string): Promise<"/onboarding" | "/dashboard"> {
+/**
+ * Where a signed-in person goes, whatever way they signed in. Someone with no workspace yet (signed up with Google,
+ * which carries no sign-up form) completes their account at /registro/completar; nothing is created here.
+ */
+export async function landingRouteForUser(client: SupabaseClient, userId: string): Promise<"/registro/completar" | "/onboarding" | "/dashboard"> {
   const member = await client.from("workspace_members")
     .select("workspace_id,role").eq("user_id", userId).order("created_at").limit(1).maybeSingle();
   if (member.error) throw member.error;
-  if (!member.data) throw new AccountSetupError("Tu cuenta no tiene un consultorio asociado. Contactanos para revisar el registro.");
+  if (!member.data) return "/registro/completar";
 
   const [workspace, professional] = await Promise.all([
     client.from("workspaces").select("onboarding_completed_at").eq("id", member.data.workspace_id).single(),

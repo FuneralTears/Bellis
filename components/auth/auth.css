@@ -319,3 +319,61 @@ button.auth-link {
     padding: 0 4px 0 10px;
   }
 }
+
+/* Sign-in with Google: above the email form, with a divider. Identity only, never Google Calendar. */
+.auth-google {
+  display: grid;
+  gap: 12px;
+  margin: 24px 0 4px;
+}
+.auth-message + .auth-google {
+  margin-top: 16px;
+}
+.auth-google-button {
+  width: 100%;
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 12px 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--foreground);
+  font-size: 15px;
+  font-weight: 600;
+  transition: background-color .15s;
+}
+.auth-google-button:hover:not(:disabled) {
+  background: var(--surface-muted);
+}
+.auth-google-button:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
+.auth-google-button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+.auth-google-note {
+  margin: -4px 0 0;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: center;
+}
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 4px 0 8px;
+  color: var(--muted-foreground);
+  font-size: 13px;
+}
+.auth-divider::before,
+.auth-divider::after {
+  content: "";
+  flex: 1;
+  border-top: 1px solid var(--border);
+}

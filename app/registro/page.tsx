@@ -5,9 +5,8 @@ import { DEFAULT_MARKET, DEFAULT_TIMEZONE_LABEL } from "@/lib/market";
 import { authMessage, landingRouteForUser } from "@/lib/auth/navigation";
 import { getSupabase } from "@/lib/supabase/browser";
 import { AuthFixedField, AuthHeading, AuthLoading, AuthMessage, AuthNotice, AuthShell, PasswordField, friendlyAuthError } from "@/components/auth/AuthUi";
-
-const specialties = ["Psicología", "Odontología", "Kinesiología", "Nutrición", "Psicopedagogía", "Otro"];
-const provinces = ["Buenos Aires", "CABA", "Córdoba", "Santa Fe", "Mendoza", "Tucumán", "Entre Ríos", "Salta", "Neuquén", "Misiones", "Santiago del Estero", "Catamarca", "Chaco", "Chubut", "Corrientes", "Formosa", "Jujuy", "La Pampa", "La Rioja", "Río Negro", "San Juan", "San Luis", "Santa Cruz", "Tierra del Fuego"];
+import GoogleSignIn from "@/components/auth/GoogleSignIn";
+import { provinces, specialties } from "@/lib/auth/signup-fields";
 
 export default function Registro() {
   const [form, setForm] = useState({ name: "", business: "", specialty: "Psicología", email: "", password: "", province: "", city: "", timezone: DEFAULT_MARKET.timezone });
@@ -55,6 +54,7 @@ export default function Registro() {
       <p>¿Ya tenías cuenta? <a className="auth-link" href="/recuperar">Recuperá tu acceso</a>.</p>
     </AuthNotice> : checking ? <AuthLoading>Comprobando tu sesión…</AuthLoading> : <>
     <AuthHeading title="Creá tu cuenta">Empezá a organizar tu consulta con Bellis.</AuthHeading>
+    <GoogleSignIn note="Usamos Google solo para iniciar sesión. No accedemos a tu calendario." />
     <form className="auth-form" onSubmit={submit} aria-describedby={error ? "auth-error" : undefined}>
       <div className="auth-grid">
         <label className="auth-field">Tu nombre<input required value={form.name} onChange={field("name")} placeholder="Ana López" autoComplete="name" /></label>

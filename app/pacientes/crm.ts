@@ -13,7 +13,7 @@ export async function loadCrmContext(): Promise<CrmContext> {
   const client = await getSupabase();
   const { data: auth, error: authError } = await client.auth.getUser();
   if (authError || !auth.user) throw new Error("Tu sesión venció. Volvé a ingresar.");
-  if (await landingRouteForUser(client, auth.user.id) === "/onboarding") throw new Error("onboarding_required");
+  if (await landingRouteForUser(client, auth.user.id) !== "/dashboard") throw new Error("onboarding_required");
   const { data: professional, error: profileError } = await client.from("professionals")
     .select("id,workspace_id,display_name,specialty").eq("user_id", auth.user.id).limit(1).maybeSingle();
   if (profileError || !professional) throw new Error("No encontramos tu espacio profesional.");

@@ -26,7 +26,7 @@ export function FormsWorkspace({ embedded = false }: { embedded?: boolean }) {
           window.location.replace("/ingresar");
           return;
         }
-        if (await landingRouteForUser(client, data.user.id) === "/onboarding") {
+        if (await landingRouteForUser(client, data.user.id) !== "/dashboard") {
           window.location.replace("/onboarding");
           return;
         }

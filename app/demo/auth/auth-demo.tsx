@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { DEFAULT_TIMEZONE_LABEL } from "@/lib/market";
 import { AuthFixedField, AuthHeading, AuthMessage, AuthNotice, AuthShell, PasswordField } from "@/components/auth/AuthUi";
+import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
 import "./auth-demo.css";
 
 /**
@@ -12,13 +13,16 @@ import "./auth-demo.css";
  * but every form only moves local state: no Supabase, no session, no emails.
  */
 
-type Screen = "ingresar" | "registro" | "recuperar";
+type Screen = "ingresar" | "registro" | "recuperar" | "completar";
 type Step = "form" | "sent" | "update" | "done";
 const screens: { key: Screen; label: string }[] = [
   { key: "ingresar", label: "Ingresar" },
   { key: "registro", label: "Registro" },
   { key: "recuperar", label: "Recuperar" },
+  { key: "completar", label: "Completar (Google)" },
 ];
+// In the demo "Continuar con Google" goes nowhere: it shows the screen a new Google account completes in Bellis.
+const googleDemo = { tone: "info" as const, text: "En la demo no se inicia sesión con Google. En Bellis, una cuenta nueva completa sus datos en el paso siguiente." };
 const specialties = ["Psicología", "Odontología", "Kinesiología", "Nutrición", "Psicopedagogía", "Otro"];
 const provinces = ["Buenos Aires", "CABA", "Córdoba", "Santa Fe", "Mendoza"];
 
@@ -33,9 +37,10 @@ export default function AuthDemo() {
       <div className="auth-demo-tabs">{screens.map(({ key, label }) => <button key={key} type="button" aria-current={screen === key ? "page" : undefined} onClick={() => go(key)}>{label}</button>)}</div>
       <p className="auth-demo-note"><span>Demo interactiva</span> No se crean cuentas, no se inicia sesión ni se envían emails.</p>
     </nav>
-    <AuthShell wide={screen === "registro" && step === "form"}>
+    <AuthShell wide={(screen === "registro" || screen === "completar") && step === "form"}>
       {screen === "ingresar" && <>
         <AuthHeading title="Iniciá sesión">Entrá a tu espacio de Bellis.</AuthHeading>
+        <GoogleSignInButton busy={false} message={step === "update" ? googleDemo : null} onClick={() => go("ingresar", "update")} />
         <form className="auth-form" onSubmit={mock("done")}>
           <label className="auth-field">Email<input type="email" autoComplete="off" required defaultValue="ana@consultorio.com" /></label>
           <PasswordField label="Contraseña" autoComplete="off" required />
@@ -52,6 +57,7 @@ export default function AuthDemo() {
         <p>¿Ya tenías cuenta? <button type="button" className="auth-link" onClick={() => go("recuperar")}>Recuperá tu acceso</button>.</p>
       </AuthNotice> : <>
         <AuthHeading title="Creá tu cuenta">Empezá a organizar tu consulta con Bellis.</AuthHeading>
+        <GoogleSignInButton busy={false} note="Usamos Google solo para iniciar sesión. No accedemos a tu calendario." onClick={() => go("completar")} />
         <form className="auth-form" onSubmit={mock("sent")}>
           <div className="auth-grid">
             <label className="auth-field">Tu nombre<input required placeholder="Ana López" autoComplete="off" /></label>
@@ -67,6 +73,24 @@ export default function AuthDemo() {
           <p className="auth-note">Después vas a configurar tu primera sesión y tus horarios. Lleva menos de 2 minutos.</p>
         </form>
         <p className="auth-alt">¿Ya tenés cuenta? <button type="button" className="auth-link" onClick={() => go("ingresar")}>Iniciá sesión</button></p>
+      </>)}
+
+      {screen === "completar" && (step === "done" ? <AuthNotice title="Tu espacio está listo" actions={<button type="button" className="auth-button" onClick={() => go("ingresar")}>Volver a iniciar sesión</button>}>
+        <p>En Bellis, ahora seguirías con tu primera sesión y tus horarios.</p>
+      </AuthNotice> : <>
+        <AuthHeading title="Completá tu cuenta">Ya iniciaste sesión con Google (ana@consultorio.com). Contanos sobre tu consulta para crear tu espacio en Bellis.</AuthHeading>
+        <form className="auth-form" onSubmit={mock("done")}>
+          <div className="auth-grid">
+            <label className="auth-field">Tu nombre<input required defaultValue="Ana López" autoComplete="off" /></label>
+            <label className="auth-field">Nombre profesional o consultorio<input required placeholder="Dra. Ana López" autoComplete="off" /></label>
+            <label className="auth-field">Especialidad<select>{specialties.map((item) => <option key={item}>{item}</option>)}</select></label>
+            <label className="auth-field">Provincia<select required defaultValue=""><option value="">Seleccioná una provincia</option>{provinces.map((item) => <option key={item}>{item}</option>)}</select></label>
+            <label className="auth-field">Ciudad<input required placeholder="Tu ciudad" autoComplete="off" /></label>
+            <AuthFixedField label="Zona horaria" value={DEFAULT_TIMEZONE_LABEL} />
+          </div>
+          <button className="auth-button" type="submit">Crear mi espacio</button>
+          <p className="auth-note">Después vas a configurar tu primera sesión y tus horarios. Lleva menos de 2 minutos.</p>
+        </form>
       </>)}
 
       {screen === "recuperar" && (step === "done" ? <AuthNotice title="Tu contraseña se actualizó correctamente" actions={<button type="button" className="auth-button" onClick={() => go("ingresar")}>Ir a iniciar sesión</button>}>

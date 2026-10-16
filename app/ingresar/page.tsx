@@ -4,6 +4,8 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { getSupabase } from "@/lib/supabase/browser";
 import { authMessage, landingRouteForUser } from "@/lib/auth/navigation";
 import { AuthHeading, AuthLoading, AuthMessage, AuthShell, PasswordField, friendlyAuthError } from "@/components/auth/AuthUi";
+import GoogleSignIn from "@/components/auth/GoogleSignIn";
+import { googleSignInMessage } from "@/lib/auth/google-flow";
 
 // The sign-up confirmation link lands here with ?confirmed=1. Read for display only; a link that came back with an error does not count.
 const subscribeToNothing = () => () => {};
@@ -12,6 +14,9 @@ function arrivedFromConfirmation() {
   return query.get("confirmed") === "1" && !query.has("error") && !new URLSearchParams(window.location.hash.slice(1)).has("error");
 }
 
+// What the Google callback came back with (?google=<code>): a short code only, read once for display.
+function googleProblem() { return new URLSearchParams(window.location.search).get("google"); }
+
 export default function Ingresar() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -19,6 +24,7 @@ export default function Ingresar() {
   const [error, setError] = useState("");
   const [checking, setChecking] = useState(true);
   const confirmed = useSyncExternalStore(subscribeToNothing, arrivedFromConfirmation, () => false);
+  const fromGoogle = googleSignInMessage(useSyncExternalStore(subscribeToNothing, googleProblem, () => null));
   useEffect(() => {
     let active = true;
     getSupabase().then(async (client) => {
@@ -46,6 +52,8 @@ export default function Ingresar() {
   return <AuthShell>{checking ? <AuthLoading>Comprobando tu sesión…</AuthLoading> : <>
     <AuthHeading title="Iniciá sesión">Entrá a tu espacio de Bellis.</AuthHeading>
     {confirmed && !error && <AuthMessage tone="success">Tu email quedó confirmado. Ya podés iniciar sesión.</AuthMessage>}
+    {fromGoogle && !error && <AuthMessage tone={fromGoogle.tone}>{fromGoogle.text}</AuthMessage>}
+    <GoogleSignIn />
     <form className="auth-form" onSubmit={submit} aria-describedby={error ? "auth-error" : undefined}>
       <label className="auth-field">Email<input type="email" autoComplete="email" required value={email} onChange={event => setEmail(event.target.value)} /></label>
       <PasswordField label="Contraseña" autoComplete="current-password" required value={password} onChange={event => setPassword(event.target.value)} />
