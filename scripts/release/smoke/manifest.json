@@ -161,6 +161,15 @@
       "requires": ["the vault extension (a throwaway secret is created and rolled back)"]
     },
     {
+      "id": "google_login_account",
+      "file": "supabase/tests/google_login_account_smoke.sql",
+      "groups": ["core", "release"],
+      "expect": {
+        "result": "PASS"
+      },
+      "requires": ["creates synthetic auth users and accounts, all rolled back"]
+    },
+    {
       "id": "google_calendar_oauth",
       "file": "supabase/tests/google_calendar_oauth_smoke.sql",
       "groups": ["calendar", "plans", "release"],
