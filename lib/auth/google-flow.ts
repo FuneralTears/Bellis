@@ -38,6 +38,52 @@ export function googleSignInMessage(code: string | null): { tone: "info" | "erro
   return code && Object.hasOwn(messages, code) ? messages[code as GoogleSignInProblem] : null;
 }
 
+type OAuthReturnEventTarget = Pick<EventTarget, "addEventListener" | "removeEventListener">;
+export type OAuthReturnWatcher = { arm(): void; disarm(): void; cleanup(): void };
+
+/**
+ * Notices that an OAuth attempt left this page and later returned to it without a callback. There is deliberately no
+ * timer: a slow OAuth can stay away for as long as it needs. A focus/visible event only resets the UI after an earlier
+ * blur/hidden/pagehide event, so an incidental focus while the request starts cannot enable a second attempt.
+ */
+export function watchOAuthReturn({ windowTarget, documentTarget, isVisible, onReturn }: {
+  windowTarget: OAuthReturnEventTarget;
+  documentTarget: OAuthReturnEventTarget;
+  isVisible(): boolean;
+  onReturn(): void;
+}): OAuthReturnWatcher {
+  let armed = false;
+  let wasAway = false;
+  const markAway = () => { if (armed) wasAway = true; };
+  const returnIfReady = () => {
+    if (!armed || !wasAway || !isVisible()) return;
+    armed = false;
+    wasAway = false;
+    onReturn();
+  };
+  const visibilityChanged = () => { if (isVisible()) returnIfReady(); else markAway(); };
+
+  windowTarget.addEventListener("blur", markAway);
+  windowTarget.addEventListener("pagehide", markAway);
+  windowTarget.addEventListener("focus", returnIfReady);
+  windowTarget.addEventListener("pageshow", returnIfReady);
+  documentTarget.addEventListener("visibilitychange", visibilityChanged);
+
+  return {
+    arm: () => { armed = true; wasAway = false; },
+    disarm: () => { armed = false; wasAway = false; },
+    cleanup: () => {
+      armed = false;
+      wasAway = false;
+      windowTarget.removeEventListener("blur", markAway);
+      windowTarget.removeEventListener("pagehide", markAway);
+      windowTarget.removeEventListener("focus", returnIfReady);
+      windowTarget.removeEventListener("pageshow", returnIfReady);
+      documentTarget.removeEventListener("visibilitychange", visibilityChanged);
+    },
+  };
+}
+
 type User = { id: string; email_confirmed_at?: string | null };
 type Session = { access_token: string; refresh_token: string; user: User };
 export type FinishDeps = {

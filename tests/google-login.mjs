@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { finishGoogleSignIn, googleCallbackPath, googleCallbackUrl, googleSignInMessage, googleSignInOptions, parseGoogleCallback } from "../lib/auth/google-flow.ts";
+import { finishGoogleSignIn, googleCallbackPath, googleCallbackUrl, googleSignInMessage, googleSignInOptions, parseGoogleCallback, watchOAuthReturn } from "../lib/auth/google-flow.ts";
 import { landingRouteForUser } from "../lib/auth/navigation.ts";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
@@ -83,6 +83,43 @@ test("5-6: cancelled, failed or invalid callbacks end on the login page with a c
   }
   assert.match(callback, /`\/ingresar\?google=\$\{outcome\.problem\}`/);
   assert.match(login, /googleSignInMessage\(useSyncExternalStore\(subscribeToNothing, googleProblem, \(\) => null\)\)/);
+});
+
+test("OAuth abort: returning focus or visibility without a callback releases the Google button safely", () => {
+  for (const returnBy of ["focus", "visibility"]) {
+    const windowTarget = new EventTarget();
+    const documentTarget = new EventTarget();
+    let visible = true;
+    let busy = false;
+    let resets = 0;
+    const watcher = watchOAuthReturn({
+      windowTarget,
+      documentTarget,
+      isVisible: () => visible,
+      onReturn: () => { busy = false; resets += 1; },
+    });
+
+    busy = true;
+    watcher.arm();
+    windowTarget.dispatchEvent(new Event("focus"));
+    assert.equal(busy, true, "focus without first leaving is not treated as an abort");
+
+    if (returnBy === "focus") {
+      windowTarget.dispatchEvent(new Event("blur"));
+      windowTarget.dispatchEvent(new Event("focus"));
+    } else {
+      visible = false;
+      documentTarget.dispatchEvent(new Event("visibilitychange"));
+      visible = true;
+      documentTarget.dispatchEvent(new Event("visibilitychange"));
+    }
+
+    assert.equal(busy, false, `${returnBy}: the button is enabled again`);
+    assert.equal(resets, 1, `${returnBy}: reset once`);
+    windowTarget.dispatchEvent(new Event("focus"));
+    assert.equal(resets, 1, `${returnBy}: the completed attempt stays disarmed`);
+    watcher.cleanup();
+  }
 });
 
 test("7: an email Google did not verify never becomes a Bellis session; the session is discarded", async () => {
