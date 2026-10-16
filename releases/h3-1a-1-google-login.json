@@ -1,6 +1,6 @@
 {
   "releaseId": "h3-1a-1-google-login",
-  "sourceCommit": "861d7154a197259f2c6e55f9aea06ec835179898",
+  "sourceCommit": "6818333e5521067902837f82545dd132b63c7657",
   "expectedMainBase": "7fbc24666ea131daeb9b1e7a57b302789bf1d5ed",
   "migrations": [
     {
@@ -14,5 +14,5 @@
   "previewRequired": true,
   "createdAt": "2026-10-16T03:43:04Z",
   "branch": "feat/h3-1a-1-google-login",
-  "notes": "Sign-in with Google (H3.1A.1): identity only, PKCE, /auth/callback, complete_bellis_account for Google sign-ups. No Calendar scopes."
+  "notes": "Sign-in with Google (H3.1A.1): identity only, PKCE, /auth/callback, complete_bellis_account for Google sign-ups, and safe loading reset after an aborted OAuth round trip. No Calendar scopes."
 }
