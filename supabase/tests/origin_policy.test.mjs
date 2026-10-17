@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { checkoutReturnOrigin, configuredOrigins, isAllowedOrigin, isBellisVercelOrigin } from "../functions/_shared/origin-policy.ts";
+import { checkoutReturnOrigin, configuredOrigins, isAllowedOrigin, isBellisVercelOrigin, isGoogleCalendarOAuthOriginAllowed } from "../functions/_shared/origin-policy.ts";
 
 test("only configured HTTPS origins and local development can call the public function", () => {
   const primary = "https://bellis.vercel.app";
@@ -44,4 +44,31 @@ test("Bellis Vercel Preview recognition is restricted to the Bellis project in t
   assert.match(publicFunction, /function publicOriginAllowed\(origin: string\) \{\s*return isAllowedOrigin\(origin, allowedOrigins\) \|\| isBellisVercelOrigin\(origin\);\s*\}/);
   assert.match(publicFunction, /if \(request\.method === "OPTIONS"\) return new Response\(null, \{ status: 204, headers: cors\(request\) \}\);/);
   assert.match(publicFunction, /if \(origin && !publicOriginAllowed\(origin\)\)/);
+});
+
+test("Calendar Preview may only run the read-only connection check", () => {
+  const primary = "https://bellis-git-staging-bellis1.vercel.app";
+  const preview = "https://bellis-git-feat-h3-1b-google-calendar-events-bellis1.vercel.app";
+  const deployment = "https://bellis-pgl756w98-bellis1.vercel.app";
+  const origins = configuredOrigins(primary, "");
+
+  for (const origin of [preview, deployment]) {
+    assert.equal(isGoogleCalendarOAuthOriginAllowed("check", origin, origins), true, origin);
+    for (const action of ["start", "complete", "disconnect", "status", ""]) {
+      assert.equal(isGoogleCalendarOAuthOriginAllowed(action, origin, origins), false, `${action}:${origin}`);
+    }
+  }
+  for (const action of ["check", "start", "complete", "disconnect"]) {
+    assert.equal(isGoogleCalendarOAuthOriginAllowed(action, primary, origins), true, action);
+  }
+  for (const origin of [
+    "https://another-project-bellis1.vercel.app",
+    "https://bellis-git-feat-h3-1b-google-calendar-events-other-team.vercel.app",
+    "http://bellis-git-feat-h3-1b-google-calendar-events-bellis1.vercel.app",
+    "https://bellis-git-feat-h3-1b-google-calendar-events-bellis1.vercel.app.evil.example",
+  ]) assert.equal(isGoogleCalendarOAuthOriginAllowed("check", origin, origins), false, origin);
+
+  const oauthFunction = readFileSync(new URL("../functions/bellis-google-oauth/index.ts", import.meta.url), "utf8");
+  assert.match(oauthFunction, /isGoogleCalendarOAuthOriginAllowed\(requestAction\(request\), origin, allowedOrigins\)/);
+  assert.match(oauthFunction, /!isGoogleCalendarOAuthOriginAllowed\(action, origin, allowedOrigins\)/);
 });

@@ -1,7 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2.117.2";
 import * as jose from "npm:jose@6.2.12";
 import { checkGoogleConnection, completeGoogleOAuth, disconnectGoogle, googleIdTokenVerifier, googleOAuthConfigFromEnv, missingGoogleConfig, sha256Hex, startGoogleOAuth, supabaseGoogleConnectionStore } from "../_shared/google-calendar-oauth.ts";
-import { configuredOrigins, isAllowedOrigin, sessionCorsHeaders } from "../_shared/origin-policy.ts";
+import { configuredOrigins, isGoogleCalendarOAuthOriginAllowed, sessionCorsHeaders } from "../_shared/origin-policy.ts";
 import { logEvent, type LogFields } from "../_shared/payment-errors.ts";
 
 // Every action needs a signed-in person. Deployed with verify_jwt=false only because the browser's CORS preflight
@@ -24,8 +24,16 @@ const log = (level: "info" | "warn" | "error", event: string, fields: Fields = {
 const errorCode = (caught: unknown) => { const message = String((caught as { message?: unknown } | null)?.message ?? ""); return /^[a-z0-9_]{1,48}$/.test(message) ? message : "internal_error"; };
 if (!configured) for (const name of siteOrigin ? missing : ["BELLIS_SITE_ORIGIN", ...missing]) log("error", "config_missing", { error_code: "google_config_missing", status: name.replace(/[^A-Za-z0-9_]/g, "_").slice(0, 48) });
 
-// The same CORS as bellis-mp-oauth: configured origins and local development only, never "*", on every answer.
-const cors = (request: Request) => sessionCorsHeaders(request.headers.get("origin"), allowedOrigins, siteOrigin);
+// Preview QA may verify an existing connection, but it cannot start, complete or disconnect Calendar OAuth.
+// All responses remain credentialed and origin-specific: never "*".
+const requestAction = (request: Request) => new URL(request.url).searchParams.get("action") ?? "";
+const cors = (request: Request) => {
+  const origin = request.headers.get("origin");
+  const headers = sessionCorsHeaders(origin, allowedOrigins, siteOrigin);
+  if (origin && isGoogleCalendarOAuthOriginAllowed(requestAction(request), origin, allowedOrigins))
+    headers["Access-Control-Allow-Origin"] = origin;
+  return headers;
+};
 function json(request: Request, data: unknown, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: { ...cors(request), "Content-Type": "application/json" } });
 }
@@ -37,12 +45,13 @@ const has = (caught: unknown, code: string) => caught instanceof Error && caught
 
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors(request) });
-  const action = new URL(request.url).searchParams.get("action") ?? "";
+  const action = requestAction(request);
   try {
     if (request.method !== "POST" || !["start", "complete", "disconnect", "check"].includes(action))
       return json(request, { error: "Acción no disponible" }, 404);
     const origin = request.headers.get("origin");
-    if (origin && !isAllowedOrigin(origin, allowedOrigins)) return json(request, { error: "Origen no permitido" }, 403);
+    if (origin && !isGoogleCalendarOAuthOriginAllowed(action, origin, allowedOrigins))
+      return json(request, { error: "Origen no permitido" }, 403);
     // The session comes first: without one, nothing is said about how this environment is set up.
     const session = (request.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
     const { data, error } = session ? await db.auth.getUser(session) : { data: { user: null }, error: null };

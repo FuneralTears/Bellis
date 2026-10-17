@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { configuredOrigins, sessionCorsHeaders } from "../functions/_shared/origin-policy.ts";
+import { configuredOrigins, isGoogleCalendarOAuthOriginAllowed, sessionCorsHeaders } from "../functions/_shared/origin-policy.ts";
 
 // Staging as it is configured: its stable site origin, and no additional (Preview) origins.
 const site = "https://bellis-git-staging-team.vercel.app";
@@ -18,10 +18,14 @@ test("CORS: local development (localhost:5173) is echoed back", () => {
   assert.equal(headers.Vary, "Origin");
 });
 
-test("CORS: the stable staging origin is allowed; an OAuth Preview only when listed exactly", () => {
+test("CORS: stable staging is allowed; a Bellis Preview is limited to the read-only check", () => {
   assert.equal(sessionCorsHeaders(site, staging, site)["Access-Control-Allow-Origin"], site);
   const h31b = "https://bellis-git-feat-h3-1b-google-calendar-events-bellis1.vercel.app";
-  assert.equal(sessionCorsHeaders(h31b, staging, site)["Access-Control-Allow-Origin"], site, "Calendar OAuth remains exact-list only");
+  assert.equal(sessionCorsHeaders(h31b, staging, site)["Access-Control-Allow-Origin"], site, "the base session policy remains exact-list only");
+  assert.equal(isGoogleCalendarOAuthOriginAllowed("check", h31b, staging), true);
+  assert.equal(isGoogleCalendarOAuthOriginAllowed("start", h31b, staging), false);
+  assert.equal(isGoogleCalendarOAuthOriginAllowed("complete", h31b, staging), false);
+  assert.equal(isGoogleCalendarOAuthOriginAllowed("disconnect", h31b, staging), false);
   assert.equal(sessionCorsHeaders("https://bellis-abc123def-team.vercel.app", withPreview, site)["Access-Control-Allow-Origin"], "https://bellis-abc123def-team.vercel.app");
   assert.equal(sessionCorsHeaders("https://bellis-zzz999zzz-team.vercel.app", withPreview, site)["Access-Control-Allow-Origin"], site, "another team is refused");
 });
@@ -51,7 +55,7 @@ test("the function answers every request, error or success, with the same CORS h
   assert.equal((source.match(/new Response\(/g) ?? []).length, 2, "only the preflight and json() build responses");
   for (const status of [401, 403, 404, 413, 429, 500, 503]) assert.ok(source.includes(`, ${status})`), `the ${status} answer goes through json()`);
   // An origin that is not allowed is refused before anything else happens.
-  assert.match(handler, /if \(origin && !isAllowedOrigin\(origin, allowedOrigins\)\) return json\(request, \{ error: "Origen no permitido" \}, 403\);/);
+  assert.match(handler, /if \(origin && !isGoogleCalendarOAuthOriginAllowed\(action, origin, allowedOrigins\)\)/);
 });
 
 test("the CORS answer is the one Mercado Pago's connection already uses", () => {

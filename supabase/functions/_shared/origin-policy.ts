@@ -25,6 +25,19 @@ export function isAllowedOrigin(origin: string, origins: ReadonlySet<string>): b
   return origins.has(origin) || /^http:\/\/localhost:\d+$/.test(origin);
 }
 
+/**
+ * Calendar connection verification is read-only and is needed from an authenticated Bellis Preview during QA.
+ * The actions that start, complete or disconnect OAuth keep the exact configured-origin policy because their
+ * redirect and mutation flow belongs to the stable environment.
+ */
+export function isGoogleCalendarOAuthOriginAllowed(
+  action: string,
+  origin: string,
+  origins: ReadonlySet<string>,
+): boolean {
+  return isAllowedOrigin(origin, origins) || (action === "check" && isBellisVercelOrigin(origin));
+}
+
 export function checkoutReturnOrigin(origin: string | null, primary: string, origins: ReadonlySet<string>): string {
   return origin && origins.has(origin) ? origin : primary;
 }
