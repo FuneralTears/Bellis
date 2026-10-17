@@ -33,10 +33,16 @@ test('the preference sends the patient back with that token, one address per out
   const realFetch = globalThis.fetch; let body;
   globalThis.fetch = async (_url, init) => { body = JSON.parse(init.body); return Response.json({ id: 'pref-1', init_point: checkoutUrl }); };
   try {
-    const returnUrls = checkoutReturnUrls('https://bellis.example', 'ana-lopez', 'a'.repeat(64));
+    const preview = 'https://bellis-git-feat-h3-1b-google-calendar-events-bellis1.vercel.app';
+    const returnUrls = checkoutReturnUrls(preview, 'ana-lopez', 'a'.repeat(64));
     await new MercadoPagoArgentinaProvider('token').createCheckout({ intentId: 'intent-1', serviceId: 'service-1', title: 'Consulta', amountMinor: 2500000,
-      currency: 'ARS', environment: 'production', returnUrl: 'https://bellis.example/p/ana-lopez', returnUrls, notificationUrl: 'https://supabase.example/hook' });
+      currency: 'ARS', environment: 'production', returnUrl: `${preview}/p/ana-lopez`, returnUrls, notificationUrl: 'https://supabase.example/hook' });
     assert.deepEqual(body.back_urls, returnUrls);
+    assert.equal(body.auto_return, 'approved');
+    for (const returnUrl of Object.values(body.back_urls)) {
+      assert.equal(new URL(returnUrl).origin, preview);
+      assert.notEqual(new URL(returnUrl).origin, 'https://bellis-git-staging-bellis1.vercel.app');
+    }
     // The request id travels to Mercado Pago as the reference, never in the address the browser comes back to.
     assert.ok(!JSON.stringify(body.back_urls).includes('intent-1'));
   } finally { globalThis.fetch = realFetch; }

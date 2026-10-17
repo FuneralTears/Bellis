@@ -61,8 +61,12 @@ export function isGoogleCalendarOAuthOriginAllowed(
   return isAllowedOrigin(origin, origins) || (action === "check" && isBellisVercelOrigin(origin));
 }
 
-export function checkoutReturnOrigin(origin: string | null, primary: string, origins: ReadonlySet<string>): string {
-  return origin && origins.has(origin) ? origin : primary;
+/**
+ * The checkout must return to the exact Bellis page that started it. Unlike CORS, there is no useful fallback:
+ * replacing an invalid or missing caller with another environment loses the patient's booking context.
+ */
+export function checkoutReturnOrigin(origin: string | null, origins: ReadonlySet<string>): string | null {
+  return origin && isPublicOriginAllowed(origin, origins) ? origin : null;
 }
 
 /**

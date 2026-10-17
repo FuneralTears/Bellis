@@ -13,15 +13,17 @@ test("only configured HTTPS origins and local development can call the public fu
   assert.equal(isAllowedOrigin("https://evil.example", origins), false);
   assert.equal(isAllowedOrigin("http://localhost:5173", origins), true);
   assert.equal(isAllowedOrigin("https://unlisted.vercel.app", origins), false);
-  assert.equal(checkoutReturnOrigin("https://preview-a.vercel.app", primary, origins), "https://preview-a.vercel.app");
-  assert.equal(checkoutReturnOrigin("https://unlisted.vercel.app", primary, origins), primary);
-  assert.equal(checkoutReturnOrigin("http://localhost:5173", primary, origins), primary);
+  assert.equal(checkoutReturnOrigin("https://preview-a.vercel.app", origins), "https://preview-a.vercel.app");
+  assert.equal(checkoutReturnOrigin("https://unlisted.vercel.app", origins), null);
+  assert.equal(checkoutReturnOrigin("http://localhost:5173", origins), "http://localhost:5173");
+  assert.equal(checkoutReturnOrigin(null, origins), null);
 });
 
 test("Bellis Vercel Preview recognition is restricted to the Bellis project in the bellis1 team", () => {
   const h31b = "https://bellis-git-feat-h3-1b-google-calendar-events-bellis1.vercel.app";
   const deployment = "https://bellis-2obl8m6in-bellis1.vercel.app";
-  const origins = configuredOrigins("https://bellis-git-staging-bellis1.vercel.app", "");
+  const stable = "https://bellis-git-staging-bellis1.vercel.app";
+  const origins = configuredOrigins(stable, "");
 
   for (const origin of [h31b, deployment]) {
     assert.equal(isBellisVercelOrigin(origin), true, origin);
@@ -46,6 +48,13 @@ test("Bellis Vercel Preview recognition is restricted to the Bellis project in t
   assert.equal(previewHeaders["Access-Control-Allow-Origin"], h31b);
   assert.equal(publicCorsHeaders(prod, configuredOrigins(prod, ""))["Access-Control-Allow-Origin"], prod);
 
+  assert.equal(checkoutReturnOrigin(h31b, origins), h31b);
+  assert.equal(checkoutReturnOrigin(deployment, origins), deployment);
+  assert.equal(checkoutReturnOrigin(stable, origins), stable);
+  assert.equal(checkoutReturnOrigin(prod, configuredOrigins(prod, "")), prod);
+  assert.equal(checkoutReturnOrigin("https://evil.example", origins), null);
+  assert.notEqual(checkoutReturnOrigin(h31b, origins), stable);
+
   const invalidHeaders = publicCorsHeaders("https://evil.example", configuredOrigins(prod, ""));
   assert.equal(invalidHeaders["Access-Control-Allow-Origin"], undefined);
   assert.equal(Object.values(invalidHeaders).includes("*"), false);
@@ -55,6 +64,12 @@ test("Bellis Vercel Preview recognition is restricted to the Bellis project in t
   assert.match(publicFunction, /status: origin && publicOriginAllowed\(origin\) \? 204 : 403/);
   assert.doesNotMatch(publicFunction, /"Access-Control-Allow-Origin": publicOriginAllowed\(origin\) \? origin : siteOrigin/);
   assert.match(publicFunction, /if \(origin && !publicOriginAllowed\(origin\)\)/);
+  const createIntent = publicFunction.indexOf('action === "create_intent"');
+  const returnOriginGuard = publicFunction.indexOf("const returnOrigin = checkoutReturnOrigin(origin, allowedOrigins)", createIntent);
+  const createIntentRpc = publicFunction.indexOf('db.rpc("create_checkout_intent"', createIntent);
+  assert.ok(createIntent >= 0 && returnOriginGuard > createIntent && createIntentRpc > returnOriginGuard,
+    "the return origin is validated before the booking write");
+  assert.doesNotMatch(publicFunction, /checkoutReturnOrigin\(origin, siteOrigin/);
 });
 
 test("Calendar Preview may only run the read-only connection check", () => {

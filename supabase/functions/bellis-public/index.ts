@@ -162,6 +162,10 @@ Deno.serve(async (request) => {
       return profile(request, new URL(request.url).searchParams.get("slug") ?? "");
     }
     if (action === "create_intent" && request.method === "POST") {
+      // Preserve the exact Bellis origin that began checkout. Missing or foreign origins fail before any patient,
+      // intent or Mercado Pago preference is created; a valid Preview is never replaced with stable staging.
+      const returnOrigin = checkoutReturnOrigin(origin, allowedOrigins);
+      if (!returnOrigin) return json(request, { error: "Origen no permitido" }, 403);
       if (!await limit(request, action, 8, 60)) return refuse(request, "rate_limited", 429);
       if (Number(request.headers.get("content-length") ?? "0") > 100000) return json(request, { error: "Formulario demasiado grande" }, 413);
       const body = await request.json();
@@ -219,7 +223,6 @@ Deno.serve(async (request) => {
         // Amount, currency and service come from the stored request; the seller is the workspace's own account.
         // The return address carries only the slug and an opaque token for this request.
         const resumeToken = newResumeToken();
-        const returnOrigin = checkoutReturnOrigin(origin, siteOrigin, allowedOrigins);
         const checkoutUrl = await createMercadoPagoCheckout(connections, account, {
           intentId: intent.id, workspaceId: intent.workspace_id, serviceId: intent.service_id, title: service.name,
           amountMinor: intent.price_minor, currency: intent.currency_code, expiresAt: intent.expires_at,

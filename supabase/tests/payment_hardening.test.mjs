@@ -474,12 +474,13 @@ test('logs: what the webhook writes for a failure carries ids and a code, never 
   assert.deepEqual(Object.keys(answer.fields).sort(), ['error_code', 'http_status', 'intent_id', 'payment_id', 'provider', 'retry', 'workspace_id']);
 });
 
-test('cross-environment: a function only trusts and returns to the site it was configured with', () => {
+test('cross-environment: checkout returns only to the exact allowed caller and never falls back across environments', () => {
   const staging = 'https://bellis-staging.example'; const production = 'https://bellis.example';
   const origins = configuredOrigins(staging, '');
   assert.equal(isAllowedOrigin(production, origins), false);
-  // The patient is sent back to this environment's site even when the request claims another origin.
-  assert.equal(checkoutReturnOrigin(production, staging, origins), staging);
+  assert.equal(checkoutReturnOrigin(staging, origins), staging);
+  assert.equal(checkoutReturnOrigin(production, origins), null);
+  assert.equal(checkoutReturnOrigin(production, configuredOrigins(production, '')), production);
   const read = (values) => (name) => values[name];
   // The callback is derived from the same site unless set, so one environment cannot inherit another's.
   assert.equal(oauthConfigFromEnv(read({}), staging).redirectUri, `${staging}/mercado-pago/callback`);
