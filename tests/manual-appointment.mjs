@@ -228,3 +228,25 @@ test("errores al cancelar: explican qué pasó y recargan cuando el turno cambi�
   assert.match(describeCancelError("appointment_not_cancellable").text, /atendido/);
   assert.match(describeCancelError("TypeError: Failed to fetch").text, /conexión/);
 });
+
+test("reagendar: solo turnos manuales que siguen agendados", async () => {
+  const { canRescheduleAppointment } = await import("../lib/manual-appointment.ts");
+  assert.equal(canRescheduleAppointment({ source: "manual", appointmentStatus: "scheduled" }), true);
+  for (const appointmentStatus of ["completed", "cancelled", null]) assert.equal(canRescheduleAppointment({ source: "manual", appointmentStatus }), false);
+  assert.equal(canRescheduleAppointment({ source: "public", appointmentStatus: "scheduled" }), false);
+  assert.equal(canRescheduleAppointment({ appointmentStatus: "scheduled" }), false);
+});
+
+test("reagendar: cada error del servidor dice qué hacer", async () => {
+  const { describeRescheduleError } = await import("../lib/manual-appointment.ts");
+  assert.deepEqual(describeRescheduleError("slot_unavailable"), { text: "Ese horario acaba de ocuparse. Elegí otro.", slotConflict: true, reload: false });
+  assert.equal(describeRescheduleError('conflicting key value violates exclusion constraint "appointments_no_overlap"').slotConflict, true);
+  assert.equal(describeRescheduleError("slot_in_past").slotConflict, true);
+  assert.match(describeRescheduleError("slot_unchanged").text, /mismo horario/);
+  assert.equal(describeRescheduleError("appointment_not_reschedulable").reload, true);
+  assert.match(describeRescheduleError("not_manual_appointment").text, /reservado por el paciente/);
+  assert.match(describeRescheduleError("not_authorized").text, /permiso/);
+  assert.match(describeRescheduleError("JWT expired").text, /sesión/);
+  assert.match(describeRescheduleError("TypeError: Failed to fetch").text, /conexión/);
+  assert.deepEqual(describeRescheduleError("boom"), { text: "No pudimos reagendar el turno. Intentá de nuevo.", slotConflict: false, reload: false });
+});

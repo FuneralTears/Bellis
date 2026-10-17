@@ -58,7 +58,8 @@ insert into public.appointments(id,workspace_id,booking_intent_id,professional_i
   ('e3100000-0000-4000-8000-0000000004ee','e3100000-0000-4000-8000-00000000000e','e3100000-0000-4000-8000-0000000003ee','e3100000-0000-4000-8000-0000000000ee','e3100000-0000-4000-8000-0000000002ee',now()+interval '14 days',now()+interval '14 days 1 hour','scheduled');
 
 do $$ begin
-  if (select count(*) from private.google_calendar_event_sync)<>2 then raise exception 'gate_did_not_limit_initial_queue'; end if;
+  -- Only this smoke's workspaces: staging may hold real rows from manual E2E runs.
+  if (select count(*) from private.google_calendar_event_sync where workspace_id::text like 'e3100000-%')<>2 then raise exception 'gate_did_not_limit_initial_queue'; end if;
   if not exists(select 1 from private.google_calendar_event_sync where appointment_id='e3100000-0000-4000-8000-0000000004aa' and desired_timezone='America/Argentina/Buenos_Aires' and state='pending')
     or not exists(select 1 from private.google_calendar_event_sync where appointment_id='e3100000-0000-4000-8000-0000000004dd')
     then raise exception 'pro_or_trial_not_queued'; end if;

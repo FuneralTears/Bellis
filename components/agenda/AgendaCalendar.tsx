@@ -1,8 +1,20 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { CalendarDays, ChevronLeft, ChevronRight, Clock3 } from "lucide-react";
+import {
+  appointmentsInPeriod,
+  dayLabels,
+  emptyPeriodText,
+  inPeriod,
+  monthWeeks,
+  periodLabel,
+  shiftPeriod,
+  stepLabel,
+  type AgendaPeriod,
+  type AgendaView,
+} from "@/lib/agenda-period";
 import "./agenda.css";
 
-export type AgendaView = "Día" | "Semana" | "Mes";
+export type { AgendaView };
 /** Display fields only. The caller keeps its existing filters, timezone and handlers. */
 export type AgendaAppointment = {
   id: string;
@@ -41,6 +53,23 @@ function statusKind(status: string) {
           ? "confirmed"
           : "neutral";
 }
+/** The color of a turn: by its state, or by its service when it is confirmed. */
+function toneOf(item: AgendaAppointment) {
+  const kind = statusKind(item.status);
+  const tones = ["sage", "blue", "coral", "lilac", "orange"];
+  const colorIndex =
+    [...(item.service ?? item.id)].reduce(
+      (sum, letter) => (sum * 31 + letter.charCodeAt(0)) >>> 0,
+      0,
+    ) % tones.length;
+  return kind === "cancelled"
+    ? "neutral"
+    : kind === "pending"
+      ? "orange"
+      : kind === "completed"
+        ? "blue"
+        : tones[colorIndex];
+}
 function AppointmentBlock({
   item,
   selected,
@@ -51,20 +80,7 @@ function AppointmentBlock({
   onSelect: (id: string) => void;
 }) {
   const kind = statusKind(item.status);
-  const tones = ["sage", "blue", "coral", "lilac", "orange"];
-  const colorIndex =
-    [...(item.service ?? item.id)].reduce(
-      (sum, letter) => (sum * 31 + letter.charCodeAt(0)) >>> 0,
-      0,
-    ) % tones.length;
-  const tone =
-    kind === "cancelled"
-      ? "neutral"
-      : kind === "pending"
-        ? "orange"
-        : kind === "completed"
-          ? "blue"
-          : tones[colorIndex];
+  const tone = toneOf(item);
   return (
     <button
       className={`agenda-appointment agenda-tone-${tone}${selected ? " is-selected" : ""}`}
@@ -93,24 +109,24 @@ function AppointmentBlock({
   );
 }
 
+type AgendaDay = { key: string; weekday: string; dateLabel: string; appointments: AgendaAppointment[] };
+
 function AgendaDays({
   days,
   selectedId,
   onSelect,
 }: {
-  days: { key: string; appointments: AgendaAppointment[] }[];
+  days: AgendaDay[];
   selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
   return (
     <>
-      {" "}
       {days.map((day) => (
         <section className="agenda-day" key={day.key}>
           <header>
             <h2>
-              {day.appointments[0].weekday}{" "}
-              <span>{day.appointments[0].dateLabel}</span>
+              {day.weekday} <span>{day.dateLabel}</span>
             </h2>
             <span>
               {day.appointments.length}{" "}
@@ -133,92 +149,243 @@ function AgendaDays({
   );
 }
 
-/** Group the already-filtered appointments for display; never calculate availability or slots. */
+/** Day or week: one column per calendar day of the period, with or without turns, and one row per hour. */
+function AgendaTimetable({
+  days,
+  selectedId,
+  onSelect,
+}: {
+  days: AgendaDay[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+}) {
+  const hours = days.flatMap((day) =>
+    day.appointments.map((item) => Number(item.startTime.split(":")[0])),
+  );
+  const start = Math.min(8, ...hours);
+  const end = Math.max(18, ...hours);
+  return (
+    <div className="agenda-grid-scroll">
+      <table className={`agenda-grid${days.length === 1 ? " agenda-grid-day" : ""}`}>
+        <caption className="sr-only">
+          Turnos por día y hora. Seleccioná un turno para ver sus detalles.
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col" className="agenda-hour-heading">
+              <Clock3 size={14} />
+              <span className="sr-only">Hora</span>
+            </th>
+            {days.map((day) => (
+              <th scope="col" key={day.key}>
+                <span>{day.weekday}</span>
+                <strong>{day.dateLabel}</strong>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {Array.from({ length: end - start + 1 }, (_, index) => start + index).map((hour) => (
+            <tr key={hour}>
+              <th scope="row" className="agenda-hour">
+                {String(hour).padStart(2, "0")}:00
+              </th>
+              {days.map((day) => (
+                <td key={day.key}>
+                  {day.appointments
+                    .filter((item) => Number(item.startTime.split(":")[0]) === hour)
+                    .map((item) => (
+                      <AppointmentBlock
+                        key={item.id}
+                        item={item}
+                        selected={selectedId === item.id}
+                        onSelect={onSelect}
+                      />
+                    ))}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Month: the real calendar month, Monday to Sunday. Each day opens in the day view; a few turns are shown in it. */
+function AgendaMonth({
+  period,
+  byDay,
+  today,
+  locale,
+  selectedId,
+  onSelect,
+  onOpenDay,
+}: {
+  period: AgendaPeriod;
+  byDay: Map<string, AgendaAppointment[]>;
+  today: string;
+  locale: string;
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+  onOpenDay?: (day: string) => void;
+}) {
+  const weeks = monthWeeks(period);
+  const shown = 3;
+  return (
+    <div className="agenda-grid-scroll">
+      <table className="agenda-month">
+        <caption className="sr-only">
+          Turnos del mes. Seleccioná un día para verlo completo.
+        </caption>
+        <thead>
+          <tr>
+            {weeks[0].map((day) => (
+              <th scope="col" key={day}>
+                {dayLabels(day, locale).weekday.slice(0, 3)}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {weeks.map((week) => (
+            <tr key={week[0]}>
+              {week.map((day) => {
+                const outside = !inPeriod(period, day);
+                const items = outside ? [] : (byDay.get(day) ?? []);
+                const label = dayLabels(day, locale);
+                return (
+                  <td
+                    key={day}
+                    className={`${outside ? "is-outside" : ""}${day === today ? " is-today" : ""}`}
+                  >
+                    {outside ? (
+                      <span className="agenda-month-day" aria-hidden="true">
+                        {Number(day.slice(8))}
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="agenda-month-day"
+                        aria-label={`Ver ${label.weekday} ${label.dateLabel}${items.length ? `, ${items.length} ${items.length === 1 ? "turno" : "turnos"}` : ""}`}
+                        aria-current={day === today ? "date" : undefined}
+                        onClick={() => onOpenDay?.(day)}
+                      >
+                        {Number(day.slice(8))}
+                      </button>
+                    )}
+                    {items.slice(0, shown).map((item) => (
+                      <button
+                        type="button"
+                        key={item.id}
+                        className={`agenda-chip agenda-tone-${toneOf(item)}${selectedId === item.id ? " is-selected" : ""}`}
+                        aria-pressed={selectedId === item.id}
+                        onClick={() => onSelect(item.id)}
+                      >
+                        <b>{item.startTime}</b> {item.patient ?? item.service}
+                      </button>
+                    ))}
+                    {items.length > shown && (
+                      <button type="button" className="agenda-chip-more" onClick={() => onOpenDay?.(day)}>
+                        +{items.length - shown} más
+                      </button>
+                    )}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/**
+ * The agenda for one period: a day, a week of seven consecutive days or a calendar month. The caller keeps the view
+ * and the anchor day; this only draws them. Appointments outside the period are never shown, whatever is passed in.
+ * It never calculates availability or slots.
+ */
 export default function AgendaCalendar({
   appointments,
-  view,
+  period,
+  today,
+  locale,
+  onPeriod,
+  onOpenDay,
   viewControls,
   selectedId,
   onSelect,
-  todayLabel,
   timezone,
   actions,
   panel,
 }: {
+  /** Every appointment that may be on screen; only the period's are drawn. `dateKey` is the local day of the workspace. */
   appointments: AgendaAppointment[];
-  view: AgendaView;
+  period: AgendaPeriod;
+  /** Local day of the workspace, YYYY-MM-DD: where "Hoy" goes back to. */
+  today: string;
+  locale: string;
+  /** Moves the anchor day: "Hoy", previous and next period. */
+  onPeriod: (anchor: string) => void;
+  /** Opens one day of the month in the day view. */
+  onOpenDay?: (day: string) => void;
   viewControls: ReactNode;
   selectedId: string | null;
   onSelect: (id: string) => void;
-  todayLabel: string;
   timezone: string;
   /** Main actions of the agenda, shown in the header. */
   actions?: ReactNode;
   /** Shown between the header and the calendar, e.g. the form that creates an appointment. */
   panel?: ReactNode;
 }) {
-  const days = [...new Set(appointments.map((item) => item.dateKey))]
-    .sort()
-    .map((key) => ({
-      key,
-      appointments: appointments.filter((item) => item.dateKey === key),
-    }));
-  const dayGroups = Array.from(
-    { length: Math.ceil(days.length / 7) },
-    (_, index) => days.slice(index * 7, index * 7 + 7),
-  );
-  const first = days[0]?.appointments[0];
-  const last = days[days.length - 1]?.appointments[0];
-  const range = first
-    ? first.dateKey === last?.dateKey
-      ? first.dateLabel
-      : `${first.dateLabel} – ${last?.dateLabel}`
-    : todayLabel;
+  const view = period.view;
+  const visible = appointmentsInPeriod(period, appointments);
+  const byDay = new Map<string, AgendaAppointment[]>();
+  for (const item of visible) byDay.set(item.dateKey, [...(byDay.get(item.dateKey) ?? []), item]);
+  const toDay = (key: string): AgendaDay => ({ key, ...dayLabels(key, locale), appointments: byDay.get(key) ?? [] });
+  const columns = period.days.map(toDay);
+  const withTurns = columns.filter((day) => day.appointments.length);
+  const current = inPeriod(period, today);
   return (
     <section className="agenda" aria-label="Agenda de turnos">
       <header className="agenda-header">
         <div>
           <h1>Agenda</h1>
-          <p>
+          <p aria-live="polite">
             <CalendarDays size={14} />
-            {range}
+            {periodLabel(period, locale)}
           </p>
         </div>
         <div className="agenda-controls">
           {actions}
-          <div
-            className="agenda-date-controls"
-            aria-label="Navegación de fechas"
-          >
+          <div className="agenda-date-controls" role="group" aria-label="Navegación de fechas">
             <button
               type="button"
-              disabled
-              title="Navegación de fechas no disponible"
+              aria-pressed={current}
+              title={current ? "Ya estás viendo el período de hoy" : "Volver a hoy"}
+              onClick={() => onPeriod(today)}
             >
               Hoy
             </button>
             <button
               type="button"
-              disabled
-              aria-label="Periodo anterior"
-              title="Navegación de fechas no disponible"
+              aria-label={stepLabel(view, -1)}
+              title={stepLabel(view, -1)}
+              onClick={() => onPeriod(shiftPeriod(view, period.anchor, -1))}
             >
-              <ChevronLeft size={16} />
+              <ChevronLeft size={18} />
             </button>
             <button
               type="button"
-              disabled
-              aria-label="Periodo siguiente"
-              title="Navegación de fechas no disponible"
+              aria-label={stepLabel(view, 1)}
+              title={stepLabel(view, 1)}
+              onClick={() => onPeriod(shiftPeriod(view, period.anchor, 1))}
             >
-              <ChevronRight size={16} />
+              <ChevronRight size={18} />
             </button>
           </div>
-          <div
-            className="agenda-view-controls"
-            role="group"
-            aria-label="Vista de agenda"
-          >
+          <div className="agenda-view-controls" role="group" aria-label="Vista de agenda">
             {viewControls}
           </div>
         </div>
@@ -227,101 +394,37 @@ export default function AgendaCalendar({
       <div className="agenda-board demo-panel">
         <div className="agenda-board-heading">
           <span>
-            <strong>{view}</strong> · {appointments.length}{" "}
-            {appointments.length === 1 ? "turno" : "turnos"}
+            <strong>{view}</strong> · {visible.length} {visible.length === 1 ? "turno" : "turnos"}
           </span>
           <span className="agenda-timezone">
             {timezone.replaceAll("_", " ").split("/").slice(-1)[0]}
           </span>
         </div>
-        {!appointments.length ? (
+        {!visible.length ? (
           <div className="agenda-empty" role="status">
             <CalendarDays size={24} />
-            <strong>No hay turnos en esta vista</strong>
-            <p>Los turnos de la vista seleccionada aparecerán acá.</p>
+            <strong>{emptyPeriodText(view)}</strong>
+            <p>Usá las flechas para ver otro período o «Hoy» para volver al actual.</p>
           </div>
         ) : (
           <>
             <div className="agenda-timetable">
-              {dayGroups.slice(0, 1).map((group) => {
-                const hours = group.flatMap((day) =>
-                  day.appointments.map((item) =>
-                    Number(item.startTime.split(":")[0]),
-                  ),
-                );
-                const start = Math.min(8, ...hours);
-                const end = Math.max(18, ...hours);
-                return (
-                  <div key={group[0].key} className="agenda-grid-scroll">
-                    <table className="agenda-grid">
-                      <caption className="sr-only">
-                        Turnos por día y hora. Seleccioná un turno para ver sus
-                        detalles.
-                      </caption>
-                      <thead>
-                        <tr>
-                          <th scope="col" className="agenda-hour-heading">
-                            <Clock3 size={14} />
-                            <span className="sr-only">Hora</span>
-                          </th>
-                          {group.map((day) => (
-                            <th scope="col" key={day.key}>
-                              <span>{day.appointments[0].weekday}</span>
-                              <strong>{day.appointments[0].dateLabel}</strong>
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {Array.from(
-                          { length: end - start + 1 },
-                          (_, index) => start + index,
-                        ).map((hour) => (
-                          <tr key={hour}>
-                            <th scope="row" className="agenda-hour">
-                              {String(hour).padStart(2, "0")}:00
-                            </th>
-                            {group.map((day) => (
-                              <td key={day.key}>
-                                {day.appointments
-                                  .filter(
-                                    (item) =>
-                                      Number(item.startTime.split(":")[0]) ===
-                                      hour,
-                                  )
-                                  .map((item) => (
-                                    <AppointmentBlock
-                                      key={item.id}
-                                      item={item}
-                                      selected={selectedId === item.id}
-                                      onSelect={onSelect}
-                                    />
-                                  ))}
-                              </td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                );
-              })}
-              {days.length > 7 && (
-                <div className="agenda-continuation">
-                  <AgendaDays
-                    days={days.slice(7)}
-                    selectedId={selectedId}
-                    onSelect={onSelect}
-                  />
-                </div>
+              {view === "Mes" ? (
+                <AgendaMonth
+                  period={period}
+                  byDay={byDay}
+                  today={today}
+                  locale={locale}
+                  selectedId={selectedId}
+                  onSelect={onSelect}
+                  onOpenDay={onOpenDay}
+                />
+              ) : (
+                <AgendaTimetable days={columns} selectedId={selectedId} onSelect={onSelect} />
               )}
             </div>
             <div className="agenda-compact">
-              <AgendaDays
-                days={days}
-                selectedId={selectedId}
-                onSelect={onSelect}
-              />
+              <AgendaDays days={withTurns} selectedId={selectedId} onSelect={onSelect} />
             </div>
           </>
         )}

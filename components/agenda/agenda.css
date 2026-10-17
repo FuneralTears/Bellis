@@ -43,18 +43,26 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 34px;
-  min-width: 34px;
-  padding: 7px 10px;
+  min-height: 40px;
+  min-width: 40px;
+  padding: 8px 12px;
+  cursor: pointer;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   font-size: 12px;
   color: var(--muted-foreground);
 }
-.agenda-date-controls button:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
+.agenda-date-controls button:hover {
+  color: var(--foreground);
+  border-color: var(--primary);
+}
+.agenda-date-controls button:first-child {
+  font-weight: 600;
+  color: var(--foreground);
+}
+.agenda-date-controls button[aria-pressed="true"] {
+  color: var(--primary);
 }
 .agenda-view-controls {
   padding: 3px;
@@ -63,8 +71,8 @@
   border-radius: 8px;
 }
 .agenda-view-controls button {
-  min-height: 30px;
-  padding: 6px 12px;
+  min-height: 34px;
+  padding: 7px 14px;
   border: 0;
   border-radius: 5px;
   background: transparent;
@@ -113,6 +121,9 @@
   table-layout: fixed;
   border-collapse: collapse;
   min-width: 820px;
+}
+.agenda-grid.agenda-grid-day {
+  min-width: 0;
 }
 .agenda-grid th {
   text-align: center;
@@ -276,6 +287,98 @@
 .agenda-compact {
   display: none;
 }
+/* Month: a real calendar month, Monday to Sunday. */
+.agenda-month {
+  width: 100%;
+  min-width: 820px;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+.agenda-month thead th {
+  padding: 10px 5px;
+  background: var(--background);
+  border-bottom: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: capitalize;
+}
+.agenda-month td {
+  height: 104px;
+  padding: 6px;
+  vertical-align: top;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.agenda-month td:last-child {
+  border-right: 0;
+}
+.agenda-month td.is-outside {
+  background: var(--surface-muted);
+  color: var(--muted-foreground);
+  opacity: 0.6;
+}
+.agenda-month-day {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  min-height: 30px;
+  margin-bottom: 4px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--foreground);
+  font-size: 12px;
+  font-weight: 600;
+}
+button.agenda-month-day {
+  cursor: pointer;
+}
+button.agenda-month-day:hover {
+  background: var(--surface-muted);
+}
+.agenda-month td.is-today .agenda-month-day {
+  background: var(--primary);
+  color: var(--surface);
+}
+.agenda-chip {
+  display: block;
+  width: 100%;
+  margin-top: 3px;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-left: 3px solid var(--agenda-rail, var(--sage));
+  border-radius: 5px;
+  background: var(--agenda-fill, var(--sage-subtle));
+  color: var(--foreground);
+  font-size: 10px;
+  line-height: 1.35;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.agenda-chip b {
+  font-weight: 600;
+}
+.agenda-chip.is-selected {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+.agenda-chip-more {
+  display: block;
+  margin-top: 4px;
+  padding: 2px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
 .demo-shell .agenda-details.demo-panel {
   padding: 16px;
   margin-top: 16px;
@@ -401,12 +504,13 @@
     gap: 8px;
   }
   .agenda-date-controls button {
-    padding: 7px 8px;
-    min-height: 36px;
+    padding: 8px 10px;
+    min-height: 44px;
+    min-width: 44px;
   }
   .agenda-view-controls button {
-    padding: 7px 10px;
-    min-height: 32px;
+    padding: 8px 12px;
+    min-height: 38px;
   }
   .agenda-board-heading {
     padding: 10px 12px;

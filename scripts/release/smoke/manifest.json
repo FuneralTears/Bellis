@@ -213,6 +213,15 @@
       }
     },
     {
+      "id": "manual_reschedule",
+      "file": "supabase/tests/manual_reschedule_smoke.sql",
+      "groups": ["core", "calendar", "release"],
+      "expect": {
+        "result": "PASS"
+      },
+      "requires": ["the reschedule migration; all appointment/account data is synthetic and the transaction is rolled back"]
+    },
+    {
       "id": "manual_downgrade_no_expiration",
       "file": "supabase/tests/manual_downgrade_no_expiration_smoke.sql",
       "groups": ["admin", "plans", "release"],

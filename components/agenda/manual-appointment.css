@@ -497,3 +497,43 @@
 .agenda-details .live-empty {
   font-size: 14px;
 }
+/* "Reagendar" on an appointment the practice loaded: same card as cancelling, with the shared time picker. */
+.rma-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.rop-open + .rma-open,
+.rma-open + .cma-open {
+  margin-left: 8px;
+}
+.ma.rma .cma-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+.rma .ma-hint {
+  margin: 6px 0 10px;
+  font-size: 13px;
+}
+.rma .bk-slot-picker {
+  margin-top: 8px;
+}
+.rma-summary {
+  margin: 10px 0 0;
+  font-size: 14px;
+  color: var(--foreground);
+}
+@media (max-width: 600px) {
+  .rop-open + .rma-open,
+  .rma-open + .cma-open {
+    margin-left: 0;
+    margin-top: 8px;
+  }
+  .rma-open,
+  .cma-open {
+    width: 100%;
+    justify-content: center;
+  }
+}

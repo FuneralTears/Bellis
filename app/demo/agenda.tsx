@@ -5,8 +5,8 @@ import { Plus } from "lucide-react";
 import AgendaCalendar, {
   AgendaDetails,
   type AgendaAppointment,
-  type AgendaView,
 } from "@/components/agenda/AgendaCalendar";
+import { agendaPeriod, agendaViews, dayLabels, type AgendaView } from "@/lib/agenda-period";
 import {
   ManualAppointmentForm,
   type ManualAppointmentInput,
@@ -14,7 +14,8 @@ import {
 } from "@/components/agenda/ManualAppointmentForm";
 import { RecordOfflinePayment } from "@/components/payments/RecordOfflinePayment";
 import { CancelManualAppointment } from "@/components/agenda/CancelManualAppointment";
-import { canCancelAppointment, canRecordPayment, chargeLabel, paymentLabel, type CancelArgs, type PaymentMethod } from "@/lib/manual-appointment";
+import { RescheduleManualAppointment } from "@/components/agenda/RescheduleManualAppointment";
+import { canCancelAppointment, canRecordPayment, canRescheduleAppointment, chargeLabel, paymentLabel, type CancelArgs, type PaymentMethod } from "@/lib/manual-appointment";
 import { formatMoney } from "@/lib/market";
 import { demoAgendaHistory } from "./agenda-data";
 import { demoPatients, demoServices, demoToday, type DemoService } from "./showroom-data";
@@ -60,6 +61,9 @@ export function DemoAgenda({
   services?: DemoService[];
 }) {
   const [view, setView] = useState<AgendaView>("Semana");
+  // Same navigation as the product: the demo's "today" is fixed, so "Hoy" always goes back to the same week.
+  const [anchor, setAnchor] = useState(demoToday);
+  const period = agendaPeriod(view, anchor);
   const [selected, setSelected] = useState<string | null>(null);
   // "Nuevo turno": same flow as the product. Patients and turns added here live in memory and nothing is sent.
   const [creating, setCreating] = useState(false);
@@ -81,13 +85,6 @@ export function DemoAgenda({
     (a, b) =>
       a.dateKey.localeCompare(b.dateKey) ||
       a.startTime.localeCompare(b.startTime),
-  );
-  const visible = all.filter((item) =>
-    view === "Día"
-      ? item.dateKey === demoToday
-      : view === "Mes"
-        ? item.dateKey.startsWith("2026-10")
-        : item.dateKey >= "2026-09-26",
   );
   const appointment = all.find((item) => item.id === selected);
   const manual = created.find((item) => item.appointment.id === selected)?.info;
@@ -111,10 +108,14 @@ export function DemoAgenda({
       || (digits.length >= 4 && (item.phone ?? "").replace(/\D/g, "").includes(digits))).slice(0, 8);
   }, [known]);
   // A time is free when no turn of that day starts at it: the example turns of the day and the ones created here.
-  const loadSlots = async (_professionalId: string, _serviceId: string, day: string) => {
-    const taken = new Set(all.filter((item) => item.dateKey === day && item.status !== "cancelled").map((item) => item.startTime));
-    return exampleTimes(day).filter((time) => !taken.has(time)).map((time) => new Date(`${day}T${time}:00-03:00`).toISOString());
+  // The turn being moved does not take its own place, and its current time is not offered.
+  const freeTimes = (day: string, except?: string) => {
+    const taken = new Set(all.filter((item) => item.dateKey === day && item.status !== "cancelled" && item.id !== except).map((item) => item.startTime));
+    const own = all.find((item) => item.id === except);
+    return exampleTimes(day).filter((time) => !taken.has(time) && !(own?.dateKey === day && own.startTime === time))
+      .map((time) => new Date(`${day}T${time}:00-03:00`).toISOString());
   };
+  const loadSlots = async (_professionalId: string, _serviceId: string, day: string) => freeTimes(day);
   const createTurn = async (input: ManualAppointmentInput) => {
     if (all.some((item) => item.dateKey === localDay(input.startsAt) && item.startTime === clock(input.startsAt) && item.status !== "cancelled"))
       throw new Error("slot_unavailable");
@@ -129,13 +130,27 @@ export function DemoAgenda({
       },
       info: { patient: input.patient, method: input.method, amountMinor: input.amountMinor, priceMinor: input.service.price_minor },
     }]);
-    setCreating(false); setView("Semana"); setSelected(id); setNotice("Turno creado en la demo. No se guardó ni se envió ningún aviso.");
+    setCreating(false); setView("Semana"); setAnchor(localDay(input.startsAt)); setSelected(id); setNotice("Turno creado en la demo. No se guardó ni se envió ningún aviso.");
   };
 
   // In memory, as everything here: the turn shows as charged at once.
   const recordPayment = async (id: string, method: PaymentMethod, amountMinor: number) => {
     setCreated((list) => list.map((item) => item.appointment.id === id ? { appointment: { ...item.appointment, paid: true }, info: { ...item.info, method, amountMinor } } : item));
     setNotice("Cobro registrado en la demo.");
+  };
+  // The same turn moves: its id, patient, service, duration and charge stay. Nothing is sent and no calendar is touched.
+  const rescheduleTurn = async (id: string, startsAt: string) => {
+    const day = localDay(startsAt);
+    if (!freeTimes(day, id).includes(startsAt)) throw new Error("slot_unavailable");
+    setCreated((list) => list.map((item) => {
+      if (item.appointment.id !== id) return item;
+      const start = new Date(`${item.appointment.dateKey}T${item.appointment.startTime}:00-03:00`).getTime();
+      const end = item.appointment.endTime ? new Date(`${item.appointment.dateKey}T${item.appointment.endTime}:00-03:00`).getTime() : start;
+      const label = dayLabels(day, "es-AR");
+      return { ...item, appointment: { ...item.appointment, dateKey: day, weekday: label.weekday, dateLabel: label.dateLabel,
+        startTime: clock(startsAt), endTime: item.appointment.endTime && clock(new Date(new Date(startsAt).getTime() + end - start).toISOString()) } };
+    }));
+    setAnchor(day); setNotice("Turno reagendado en la demo. No se guardó ni se envió ningún aviso.");
   };
   // The turn stays in the agenda as cancelled and its time is offered again.
   const cancelTurn = async (id: string, args: CancelArgs) => {
@@ -150,11 +165,14 @@ export function DemoAgenda({
     <>
       {notice && <p className="live-success" role="status">{notice}</p>}
       <AgendaCalendar
-        appointments={visible}
-        view={view}
+        appointments={all}
+        period={period}
+        today={demoToday}
+        locale="es-AR"
+        onPeriod={setAnchor}
+        onOpenDay={(day) => { setView("Día"); setAnchor(day); }}
         selectedId={selected}
         onSelect={setSelected}
-        todayLabel="3 oct 2026"
         timezone={timezone}
         actions={<button className="demo-primary agenda-new" type="button" disabled={creating} onClick={() => { setCreating(true); setNotice(""); }}><Plus size={16}/> Nuevo turno</button>}
         panel={creating && <ManualAppointmentForm
@@ -169,7 +187,7 @@ export function DemoAgenda({
             return next;
           }}
           loadSlots={loadSlots} onCreate={createTurn} onCancel={() => setCreating(false)}/>}
-        viewControls={(["Día", "Semana", "Mes"] as const).map((value) => (
+        viewControls={agendaViews.map((value) => (
           <button
             key={value}
             className={view === value ? "on" : ""}
@@ -205,6 +223,12 @@ export function DemoAgenda({
                   <span className="agenda-manual-tag">Cargado manualmente</span>
                   {canRecordPayment({ source: "manual", appointmentStatus: appointment.status, hasPayment: manual.method !== null }) && (
                     <RecordOfflinePayment key={appointment.id} priceMinor={manual.priceMinor} formatMoney={(minor) => formatMoney(minor / 100)} onSave={(method, amountMinor) => recordPayment(appointment.id, method, amountMinor)} />
+                  )}
+                  {canRescheduleAppointment({ source: "manual", appointmentStatus: appointment.status }) && (
+                    <RescheduleManualAppointment key={`reschedule-${appointment.id}-${appointment.dateKey}-${appointment.startTime}`}
+                      current={`${appointment.weekday} ${appointment.dateLabel} · ${appointment.startTime}`} currentDay={appointment.dateKey}
+                      today={demoToday} timezone={timezone} locale="es-AR"
+                      loadSlots={async (day) => freeTimes(day, appointment.id)} onReschedule={(startsAt) => rescheduleTurn(appointment.id, startsAt)} />
                   )}
                   {canCancelAppointment({ source: "manual", appointmentStatus: appointment.status }) && (
                     <CancelManualAppointment key={`cancel-${appointment.id}`} charge={manual.method !== null && manual.amountMinor !== null ? `${paymentLabel({ provider: "offline", method: manual.method, status: "approved" })} · ${formatMoney(manual.amountMinor / 100)}` : null}

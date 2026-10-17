@@ -189,3 +189,29 @@ export function describeCancelError(message: string): { text: string; reload: bo
   if (/failed to fetch|networkerror|load failed/i.test(message)) return { text: "No pudimos conectarnos. Revisá tu conexión e intentá de nuevo.", reload: false };
   return { text: "No pudimos cancelar el turno. Intentá de nuevo.", reload: false };
 }
+
+/**
+ * Whether "Reagendar" is offered: the same turns that can be cancelled, a manual one that is still scheduled.
+ * The turn keeps its identity, patient, service, duration and charge; only its date and time change. One from the
+ * public booking is not moved from here: its patient was told the time and has reminders queued for it.
+ */
+export function canRescheduleAppointment(input: { source?: string | null; appointmentStatus?: string | null }): boolean {
+  return input.source === "manual" && input.appointmentStatus === "scheduled";
+}
+
+/**
+ * What to tell the person when moving a turn fails. `slotConflict`: that time is no longer free, the times are
+ * asked again. `reload`: the turn itself changed (cancelled or attended meanwhile), the agenda is read again.
+ */
+export function describeRescheduleError(message: string): { text: string; slotConflict: boolean; reload: boolean } {
+  const has = (code: string) => message.includes(code);
+  if (has("slot_unavailable") || has("appointments_no_overlap")) return { text: "Ese horario acaba de ocuparse. Elegí otro.", slotConflict: true, reload: false };
+  if (has("slot_in_past")) return { text: "Ese horario ya pasó. Elegí otro.", slotConflict: true, reload: false };
+  if (has("slot_unchanged")) return { text: "Es el mismo horario que ya tiene el turno. Elegí otro.", slotConflict: false, reload: false };
+  if (has("appointment_not_reschedulable")) return { text: "Este turno ya no está agendado: no se puede reagendar.", slotConflict: false, reload: true };
+  if (has("not_manual_appointment")) return { text: "Este turno fue reservado por el paciente: no se reagenda desde acá.", slotConflict: false, reload: false };
+  if (has("not_authorized")) return { text: "No tenés permiso para reagendar turnos en esta agenda.", slotConflict: false, reload: false };
+  if (has("authentication_required") || has("JWT")) return { text: "Tu sesión venció. Volvé a ingresar.", slotConflict: false, reload: false };
+  if (/failed to fetch|networkerror|load failed/i.test(message)) return { text: "No pudimos conectarnos. Revisá tu conexión e intentá de nuevo.", slotConflict: false, reload: false };
+  return { text: "No pudimos reagendar el turno. Intentá de nuevo.", slotConflict: false, reload: false };
+}
