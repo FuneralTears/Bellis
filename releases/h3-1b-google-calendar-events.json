@@ -14,5 +14,5 @@
   "previewRequired": true,
   "createdAt": "2026-10-17T00:51:28Z",
   "branch": "feat/h3-1b-google-calendar-events",
-  "notes": "H3.1B: private outbox and internal worker for Bellis appointment create/update/delete in the app-created Turnos Bellis calendar, with deterministic generation IDs, retries, leases, reconciliation, privacy-minimal payloads, restricted Bellis Vercel Preview CORS that echoes only the accepted caller and fails closed otherwise, a runtime guard that prevents every Preview from receiving the production Supabase project, and exact fail-closed Mercado Pago return origins so Preview checkout returns to the same Preview; staging-only rollout."
+  "notes": "H3.1B: private outbox and worker for Bellis appointment create/update/delete in Turnos Bellis, with deterministic generation IDs, retries, leases, reconciliation and privacy-minimal payloads. Restricted Bellis Preview CORS and runtime Supabase target guard fail closed. Mercado Pago now preserves the exact valid Bellis return origin and rejects invalid or missing origins before writes. Staging-only rollout."
 }
