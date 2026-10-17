@@ -1,0 +1,18 @@
+{
+  "releaseId": "h3-1b-1-agenda-reschedule",
+  "sourceCommit": "eedb427ce1744038e31d33fc612dbfcddcefb342",
+  "expectedMainBase": "5109e56a57a687fe3d466ba59149715c5b985211",
+  "migrations": [
+    {
+      "file": "20261021090000_manual_appointment_reschedule.sql",
+      "sha256": "be3961d1ebb82ba0e36370cb1bfbf11399c7178d98490ecdf40fd6bdaa6cb79c"
+    }
+  ],
+  "smokeGroups": [
+    "release"
+  ],
+  "previewRequired": true,
+  "createdAt": "2026-10-17T19:17:25Z",
+  "branch": "feat/h3-1b-1-agenda-reschedule",
+  "notes": "H3.1B.1: Agenda shows real day/week/month periods with working navigation, and manual appointments can be rescheduled (same appointment; start/end updated through reschedule_manual_appointment, validated against shared availability). The normal H3.1B sync trigger reacts to the update. Stacked on H3.1B; needed for its E2E B. Staging-only rollout."
+}
