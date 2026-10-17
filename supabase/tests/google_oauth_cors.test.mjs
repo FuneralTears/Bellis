@@ -18,15 +18,16 @@ test("CORS: local development (localhost:5173) is echoed back", () => {
   assert.equal(headers.Vary, "Origin");
 });
 
-test("CORS: the stable staging origin is allowed; a Preview only when it is listed exactly", () => {
+test("CORS: stable staging and Bellis project Previews are allowed", () => {
   assert.equal(sessionCorsHeaders(site, staging, site)["Access-Control-Allow-Origin"], site);
-  assert.equal(sessionCorsHeaders("https://bellis-abc123def-team.vercel.app", staging, site)["Access-Control-Allow-Origin"], site, "a Preview not listed is not allowed");
+  const h31b = "https://bellis-git-feat-h3-1b-google-calendar-events-bellis1.vercel.app";
+  assert.equal(sessionCorsHeaders(h31b, staging, site)["Access-Control-Allow-Origin"], h31b);
   assert.equal(sessionCorsHeaders("https://bellis-abc123def-team.vercel.app", withPreview, site)["Access-Control-Allow-Origin"], "https://bellis-abc123def-team.vercel.app");
-  assert.equal(sessionCorsHeaders("https://bellis-zzz999zzz-team.vercel.app", withPreview, site)["Access-Control-Allow-Origin"], site, "only the listed one");
+  assert.equal(sessionCorsHeaders("https://bellis-zzz999zzz-team.vercel.app", withPreview, site)["Access-Control-Allow-Origin"], site, "another team is refused");
 });
 
 test("CORS: an unknown origin is refused (the site's own origin is answered, never the caller's)", () => {
-  for (const origin of ["https://evil.example", "http://bellis-git-staging-team.vercel.app", "https://bellis-git-staging-team.vercel.app.evil.example", "null", "", null, "http://localhost:5173.evil.example"]) {
+  for (const origin of ["https://evil.example", "http://bellis-git-staging-team.vercel.app", "https://bellis-git-staging-team.vercel.app.evil.example", "https://another-project-bellis1.vercel.app", "null", "", null, "http://localhost:5173.evil.example"]) {
     assert.equal(sessionCorsHeaders(origin, staging, site)["Access-Control-Allow-Origin"], site, String(origin));
   }
 });

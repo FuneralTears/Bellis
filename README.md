@@ -13,7 +13,7 @@ SUPABASE_URL=https://<proyecto>.supabase.co
 SUPABASE_PUBLISHABLE_KEY=<clave publicable>
 ```
 
-La Edge Function `bellis-public` debe desplegarse con `verify_jwt=false` porque atiende a pacientes sin cuenta. Su código valida la procedencia, limita solicitudes y usa la clave de servicio disponible solo dentro de Supabase Functions. Para el dominio de Vercel, establecer `BELLIS_SITE_ORIGIN` con el origen exacto de producción; las previews autorizadas pueden añadirse como orígenes exactos en `BELLIS_ADDITIONAL_ORIGINS`. Nunca colocar una clave de servicio en `.env.local` ni en el navegador.
+La Edge Function `bellis-public` debe desplegarse con `verify_jwt=false` porque atiende a pacientes sin cuenta. Su código valida la procedencia, limita solicitudes y usa la clave de servicio disponible solo dentro de Supabase Functions. Para el dominio de Vercel, establecer `BELLIS_SITE_ORIGIN` con el origen estable exacto; las Preview URLs `bellis-…-bellis1.vercel.app` se validan con un patrón restringido al proyecto/team y cualquier origen adicional debe declararse de forma exacta en `BELLIS_ADDITIONAL_ORIGINS`. Nunca colocar una clave de servicio en `.env.local` ni en el navegador.
 
 ## Probar
 

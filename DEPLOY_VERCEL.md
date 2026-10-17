@@ -39,7 +39,7 @@ El registro usa `emailRedirectTo` hacia `/ingresar?confirmed=1`. La recuperació
 La función pública `supabase/functions/bellis-public` comprueba el origen del navegador. **Antes de probar el perfil público en Vercel**, desplegar la versión de esa función incluida en este commit y configurar en Supabase Edge Functions:
 
 - `BELLIS_SITE_ORIGIN`: origen exacto de producción de Vercel, sin path ni barra final.
-- `BELLIS_ADDITIONAL_ORIGINS`: opcional; lista separada por comas de orígenes HTTPS exactos para previews autorizados o para mantener temporalmente accesible la demo anterior. No admite comodines.
+- `BELLIS_ADDITIONAL_ORIGINS`: opcional; lista separada por comas de orígenes HTTPS exactos externos al proyecto Bellis. Las Preview URLs `bellis-…-bellis1.vercel.app` se validan con un patrón restringido al proyecto/team; no se admiten comodines configurables.
 
 Esta configuración no es una clave de servicio. El runtime local sigue aceptando `http://localhost:<puerto>`. La URL de retorno de Mercado Pago usa el origen autorizado del preview cuando corresponda; el webhook permanece en Supabase. La función y sus secretos de servidor nunca se empaquetan en el frontend de Vercel.
 

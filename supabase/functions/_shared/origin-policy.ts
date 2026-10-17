@@ -9,8 +9,20 @@ export function configuredOrigins(primary: string, additional: string): Set<stri
   return origins;
 }
 
+// Vercel's per-deployment and per-branch addresses for the Bellis project in the bellis1 team. Keep this aligned with
+// the browser-side Google Sign-In policy: another project, another team, a custom port or a non-HTTPS URL fails closed.
+const bellisVercelHostname = /^bellis-[a-z0-9-]+-bellis1\.vercel\.app$/;
+
+export function isBellisVercelOrigin(origin: string): boolean {
+  try {
+    const candidate = new URL(origin);
+    return candidate.origin === origin && candidate.protocol === "https:" && candidate.port === "" &&
+      bellisVercelHostname.test(candidate.hostname);
+  } catch { return false; }
+}
+
 export function isAllowedOrigin(origin: string, origins: ReadonlySet<string>): boolean {
-  return origins.has(origin) || /^http:\/\/localhost:\d+$/.test(origin);
+  return origins.has(origin) || /^http:\/\/localhost:\d+$/.test(origin) || isBellisVercelOrigin(origin);
 }
 
 export function checkoutReturnOrigin(origin: string | null, primary: string, origins: ReadonlySet<string>): string {
