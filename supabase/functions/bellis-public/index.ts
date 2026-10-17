@@ -2,7 +2,7 @@ import { createClient } from "npm:@supabase/supabase-js@2.117.2";
 import { createMercadoPagoCheckout, mercadoPagoConnected, recordVerifiedPayment, withSellerAccount } from "../_shared/bellis-payment.ts";
 import { ExternalPaymentLinkProvider } from "../_shared/mercado-pago.ts";
 import { getValidMercadoPagoAccessToken, oauthConfigFromEnv, supabaseConnectionStore, type ValidAccount } from "../_shared/mercado-pago-oauth.ts";
-import { checkoutReturnOrigin, configuredOrigins, isAllowedOrigin, isBellisVercelOrigin } from "../_shared/origin-policy.ts";
+import { checkoutReturnOrigin, configuredOrigins, isPublicOriginAllowed, publicCorsHeaders } from "../_shared/origin-policy.ts";
 import { bookingAnswer, checkoutReturnUrls, newResumeToken, resumeAnswer, resumeTokenPattern } from "../_shared/bellis-return.ts";
 import { logEvent, patientMessage, paymentErrorCode, type LogFields, type PaymentErrorCode } from "../_shared/payment-errors.ts";
 
@@ -22,19 +22,12 @@ const log = (level: "info" | "warn" | "error", event: string, fields: LogFields 
 if (!siteOrigin) log("error", "config_missing", { error_code: "mp_config_missing" });
 
 function cors(request: Request) {
-  const origin = request.headers.get("origin") ?? "";
-  return {
-    "Access-Control-Allow-Origin": publicOriginAllowed(origin) ? origin : siteOrigin,
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "content-type, x-bellis-intent, apikey, authorization",
-    "Vary": "Origin",
-    "Cache-Control": "no-store",
-  };
+  return publicCorsHeaders(request.headers.get("origin"), allowedOrigins);
 }
 // Public Agenda is rendered by branch and immutable Vercel Previews. OAuth endpoints keep their stricter exact-list
 // policy; this project/team pattern is intentionally local to the unauthenticated, rate-limited public API.
 function publicOriginAllowed(origin: string) {
-  return isAllowedOrigin(origin, allowedOrigins) || isBellisVercelOrigin(origin);
+  return isPublicOriginAllowed(origin, allowedOrigins);
 }
 function json(request: Request, data: unknown, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: { ...cors(request), "Content-Type": "application/json" } });
@@ -157,8 +150,9 @@ async function profile(request: Request, slug: string) {
 }
 
 Deno.serve(async (request) => {
-  if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors(request) });
   const origin = request.headers.get("origin");
+  if (request.method === "OPTIONS")
+    return new Response(null, { status: origin && publicOriginAllowed(origin) ? 204 : 403, headers: cors(request) });
   if (origin && !publicOriginAllowed(origin))
     return json(request, { error: "Origen no permitido" }, 403);
   const action = new URL(request.url).searchParams.get("action") ?? "";

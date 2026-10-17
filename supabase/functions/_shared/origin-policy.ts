@@ -26,6 +26,29 @@ export function isAllowedOrigin(origin: string, origins: ReadonlySet<string>): b
 }
 
 /**
+ * Public Agenda is also rendered by Bellis branch and immutable Vercel Previews. The hostname rule is restricted
+ * to this project/team; it never becomes a general Vercel wildcard.
+ */
+export function isPublicOriginAllowed(origin: string, origins: ReadonlySet<string>): boolean {
+  return isAllowedOrigin(origin, origins) || isBellisVercelOrigin(origin);
+}
+
+/**
+ * A permitted caller gets its exact Origin echoed. A rejected caller deliberately gets no ACAO at all: returning
+ * another permitted origin obscures configuration mistakes and can never authorize the requesting browser.
+ */
+export function publicCorsHeaders(origin: string | null, origins: ReadonlySet<string>): Record<string, string> {
+  const headers: Record<string, string> = {
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "content-type, x-bellis-intent, apikey, authorization",
+    "Vary": "Origin",
+    "Cache-Control": "no-store",
+  };
+  if (origin && isPublicOriginAllowed(origin, origins)) headers["Access-Control-Allow-Origin"] = origin;
+  return headers;
+}
+
+/**
  * Calendar connection verification is read-only and is needed from an authenticated Bellis Preview during QA.
  * The actions that start, complete or disconnect OAuth keep the exact configured-origin policy because their
  * redirect and mutation flow belongs to the stable environment.

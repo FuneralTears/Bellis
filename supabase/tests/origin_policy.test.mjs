@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { checkoutReturnOrigin, configuredOrigins, isAllowedOrigin, isBellisVercelOrigin, isGoogleCalendarOAuthOriginAllowed } from "../functions/_shared/origin-policy.ts";
+import { checkoutReturnOrigin, configuredOrigins, isAllowedOrigin, isBellisVercelOrigin, isGoogleCalendarOAuthOriginAllowed, isPublicOriginAllowed, publicCorsHeaders } from "../functions/_shared/origin-policy.ts";
 
 test("only configured HTTPS origins and local development can call the public function", () => {
   const primary = "https://bellis.vercel.app";
@@ -40,9 +40,20 @@ test("Bellis Vercel Preview recognition is restricted to the Bellis project in t
     assert.equal(isAllowedOrigin(origin, origins), false, origin);
   }
 
+  const prod = "https://bellis-six.vercel.app";
+  const previewHeaders = publicCorsHeaders(h31b, configuredOrigins(prod, ""));
+  assert.equal(isPublicOriginAllowed(h31b, origins), true);
+  assert.equal(previewHeaders["Access-Control-Allow-Origin"], h31b);
+  assert.equal(publicCorsHeaders(prod, configuredOrigins(prod, ""))["Access-Control-Allow-Origin"], prod);
+
+  const invalidHeaders = publicCorsHeaders("https://evil.example", configuredOrigins(prod, ""));
+  assert.equal(invalidHeaders["Access-Control-Allow-Origin"], undefined);
+  assert.equal(Object.values(invalidHeaders).includes("*"), false);
+
   const publicFunction = readFileSync(new URL("../functions/bellis-public/index.ts", import.meta.url), "utf8");
-  assert.match(publicFunction, /function publicOriginAllowed\(origin: string\) \{\s*return isAllowedOrigin\(origin, allowedOrigins\) \|\| isBellisVercelOrigin\(origin\);\s*\}/);
-  assert.match(publicFunction, /if \(request\.method === "OPTIONS"\) return new Response\(null, \{ status: 204, headers: cors\(request\) \}\);/);
+  assert.match(publicFunction, /return isPublicOriginAllowed\(origin, allowedOrigins\);/);
+  assert.match(publicFunction, /status: origin && publicOriginAllowed\(origin\) \? 204 : 403/);
+  assert.doesNotMatch(publicFunction, /"Access-Control-Allow-Origin": publicOriginAllowed\(origin\) \? origin : siteOrigin/);
   assert.match(publicFunction, /if \(origin && !publicOriginAllowed\(origin\)\)/);
 });
 

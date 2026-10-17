@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { evaluate, projects } from "../scripts/assert-staging-env.mjs";
-import { productionProjectRef, refusesProductionProject } from "../lib/supabase-target.ts";
+import { deploymentTargetProblem, productionProjectRef, refusesProductionProject } from "../lib/supabase-target.ts";
 
 const prod = `https://${projects.production}.supabase.co`;
 const staging = `https://${projects.staging}.supabase.co`;
@@ -59,4 +59,26 @@ test("config en ejecución: un deploy de Vercel que no es de main no entrega el 
   assert.equal(refusesProductionProject(undefined, preview), false);
   // Solo el proyecto exacto: una dirección parecida no es producción.
   assert.equal(refusesProductionProject(`https://${projects.production}.supabase.co.evil.example`, preview), false);
+});
+
+test("runtime config rejects production from every Preview, even with main branch metadata", () => {
+  assert.equal(deploymentTargetProblem(prod, {
+    VERCEL: "1",
+    VERCEL_ENV: "preview",
+    VERCEL_GIT_COMMIT_REF: "main",
+  }), "preview_with_production_project");
+  assert.equal(deploymentTargetProblem(staging, {
+    VERCEL: "1",
+    VERCEL_ENV: "preview",
+    VERCEL_GIT_COMMIT_REF: "feat/h3-1b-google-calendar-events",
+  }), null);
+  assert.equal(deploymentTargetProblem(prod, {
+    VERCEL: "1",
+    VERCEL_ENV: "production",
+    VERCEL_GIT_COMMIT_REF: "main",
+  }), null);
+
+  const route = readFileSync("app/api/supabase-config/route.ts", "utf8");
+  assert.match(route, /deploymentTargetProblem\(url, process\.env\)/);
+  assert.doesNotMatch(route, /if \(refusesProductionProject\(/);
 });
