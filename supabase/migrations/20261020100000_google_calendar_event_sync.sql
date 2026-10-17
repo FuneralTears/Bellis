@@ -117,7 +117,7 @@ begin
   end loop;
 
   update private.google_calendar_event_sync s set state='blocked',lease_token=null,lease_until=null,updated_at=now()
-  where s.state in ('pending','retry') and (not private.google_calendar_available(s.workspace_id) or not exists(
+  where s.state in ('pending','retry','synced') and (not private.google_calendar_available(s.workspace_id) or not exists(
     select 1 from private.google_calendar_accounts a where a.professional_id=s.professional_id
       and a.workspace_id=s.workspace_id and a.status='connected' and a.calendar_id is not null));
 
