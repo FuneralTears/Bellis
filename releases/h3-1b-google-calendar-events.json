@@ -1,11 +1,11 @@
 {
   "releaseId": "h3-1b-google-calendar-events",
-  "sourceCommit": "1d4fd7a6056d443e1c61114a06c198bce855523c",
+  "sourceCommit": "9231172525f1f9889946032fd76a7d6fb044a917",
   "expectedMainBase": "5109e56a57a687fe3d466ba59149715c5b985211",
   "migrations": [
     {
       "file": "20261020100000_google_calendar_event_sync.sql",
-      "sha256": "27275bd00f7edaac24212c756c269e4096843d61e9b2226ba71b578b3f2a6c25"
+      "sha256": "c2ce9d520a2e15cbf74168bb7c81a9d7d52bf5d7147112304a7af719e40fdcb9"
     }
   ],
   "smokeGroups": [
