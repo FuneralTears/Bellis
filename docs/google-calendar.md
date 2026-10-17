@@ -160,7 +160,8 @@ beta, sin revocar nada ni borrar el calendario. `failed` es terminal para un err
 intentos. Un barrido recupera leases vencidos, reactiva filas bloqueadas al volver la capacidad y descubre turnos que
 entran en la ventana futura de 90 días. No hay backfill histórico.
 
-El worker interno `bellis-google-calendar-sync` corre cada minuto mediante `pg_cron` + `pg_net`. Reclama hasta 25 filas
+El worker interno `bellis-google-calendar-sync` corre cada minuto mediante `pg_cron` + `pg_net` (extensión habilitada
+como prerrequisito de infraestructura del entorno, antes de aplicar la migración). Reclama hasta 25 filas
 con `FOR UPDATE SKIP LOCKED` y un lease de 90 segundos. Reutiliza `getValidGoogleAccessToken`: un 401 fuerza una sola
 renovación; `invalid_grant` mantiene la transición H3.1A a `needs_reconnect`. 403 de cuota, 429, 5xx, timeout y red
 reintentan con backoff. El job de cron es un no-op hasta que existan sus dos secretos de entorno en Vault.
@@ -186,6 +187,10 @@ Generar un secreto aleatorio distinto por entorno y guardar el mismo valor como 
 exacta `https://<project-ref>.supabase.co/functions/v1/bellis-google-calendar-sync` con nombre
 `bellis_google_calendar_sync_url`. Ninguno de los valores se imprime ni se versiona. Producción se configura solo en su
 release autorizado; H3.1B configura staging únicamente.
+
+Antes de aplicar la migración, habilitar `pg_net` en ese proyecto Supabase. Se hace fuera de la migración porque el
+release de Bellis ensaya cada migración dentro de una transacción y, por seguridad, rechaza `CREATE EXTENSION` como un
+efecto que podría no revertirse. La migración falla cerrada si el prerrequisito no está presente.
 
 ### E2E manual en staging
 

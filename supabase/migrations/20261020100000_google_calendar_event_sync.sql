@@ -1,8 +1,6 @@
 -- H3.1B: Bellis appointments -> the app-created "Turnos Bellis" Google calendar.
 -- Booking only writes this private outbox. The network worker is independent, bounded and idempotent.
 
-create extension if not exists pg_net;
-
 create table private.google_calendar_event_sync (
   id uuid primary key default gen_random_uuid(),
   appointment_id uuid not null unique references public.appointments(id) on delete cascade,
