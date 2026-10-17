@@ -22,7 +22,7 @@ export function isBellisVercelOrigin(origin: string): boolean {
 }
 
 export function isAllowedOrigin(origin: string, origins: ReadonlySet<string>): boolean {
-  return origins.has(origin) || /^http:\/\/localhost:\d+$/.test(origin) || isBellisVercelOrigin(origin);
+  return origins.has(origin) || /^http:\/\/localhost:\d+$/.test(origin);
 }
 
 export function checkoutReturnOrigin(origin: string | null, primary: string, origins: ReadonlySet<string>): string {

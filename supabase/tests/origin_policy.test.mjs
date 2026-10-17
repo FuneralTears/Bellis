@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { checkoutReturnOrigin, configuredOrigins, isAllowedOrigin, isBellisVercelOrigin } from "../functions/_shared/origin-policy.ts";
 
@@ -17,14 +18,14 @@ test("only configured HTTPS origins and local development can call the public fu
   assert.equal(checkoutReturnOrigin("http://localhost:5173", primary, origins), primary);
 });
 
-test("Bellis Vercel Previews are allowed only for the Bellis project in the bellis1 team", () => {
+test("Bellis Vercel Preview recognition is restricted to the Bellis project in the bellis1 team", () => {
   const h31b = "https://bellis-git-feat-h3-1b-google-calendar-events-bellis1.vercel.app";
   const deployment = "https://bellis-2obl8m6in-bellis1.vercel.app";
   const origins = configuredOrigins("https://bellis-git-staging-bellis1.vercel.app", "");
 
   for (const origin of [h31b, deployment]) {
     assert.equal(isBellisVercelOrigin(origin), true, origin);
-    assert.equal(isAllowedOrigin(origin, origins), true, origin);
+    assert.equal(isAllowedOrigin(origin, origins), false, "session endpoints still require an exact configured origin");
   }
 
   for (const origin of [
@@ -38,4 +39,9 @@ test("Bellis Vercel Previews are allowed only for the Bellis project in the bell
     assert.equal(isBellisVercelOrigin(origin), false, origin);
     assert.equal(isAllowedOrigin(origin, origins), false, origin);
   }
+
+  const publicFunction = readFileSync(new URL("../functions/bellis-public/index.ts", import.meta.url), "utf8");
+  assert.match(publicFunction, /function publicOriginAllowed\(origin: string\) \{\s*return isAllowedOrigin\(origin, allowedOrigins\) \|\| isBellisVercelOrigin\(origin\);\s*\}/);
+  assert.match(publicFunction, /if \(request\.method === "OPTIONS"\) return new Response\(null, \{ status: 204, headers: cors\(request\) \}\);/);
+  assert.match(publicFunction, /if \(origin && !publicOriginAllowed\(origin\)\)/);
 });

@@ -18,10 +18,10 @@ test("CORS: local development (localhost:5173) is echoed back", () => {
   assert.equal(headers.Vary, "Origin");
 });
 
-test("CORS: stable staging and Bellis project Previews are allowed", () => {
+test("CORS: the stable staging origin is allowed; an OAuth Preview only when listed exactly", () => {
   assert.equal(sessionCorsHeaders(site, staging, site)["Access-Control-Allow-Origin"], site);
   const h31b = "https://bellis-git-feat-h3-1b-google-calendar-events-bellis1.vercel.app";
-  assert.equal(sessionCorsHeaders(h31b, staging, site)["Access-Control-Allow-Origin"], h31b);
+  assert.equal(sessionCorsHeaders(h31b, staging, site)["Access-Control-Allow-Origin"], site, "Calendar OAuth remains exact-list only");
   assert.equal(sessionCorsHeaders("https://bellis-abc123def-team.vercel.app", withPreview, site)["Access-Control-Allow-Origin"], "https://bellis-abc123def-team.vercel.app");
   assert.equal(sessionCorsHeaders("https://bellis-zzz999zzz-team.vercel.app", withPreview, site)["Access-Control-Allow-Origin"], site, "another team is refused");
 });
