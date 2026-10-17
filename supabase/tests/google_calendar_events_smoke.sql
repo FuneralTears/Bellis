@@ -156,12 +156,22 @@ do $$ declare q text; begin
     $q$select * from private.google_calendar_event_sync$q$,
     $q$update private.google_calendar_event_sync set state='synced'$q$,
     $q$select * from public.claim_google_calendar_event_sync(gen_random_uuid(),1)$q$,
-    $q$select public.complete_google_calendar_event_sync(gen_random_uuid(),gen_random_uuid(),1,'deleted',null,0)$q$
+    $q$select public.complete_google_calendar_event_sync(gen_random_uuid(),gen_random_uuid(),1,'deleted',null,0)$q$,
+    $q$select public.configure_google_calendar_event_sync('https://aaaaaaaaaaaaaaaaaaaa.supabase.co/functions/v1/bellis-google-calendar-sync',repeat('s',32))$q$
   ] loop
     begin execute 'set local role authenticated'; execute q; reset role; raise exception 'browser_reached_sync_internal';
     exception when insufficient_privilege or invalid_schema_name or undefined_table or undefined_function then reset role; end;
   end loop;
 end $$;
+
+set local role service_role;
+do $$ begin
+  begin perform public.configure_google_calendar_event_sync('https://evil.example/functions/v1/bellis-google-calendar-sync',repeat('s',32));
+    raise exception 'foreign_worker_url_accepted'; exception when others then if sqlerrm<>'invalid_sync_configuration' then raise; end if; end;
+  begin perform public.configure_google_calendar_event_sync('https://aaaaaaaaaaaaaaaaaaaa.supabase.co/functions/v1/bellis-google-calendar-sync','short');
+    raise exception 'weak_worker_secret_accepted'; exception when others then if sqlerrm<>'invalid_sync_configuration' then raise; end if; end;
+end $$;
+reset role;
 
 do $$ begin
   if not exists(select 1 from cron.job where jobname='bellis-google-calendar-events' and schedule='* * * * *'

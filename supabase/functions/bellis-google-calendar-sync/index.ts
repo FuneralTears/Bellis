@@ -55,6 +55,16 @@ Deno.serve(async (request) => {
     return Response.json({ error: "not_configured" }, { status: 503 });
   }
 
+  // The first manual authenticated invocation bootstraps the cron secrets; later calls make rotation idempotent.
+  const workerUrl = `${Deno.env.get("SUPABASE_URL") ?? ""}/functions/v1/bellis-google-calendar-sync`;
+  const { error: configureError } = await db.rpc("configure_google_calendar_event_sync", {
+    p_url: workerUrl, p_secret: configuredSecret,
+  });
+  if (configureError) {
+    log("error", "sync_config_failed", { error_code: firstErrorCode(configureError) });
+    return Response.json({ error: "config_failed" }, { status: 500 });
+  }
+
   const lease = crypto.randomUUID();
   const { data, error } = await db.rpc("claim_google_calendar_event_sync", { p_lease_token: lease, p_limit: 25 });
   if (error) {

@@ -233,6 +233,24 @@ end $$;
 revoke all on function public.fail_google_calendar_event_sync(uuid,uuid,bigint,text,boolean) from public,anon,authenticated;
 grant execute on function public.fail_google_calendar_event_sync(uuid,uuid,bigint,text,boolean) to service_role;
 
+-- The worker registers its own environment-specific callback and dedicated secret on the first authenticated manual
+-- invocation after deployment. Only service_role can call this; the values never pass through a browser or source.
+create function public.configure_google_calendar_event_sync(p_url text,p_secret text) returns void
+language plpgsql security definer set search_path='' as $$
+declare v_url_id uuid; v_secret_id uuid;
+begin
+  if p_url is null or p_url !~ '^https://[a-z]{20}\.supabase\.co/functions/v1/bellis-google-calendar-sync$'
+    or p_secret is null or length(p_secret) not between 32 and 256 then raise exception 'invalid_sync_configuration'; end if;
+  select s.id into v_url_id from vault.secrets s where s.name='bellis_google_calendar_sync_url' order by s.created_at limit 1;
+  select s.id into v_secret_id from vault.secrets s where s.name='bellis_google_calendar_sync_secret' order by s.created_at limit 1;
+  if v_url_id is null then perform vault.create_secret(p_url,'bellis_google_calendar_sync_url','Bellis Google Calendar sync worker URL');
+  else perform vault.update_secret(v_url_id,p_url,'bellis_google_calendar_sync_url','Bellis Google Calendar sync worker URL'); end if;
+  if v_secret_id is null then perform vault.create_secret(p_secret,'bellis_google_calendar_sync_secret','Bellis Google Calendar sync worker secret');
+  else perform vault.update_secret(v_secret_id,p_secret,'bellis_google_calendar_sync_secret','Bellis Google Calendar sync worker secret'); end if;
+end $$;
+revoke all on function public.configure_google_calendar_event_sync(text,text) from public,anon,authenticated;
+grant execute on function public.configure_google_calendar_event_sync(text,text) to service_role;
+
 -- The URL and secret are environment-specific and are deliberately not in source. Staging/prod setup stores them
 -- under these Vault names. Until configured this function is a no-op, so applying the migration cannot call a wrong
 -- environment. pg_net starts the request only after the cron transaction commits.

@@ -182,11 +182,12 @@ la fila nuevamente pendiente para aplicar la versión nueva.
 
 ### Configurar el scheduler por entorno
 
-Generar un secreto aleatorio distinto por entorno y guardar el mismo valor como secret de la Edge Function
-`GOOGLE_CALENDAR_SYNC_SECRET` y en Vault con nombre `bellis_google_calendar_sync_secret`. Guardar además en Vault la URL
-exacta `https://<project-ref>.supabase.co/functions/v1/bellis-google-calendar-sync` con nombre
-`bellis_google_calendar_sync_url`. Ninguno de los valores se imprime ni se versiona. Producción se configura solo en su
-release autorizado; H3.1B configura staging únicamente.
+Generar un secreto aleatorio distinto por entorno y guardarlo como secret de la Edge Function
+`GOOGLE_CALENDAR_SYNC_SECRET`. Después del deploy se hace una primera llamada manual con ese header. El worker, ya
+autenticado, registra mediante una RPC exclusiva de `service_role` el mismo secreto en Vault como
+`bellis_google_calendar_sync_secret` y su propia URL exacta como `bellis_google_calendar_sync_url`. Las llamadas
+posteriores hacen esa configuración idempotente y permiten rotar el secreto. Ningún valor se imprime ni se versiona.
+Producción se configura solo en su release autorizado; H3.1B configura staging únicamente.
 
 Antes de aplicar la migración, habilitar `pg_net` en ese proyecto Supabase. Se hace fuera de la migración porque el
 release de Bellis ensaya cada migración dentro de una transacción y, por seguridad, rechaza `CREATE EXTENSION` como un
