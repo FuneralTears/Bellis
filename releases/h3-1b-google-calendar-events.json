@@ -1,6 +1,6 @@
 {
   "releaseId": "h3-1b-google-calendar-events",
-  "sourceCommit": "479cf9d216c3ba9e784aa9036ace229181c6445b",
+  "sourceCommit": "d29b70294362c35e80083b799cd443396b3a4938",
   "expectedMainBase": "5109e56a57a687fe3d466ba59149715c5b985211",
   "migrations": [
     {
