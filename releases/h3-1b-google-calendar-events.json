@@ -1,6 +1,6 @@
 {
   "releaseId": "h3-1b-google-calendar-events",
-  "sourceCommit": "d29b70294362c35e80083b799cd443396b3a4938",
+  "sourceCommit": "4c4b8f375d9c3af6c1723eac7df743b63806ec0e",
   "expectedMainBase": "5109e56a57a687fe3d466ba59149715c5b985211",
   "migrations": [
     {
@@ -14,5 +14,5 @@
   "previewRequired": true,
   "createdAt": "2026-10-17T00:51:28Z",
   "branch": "feat/h3-1b-google-calendar-events",
-  "notes": "H3.1B: private outbox and internal worker for Bellis appointment create/update/delete in the app-created Turnos Bellis calendar, with deterministic generation IDs, retries, leases, reconciliation, privacy-minimal payloads, plus restricted Bellis Vercel Preview CORS for the public Agenda, and staging-only rollout."
+  "notes": "H3.1B: private outbox and internal worker for Bellis appointment create/update/delete in the app-created Turnos Bellis calendar, with deterministic generation IDs, retries, leases, reconciliation, privacy-minimal payloads, restricted Bellis Vercel Preview CORS that echoes only the accepted caller and fails closed otherwise, plus a runtime guard that prevents every Preview from receiving the production Supabase project, and staging-only rollout."
 }
