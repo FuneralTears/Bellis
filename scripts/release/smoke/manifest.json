@@ -15,7 +15,7 @@
     "crm": "Patients, notes, follow-ups, automations and internal notifications.",
     "plans": "Free, Pro and the trial: what each plan allows and how a plan changes.",
     "admin": "The internal backoffice: who can read, who can act, and what is recorded.",
-    "calendar": "Google Calendar: the rollout flag, the connection, its tokens in Vault, renewal and disconnection.",
+    "calendar": "Google Calendar: rollout, connection, tokens, renewal, disconnection and the private appointment event outbox.",
     "release": "The gate of a release: everything that has to pass before production. Today, every smoke."
   },
   "smokes": [
@@ -177,6 +177,16 @@
         "result": "PASS"
       },
       "requires": ["the vault extension: creates and deletes its own synthetic secrets, and counts the existing ones without reading them"]
+    },
+    {
+      "id": "google_calendar_events",
+      "file": "supabase/tests/google_calendar_events_smoke.sql",
+      "groups": ["calendar", "plans", "release"],
+      "expect": {
+        "result": "PASS"
+      },
+      "checks": ["workspace-clock"],
+      "requires": ["pg_cron, pg_net and Vault; all appointment/account data is synthetic and the transaction is rolled back"]
     },
     {
       "id": "live_booking",

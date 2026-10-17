@@ -148,27 +148,66 @@ Un día completo bloquea según la zona horaria del calendario de la persona, no
 Siguen pendientes del E2E (no son pruebas de FreeBusy): volver a conectar la misma cuenta y reutilizar el calendario,
 borrar "Turnos Bellis" y volver a conectar, y quitar el permiso desde Google para ver `needs_reconnect`.
 
-## Lo que H3.1B tiene que cambiar
+## H3.1B: sincronización de turnos
 
-- **Desconectar** hoy solo revoca y borra tokens. Cuando existan eventos sincronizados, desconectar también tiene que
-  detener la sincronización y los trabajos pendientes del profesional y decidir qué pasa con los vínculos de eventos
-  (`event_links`). El calendario sigue sin borrarse de Google.
-- `paused` hoy solo se deriva en `google_calendar_status`. Si H3.1B necesita pausar la sincronización cuando cambia el
-  plan o el rollout, la pausa tiene que vivir en el lado que sincroniza, no solo en el panel.
-- El refresh queda listo para usarse (`getValidGoogleAccessToken`); H3.1B lo llama desde donde sincronice.
-- **Ids de evento con generación (obligatorio).** Un id borrado no se puede reusar (ver arriba). `event_links` guarda
-  una `generation` y el id efectivo es `bellis<uuid del turno sin guiones>g<N>` (base32hex). Al sincronizar:
-  `events.get(id)` primero; `confirmed`: se reconcilia o actualiza ese mismo evento; `cancelled`: se pasa a la
-  generación siguiente y se guarda; 404: se crea. Si un `insert` da 409 `duplicate`, se vuelve a leer antes de
-  decidir; nunca se toma como éxito a ciegas. Un HTTP 200 no significa "evento activo": se mira `status`. No se
-  reactivan lápidas (`cancelled` → `confirmed`) sin una prueba aparte.
+`private.google_calendar_event_sync` es a la vez vínculo y outbox, una fila por turno. Guarda el workspace, profesional,
+conexión/calendario usados, id efectivo, generación, estado deseado, revisión, lease, intentos y el último resultado.
+Es privada, con RLS, sin policies ni grants para el navegador. El trigger de `appointments` solo persiste intención;
+nunca espera a Google y un problema de Calendar no puede revertir una reserva.
+
+Estados: `pending`/`retry` → `processing` → `synced` o `deleted`. `blocked` pausa una fila si falta conexión, Pro o la
+beta, sin revocar nada ni borrar el calendario. `failed` es terminal para un error permanente o después de ocho
+intentos. Un barrido recupera leases vencidos, reactiva filas bloqueadas al volver la capacidad y descubre turnos que
+entran en la ventana futura de 90 días. No hay backfill histórico.
+
+El worker interno `bellis-google-calendar-sync` corre cada minuto mediante `pg_cron` + `pg_net`. Reclama hasta 25 filas
+con `FOR UPDATE SKIP LOCKED` y un lease de 90 segundos. Reutiliza `getValidGoogleAccessToken`: un 401 fuerza una sola
+renovación; `invalid_grant` mantiene la transición H3.1A a `needs_reconnect`. 403 de cuota, 429, 5xx, timeout y red
+reintentan con backoff. El job de cron es un no-op hasta que existan sus dos secretos de entorno en Vault.
+
+Payload: `summary = "Turno Bellis"`, visibilidad privada, inicio/fin con la zona IANA del workspace, descripción y
+ubicación vacías, sin asistentes y `reminders.useDefault = false`. No salen nombre, email, teléfono, servicio, motivo,
+notas ni respuestas. La única metadata técnica es el UUID del turno sin guiones y su generación en
+`extendedProperties.private`.
+
+Mapeo de estados reales: `scheduled` y `completed` crean o actualizan el mismo evento; completar no borra el historial
+del calendario. `cancelled` elimina. Cualquier otro valor del enum amplio de booking falla cerrado y no crea. Un turno
+ya vinculado que se mueve después de +90 días se elimina y el barrido lo vuelve a crear cuando entre en la ventana.
+
+El id es `bellis<uuid sin guiones>g<N>`. Antes de crear se hace `events.get`: activo se actualiza; `cancelled`/410
+incrementa la generación (máximo 8); 404 permite crear. Un 409 siempre vuelve a GET y reconcilia. Si el turno cambia
+mientras Google responde, la revisión vieja conserva el resultado externo (incluido el id que alcanzó a crear) y deja
+la fila nuevamente pendiente para aplicar la versión nueva.
+
+### Configurar el scheduler por entorno
+
+Generar un secreto aleatorio distinto por entorno y guardar el mismo valor como secret de la Edge Function
+`GOOGLE_CALENDAR_SYNC_SECRET` y en Vault con nombre `bellis_google_calendar_sync_secret`. Guardar además en Vault la URL
+exacta `https://<project-ref>.supabase.co/functions/v1/bellis-google-calendar-sync` con nombre
+`bellis_google_calendar_sync_url`. Ninguno de los valores se imprime ni se versiona. Producción se configura solo en su
+release autorizado; H3.1B configura staging únicamente.
+
+### E2E manual en staging
+
+- A. Crear un turno futuro: aparece un único evento privado “Turno Bellis” en “Turnos Bellis”.
+- B. Cambiar hora/duración: cambia ese evento, sin crear otro.
+- C. Cancelar: el evento desaparece; reactivar el mismo turno crea `g1`, no intenta revivir la lápida.
+- D. Repetir el worker/refrescar durante sync: sigue habiendo un evento y una fila.
+- E. Simular cuota/5xx: la fila queda `retry`; al recuperar Google termina `synced`.
+- F. Revocar Google: el refresh rechazado deja `needs_reconnect`, tokens borrados y fila `blocked`.
+- G. Bajar a Free o apagar beta: no hay llamadas nuevas; conexión/calendario quedan. Rehabilitar reconcilia hasta +90 días.
+- H. Inspeccionar el evento: no contiene PII, notas, motivo, ubicación, asistentes ni recordatorios personalizados.
 
 ## Archivos
 
 - Migración: `supabase/migrations/20261019090000_google_calendar_oauth.sql`
 - Edge Function: `supabase/functions/bellis-google-oauth/index.ts` (acciones `start`, `complete`, `disconnect`)
 - Lógica compartida: `supabase/functions/_shared/google-calendar-oauth.ts`
+- H3.1B: `supabase/migrations/20261020100000_google_calendar_event_sync.sql`,
+  `supabase/functions/bellis-google-calendar-sync/index.ts` y
+  `supabase/functions/_shared/google-calendar-events.ts`
 - Callback: `app/google-calendar/callback/page.tsx`
 - Panel: `components/integrations/GoogleCalendarSettings.tsx`, `lib/google-calendar.ts`
-- Pruebas: `supabase/tests/google_calendar_oauth.test.mjs` (Google falso local) y
-  `supabase/tests/google_calendar_oauth_smoke.sql` (grupo `calendar`)
+- Pruebas: `supabase/tests/google_calendar_oauth.test.mjs` (Google falso local),
+  `supabase/tests/google_calendar_oauth_smoke.sql`, `supabase/tests/google_calendar_events.test.mjs` y
+  `supabase/tests/google_calendar_events_smoke.sql` (grupo `calendar`)

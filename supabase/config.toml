@@ -16,3 +16,8 @@ verify_jwt = false
 # Google Calendar connection: same as bellis-mp-oauth, every action verifies the session in code.
 [functions.bellis-google-oauth]
 verify_jwt = false
+
+# Internal cron worker. The gateway cannot verify the dedicated non-JWT secret; the function compares its hash before
+# touching the outbox. The secret exists only in Edge Function secrets and Vault, never in the repository.
+[functions.bellis-google-calendar-sync]
+verify_jwt = false
