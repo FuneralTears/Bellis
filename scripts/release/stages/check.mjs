@@ -18,6 +18,7 @@ import { resolvePending } from "../smoke/runner.mjs";
 import { validateSmokeSql } from "../smoke/sql.mjs";
 import { readFileSync } from "node:fs";
 import { toolingSelfTest } from "./core.mjs";
+import { loadDeclaredPredecessor } from "./stacked-release.mjs";
 
 const line = (check) => `${check.ok ? "ok" : "FAIL"} · ${check.name}: ${check.detail}`;
 
@@ -43,8 +44,10 @@ export function sourceCommitCheck(git, manifest) {
 export function staticChecks({ root, git, release, report }) {
   const smokeManifest = loadManifest(root);
   const { manifest, hash } = loadReleaseManifest(root, release, { smokeGroups: Object.keys(smokeManifest.groups) });
+  const predecessor = loadDeclaredPredecessor(root, manifest);
   report.set("RELEASE", "INFO", [`${manifest.releaseId}: ${manifestFile(manifest.releaseId)} (sha256 ${hash.slice(0, 12)})`, `source commit ${short(manifest.sourceCommit)}, main base ${short(manifest.expectedMainBase)}`,
-    `${manifest.migrations.length} migration(s); smoke groups: ${manifest.smokeGroups.join(", ")}; Preview ${manifest.previewRequired ? "required" : "not required"}`, manifest.branch ? `branch ${manifest.branch}` : null]);
+    `${manifest.migrations.length} migration(s); smoke groups: ${manifest.smokeGroups.join(", ")}; Preview ${manifest.previewRequired ? "required" : "not required"}`, manifest.branch ? `branch ${manifest.branch}` : null,
+    predecessor ? `explicit predecessor: ${predecessor.manifest.releaseId} (one level only)` : null]);
   let ok = true;
 
   const seen = checkGit(git, { requireClean: true, expectBranch: manifest.branch, expectMain: manifest.expectedMainBase, fastForwardMainTo: "HEAD" });

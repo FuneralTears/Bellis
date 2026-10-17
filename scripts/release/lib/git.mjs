@@ -39,6 +39,12 @@ export function createGit({ cwd = process.cwd(), run } = {}) {
       if (result.code !== 0) throw new PreconditionError("git diff could not be read.", { details: [redact(result.stderr, 200)] });
       return result.stdout.split(/\r?\n/).filter(Boolean);
     },
+    /** A tracked text file exactly as it existed at a commit; null if either side cannot be resolved. */
+    fileAt(commit, path) {
+      if (!resolve(commit) || typeof path !== "string" || path.startsWith("-") || path.includes("\0")) return null;
+      const result = exec(["show", `${commit}:${path}`]);
+      return result.code === 0 ? result.stdout : null;
+    },
     /**
      * Whether `branch` could be moved to `target` without a merge: `target` has to descend from it, in a straight
      * line. It only answers the question; nothing is moved.

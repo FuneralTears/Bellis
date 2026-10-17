@@ -43,6 +43,7 @@ import { compareHistory, migrationHistory, residue } from "./database.mjs";
 import { deployStateName } from "./deploy-check.mjs";
 import { migrationSetHash, precheckName, reusablePrecheck } from "./prod-precheck.mjs";
 import { openReleaseState } from "./release-state.mjs";
+import { predecessorProductionProblems } from "./stacked-release.mjs";
 
 export { qaPaths };
 export const timing = Object.freeze({ deployTimeoutMs: 15 * 60_000, deployIntervalMs: 15_000, aliasAttempts: 12, aliasIntervalMs: 15_000 });
@@ -68,7 +69,7 @@ export async function runProdRelease({ root, git, supabase, environment = proces
   const progress = openReleaseState(state, release, { manifest, manifestHash: hash, now });
   const saved = state.load(release, precheckName)?.data ?? null;
   const reusable = reusablePrecheck(saved, { head, manifestHash: hash, migrationSet, now });
-  const problems = [];
+  const problems = predecessorProductionProblems({ root, state, git, successor: manifest });
   if (!progress.reached("STAGING_COMPLETE")) problems.push(`the release is at ${progress.state ?? "nothing"}, not STAGING_COMPLETE`);
   if (progress.state !== "PROD_PRECHECK_COMPLETE") problems.push(progress.reached("PROD_APPLIED") ? `the release already went further on production (${progress.state}): a person has to decide what to do` : "the release has no PROD_PRECHECK_COMPLETE");
   if (manifest.previewRequired) { const preview = state.load(release, deployStateName)?.data?.preview; if (preview?.state !== "DEPLOY_PREVIEW_VERIFIED" || preview.expectedCommit !== head) problems.push("the Preview of this commit has not been verified (DEPLOY_PREVIEW_VERIFIED)"); }

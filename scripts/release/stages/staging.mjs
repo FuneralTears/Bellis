@@ -43,6 +43,7 @@ import { localChecks, staticChecks } from "./check.mjs";
 import { compareHistory, migrationHistory, residue } from "./database.mjs";
 import { openReleaseState } from "./release-state.mjs";
 import { judgeRehearsalReuse, readEarlierRehearsal, reuseRecordName } from "./rehearsal-reuse.mjs";
+import { judgeStackedBase, judgeStackedExpected, loadPredecessorEvidence } from "./stacked-release.mjs";
 
 const localFiles = (root) => readdirSync(join(root, "supabase", "migrations")).filter((name) => /^\d{14}_[a-z0-9_]+\.sql$/.test(name)).sort();
 const same = (a, b) => a.length === b.length && a.every((item, index) => item === b[index]);
@@ -74,6 +75,7 @@ export async function runStaging({ root, git, supabase, environment = process.en
   const files = manifest.migrations.map((item) => item.file);
   const progress = openReleaseState(state, release, { manifest, manifestHash: hash, now });
   try {
+    const predecessor = loadPredecessorEvidence({ root, state, git, successor: manifest });
     const checkedHere = progress.history.some((entry) => entry.state === "CHECKED" && entry.commit === head && entry.result === "PASS");
     const releaseLines = report.get("RELEASE").lines;
     if (checkedHere) report.set("RELEASE", "INFO", [...releaseLines, "local checks: passed before for this commit and manifest, not run again"]);
@@ -86,14 +88,14 @@ export async function runStaging({ root, git, supabase, environment = process.en
       if (!ok) throw new CheckFailed("A local check failed. Nothing was sent to Supabase.", { stage: "check" });
     }
     progress.advance("CHECKED", { commit: head, detail: checkedHere ? "local checks reused: same commit and manifest" : "bellis:check passed" });
-    return await toStaging({ root, git, supabase, environment, release, report, signals, state, now, manifest, head, files, smokeManifest, smokes, progress, reuseRehearsal });
+    return await toStaging({ root, git, supabase, environment, release, report, signals, state, now, manifest, head, files, smokeManifest, smokes, progress, reuseRehearsal, predecessor });
   } catch (error) {
     progress.note(error?.stage ?? "staging", { commit: head, environment: "staging", result: "FAIL", detail: redact(error?.message ?? String(error), 200) });
     throw error;
   }
 }
 
-async function toStaging({ root, git, supabase, environment, release, report, signals, state, now, manifest, head, files, smokeManifest, smokes, progress, reuseRehearsal }) {
+async function toStaging({ root, git, supabase, environment, release, report, signals, state, now, manifest, head, files, smokeManifest, smokes, progress, reuseRehearsal, predecessor }) {
   const target = { environment, signals };
   const record = (to, detail, where = "staging") => progress.advance(to, { commit: head, environment: where, detail });
   const save = (name, data) => state.save(release, name, data);
@@ -175,8 +177,14 @@ async function toStaging({ root, git, supabase, environment, release, report, si
 
   // D. Production, read-only: it has to be exactly what the release starts from.
   const productionBefore = await readProduction(); save("schema-production", productionBefore);
-  const startsFrom = compareSchemas(base, productionBefore);
-  if (!startsFrom.ok) { report.set("EXPECTED DRIFT", "FAIL", ["production is not the schema the release starts from", ...startsFrom.differences.slice(0, 15).map((item) => driftLine(item, ["staging base", "production"]))]); throw new CheckFailed("Production does not match the base of the release.", { stage: "drift base" }); }
+  if (predecessor) {
+    const stacked = judgeStackedBase({ predecessor, base, production: productionBefore, successor: manifest });
+    if (!stacked.ok) { report.set("EXPECTED DRIFT", "FAIL", ["the explicit predecessor does not exactly explain the successor base", ...stacked.problems]); throw new CheckFailed("The stacked release invariant failed before the apply.", { stage: "drift base", details: stacked.problems }); }
+    report.set("EXPECTED DRIFT", "PASS", [`STACKED: production + exactly ${predecessor.release} = successor base`, "production remains unchanged; only the declared predecessor is extra on staging"]);
+  } else {
+    const startsFrom = compareSchemas(base, productionBefore);
+    if (!startsFrom.ok) { report.set("EXPECTED DRIFT", "FAIL", ["production is not the schema the release starts from", ...startsFrom.differences.slice(0, 15).map((item) => driftLine(item, ["staging base", "production"]))]); throw new CheckFailed("Production does not match the base of the release.", { stage: "drift base" }); }
+  }
 
   // F, G, H, I, K, L, M: staging.
   const stagingAfter = (await withTarget(supabase, "staging", async (on) => {
@@ -225,9 +233,15 @@ async function toStaging({ root, git, supabase, environment, release, report, si
   // J. Production read again: still exactly the base. Staging: exactly what was rehearsed (or, with no migrations, production).
   const productionAfter = await readProduction(); save("schema-production", productionAfter);
   if (files.length) {
-    const seen = explainExpected({ base, expected, staging: stagingAfter, production: productionAfter, pending: pending() });
-    if (!seen.ok) { report.set("EXPECTED DRIFT", "FAIL", [...seen.problems, ...seen.drift.slice(0, 10).map((item) => `DRIFT ${driftLine(item, ["base", "production"])}`), ...seen.unexplained.slice(0, 10).map((item) => `UNEXPLAINED ${driftLine(item, ["expected", "staging"])}`)]); throw new CheckFailed("The schemas are not what the rehearsal said they would be.", { stage: "expected drift" }); }
-    report.set("EXPECTED DRIFT", "PASS", ["staging is exactly what was rehearsed; production is still exactly the base", `${seen.explained.length} object(s) differ between them, all of them the release`]);
+    if (predecessor) {
+      const seen = judgeStackedExpected({ predecessor, base, expected, staging: stagingAfter, production: productionAfter, successor: manifest });
+      if (!seen.ok) { report.set("EXPECTED DRIFT", "FAIL", ["the stacked release invariant failed after the apply", ...seen.problems]); throw new CheckFailed("The schemas are not the exact predecessor plus successor stack.", { stage: "expected drift", details: seen.problems }); }
+      report.set("EXPECTED DRIFT", "PASS", [`STACKED: production + exactly ${predecessor.release} = successor base`, `STACKED: production + ${predecessor.release} + ${manifest.releaseId} = staging`, `${seen.explained.length} object(s) are the successor's rehearsed change; no other drift`]);
+    } else {
+      const seen = explainExpected({ base, expected, staging: stagingAfter, production: productionAfter, pending: pending() });
+      if (!seen.ok) { report.set("EXPECTED DRIFT", "FAIL", [...seen.problems, ...seen.drift.slice(0, 10).map((item) => `DRIFT ${driftLine(item, ["base", "production"])}`), ...seen.unexplained.slice(0, 10).map((item) => `UNEXPLAINED ${driftLine(item, ["expected", "staging"])}`)]); throw new CheckFailed("The schemas are not what the rehearsal said they would be.", { stage: "expected drift" }); }
+      report.set("EXPECTED DRIFT", "PASS", ["staging is exactly what was rehearsed; production is still exactly the base", `${seen.explained.length} object(s) differ between them, all of them the release`]);
+    }
   } else {
     const exact = compareSchemas(stagingAfter, productionAfter);
     if (!exact.ok) { report.set("EXPECTED DRIFT", "FAIL", exact.differences.slice(0, 15).map((item) => driftLine(item, ["staging", "production"]))); throw new CheckFailed("Staging and production do not match, and the release has no migrations to explain it.", { stage: "drift" }); }

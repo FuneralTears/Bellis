@@ -34,6 +34,7 @@ import { compareSnapshots, differenceLine as snapshotLine } from "../snapshot/co
 import { staticChecks } from "./check.mjs";
 import { compareHistory, migrationHistory } from "./database.mjs";
 import { openReleaseState } from "./release-state.mjs";
+import { requirePredecessorProductionComplete } from "./stacked-release.mjs";
 
 export const precheckLifetimeHours = 2;
 export const precheckName = "prod-precheck";
@@ -99,6 +100,7 @@ export async function runPrecheck({ root, git, supabase, environment = process.e
   if (!found.ok) throw new CheckFailed("The release does not pass its checks. Nothing was sent to Supabase.", { stage: "release" });
   const { manifest, hash, head } = found; const files = manifest.migrations.map((item) => item.file); const migrationSet = migrationSetHash(manifest.migrations);
   const progress = openReleaseState(state, release, { manifest, manifestHash: hash, now });
+  requirePredecessorProductionComplete({ root, state, git, successor: manifest });
   const verified = progress.history.some((entry) => entry.state === "STAGING_VERIFIED" && entry.result === "PASS");
   if (!progress.reached("STAGING_COMPLETE") || !verified) { report.set("STAGING STATE", "HUMAN", [`the release is at ${progress.state ?? "nothing"}; it has to be STAGING_COMPLETE (bellis:staging)`]); throw new HumanActionRequired("The release has not completed staging.", { stage: "staging state" }); }
   report.set("STAGING STATE", "STAGING_COMPLETE", [`verified on staging at ${short([...progress.history].reverse().find((entry) => entry.state === "STAGING_VERIFIED").commit)}`]);

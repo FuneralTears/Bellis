@@ -38,7 +38,7 @@ function assertSafeEnd(made, out) {
 }
 
 test("manifest: a valid one, and every way of getting it wrong", () => {
-  const good = releaseManifest({ migrations: [{ file: "20261020090000_a.sql", sha256: "a".repeat(64) }, { file: "20261021090000_b.sql", sha256: "b".repeat(64) }], branch: "feat/x", notes: "a note" });
+  const good = releaseManifest({ migrations: [{ file: "20261020090000_a.sql", sha256: "a".repeat(64) }, { file: "20261021090000_b.sql", sha256: "b".repeat(64) }], branch: "feat/x", predecessorRelease: "h2-8", notes: "a note" });
   assert.deepEqual(manifestProblems(good, { releaseId: "h2-9", smokeGroups: ["core", "release"] }), []);
   assert.deepEqual(manifestProblems(releaseManifest(), { releaseId: "h2-9" }), [], "no migrations is a valid release");
   const broken = (change, pattern, options = { releaseId: "h2-9", smokeGroups: ["core", "release"] }) => { const manifest = JSON.parse(JSON.stringify(good)); change(manifest); assert.match(manifestProblems(manifest, options).join(" | "), pattern); };
@@ -58,6 +58,8 @@ test("manifest: a valid one, and every way of getting it wrong", () => {
   broken((m) => { m.previewRequired = "no"; }, /true or false/);
   broken((m) => { m.createdAt = "yesterday"; }, /ISO time/);
   broken((m) => { m.branch = "../main"; }, /not a branch name/);
+  broken((m) => { m.predecessorRelease = "../h2-8"; }, /predecessorRelease: has to be one release id/);
+  broken((m) => { m.predecessorRelease = m.releaseId; }, /cannot be its own predecessor/);
   broken((m) => { m.notes = "deploy with postgres://postgres:hunter2@db.x.supabase.co/postgres"; }, /looks like a credential/);
   for (const id of ["../x", "a/b", "a..b", "X", ""]) assert.match(manifestProblems({ ...good, releaseId: id }).join(), /releaseId/, id);
 });

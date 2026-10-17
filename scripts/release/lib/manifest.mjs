@@ -10,6 +10,7 @@
  *   previewRequired    whether a person has to look at the Vercel Preview before the release goes on
  *   createdAt          when the manifest was written (ISO time)
  *   branch             (optional) the branch the release is made from
+ *   predecessorRelease (optional) the one release that may already be on staging beneath this release
  *   notes              (optional) a short note
  * Any other field is an error, and so is anything that looks like a credential.
  *
@@ -24,7 +25,7 @@ import { findSecrets } from "./state.mjs";
 
 export const releaseIdPattern = /^[a-z0-9](?:[a-z0-9-]|\.(?!\.)){1,60}$/;
 const commitPattern = /^[0-9a-f]{40}$/;
-const fields = Object.freeze({ releaseId: true, sourceCommit: true, expectedMainBase: true, migrations: true, smokeGroups: true, previewRequired: true, createdAt: true, branch: false, notes: false });
+const fields = Object.freeze({ releaseId: true, sourceCommit: true, expectedMainBase: true, migrations: true, smokeGroups: true, previewRequired: true, createdAt: true, branch: false, predecessorRelease: false, notes: false });
 export const manifestFile = (releaseId) => `releases/${releaseId}.json`;
 
 /** Everything wrong with a manifest, as a list. Empty when it can be used. */
@@ -59,6 +60,8 @@ export function manifestProblems(manifest, { releaseId, smokeGroups } = {}) {
   if (manifest.previewRequired !== undefined && typeof manifest.previewRequired !== "boolean") problems.push("previewRequired: has to be true or false");
   if (manifest.createdAt !== undefined && (typeof manifest.createdAt !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?Z$/.test(manifest.createdAt) || Number.isNaN(Date.parse(manifest.createdAt)))) problems.push("createdAt: has to be an ISO time in UTC");
   if (manifest.branch !== undefined && (typeof manifest.branch !== "string" || !/^[A-Za-z0-9._/-]{1,100}$/.test(manifest.branch) || manifest.branch.includes(".."))) problems.push("branch: is not a branch name");
+  if (manifest.predecessorRelease !== undefined && !releaseIdPattern.test(String(manifest.predecessorRelease))) problems.push("predecessorRelease: has to be one release id");
+  if (manifest.predecessorRelease !== undefined && manifest.predecessorRelease === manifest.releaseId) problems.push("predecessorRelease: a release cannot be its own predecessor");
   if (manifest.notes !== undefined && (typeof manifest.notes !== "string" || manifest.notes.length > 500)) problems.push("notes: has to be text of 500 characters at most");
   if (findSecrets(manifest).length) problems.push("the manifest holds something that looks like a credential");
   return problems;
