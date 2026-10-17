@@ -1,0 +1,18 @@
+{
+  "releaseId": "h3-1b-google-calendar-events",
+  "sourceCommit": "1b4c0b564589438d9a338895e32c33920c569cf9",
+  "expectedMainBase": "5109e56a57a687fe3d466ba59149715c5b985211",
+  "migrations": [
+    {
+      "file": "20261020100000_google_calendar_event_sync.sql",
+      "sha256": "40851467956e8956d469021aa80a32b3ca88337059e7280ecad4c1650cd4a7ed"
+    }
+  ],
+  "smokeGroups": [
+    "release"
+  ],
+  "previewRequired": true,
+  "createdAt": "2026-10-17T00:51:28Z",
+  "branch": "feat/h3-1b-google-calendar-events",
+  "notes": "H3.1B: private outbox and internal worker for Bellis appointment create/update/delete in the app-created Turnos Bellis calendar, with deterministic generation IDs, retries, leases, reconciliation, privacy-minimal payloads and staging-only rollout."
+}
